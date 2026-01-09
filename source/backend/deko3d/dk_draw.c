@@ -1,0 +1,554 @@
+/*
+ * SwitchGLES - OpenGL ES 2.0 / EGL implementation for Nintendo Switch
+ * deko3d Backend - Draw Operations
+ *
+ * This module handles:
+ * - Vertex attribute binding (glVertexAttribPointer state)
+ * - Draw arrays (glDrawArrays)
+ * - Draw elements (glDrawElements)
+ *
+ * Vertex data handling:
+ * - VBO path: Uses pre-uploaded GPU buffer data
+ * - Client array path: Copies client memory to GPU staging area per-frame
+ */
+
+#include "dk_internal.h"
+
+/* Convert GL_FIXED (16.16 fixed-point) vertex data to float.
+ * src/dst may overlap (in-place conversion is safe since both are 4 bytes). */
+static void dk_convert_fixed_to_float(void *dst, const void *src,
+                                       GLsizei vertex_count, GLint components,
+                                       GLsizei src_stride, GLsizei dst_stride) {
+    const uint8_t *sp = (const uint8_t *)src;
+    uint8_t *dp = (uint8_t *)dst;
+    for (GLsizei v = 0; v < vertex_count; v++) {
+        const int32_t *fixed_vals = (const int32_t *)(sp + v * src_stride);
+        float *float_vals = (float *)(dp + v * dst_stride);
+        for (int c = 0; c < components; c++) {
+            float_vals[c] = (float)fixed_vals[c] / 65536.0f;
+        }
+    }
+}
+
+/* ============================================================================
+ * Vertex Attribute Binding
+ *
+ * Configures vertex attribute formats and buffer bindings for the next draw.
+ * Handles both VBO-based and client-side vertex arrays.
+ * ============================================================================ */
+
+void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attribs,
+                            int num_attribs, GLint first, GLsizei count) {
+    dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
+
+    DkVtxAttribState attribStates[SGL_MAX_ATTRIBS];
+    DkVtxBufferState bufferStates[SGL_MAX_ATTRIBS];
+    DkBufExtents bufferExtents[SGL_MAX_ATTRIBS];
+    GLuint boundBuffers[SGL_MAX_ATTRIBS];
+    int numAttribs = 0;
+    int numBuffers = 0;
+
+    DkGpuAddr data_gpu_base = dkMemBlockGetGpuAddr(dk->data_memblock);
+    uint8_t *data_cpu_base = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock);
+
+    /* Determine numAttribs: MUST cover ALL attribute locations the shader might
+     * read from, not just enabled ones. In GLES 2.0, disabled attributes return
+     * the default glVertexAttrib value (0,0,0,1). deko3d GPU faults if the shader
+     * reads from an undeclared attribute slot. Always declare all num_attribs slots
+     * so any shader input finds a valid attribute state. */
+    int hasAnyEnabled = 0;
+    for (int i = 0; i < num_attribs && i < SGL_MAX_ATTRIBS; i++) {
+        if (attribs[i].enabled ||
+            attribs[i].current_value[0] != 0.0f ||
+            attribs[i].current_value[1] != 0.0f ||
+            attribs[i].current_value[2] != 0.0f ||
+            attribs[i].current_value[3] != 1.0f) {
+            hasAnyEnabled = 1;
+        }
+    }
+
+    if (!hasAnyEnabled) {
+        /* No enabled attributes and all have default values — skip binding.
+         * Shaders using gl_VertexID work without vertex bindings. */
+        return;
+    }
+
+    numAttribs = (num_attribs < SGL_MAX_ATTRIBS) ? num_attribs : SGL_MAX_ATTRIBS;
+
+    /* Initialize arrays to zero */
+    memset(attribStates, 0, sizeof(attribStates));
+    memset(bufferStates, 0, sizeof(bufferStates));
+    memset(bufferExtents, 0, sizeof(bufferExtents));
+    memset(boundBuffers, 0, sizeof(boundBuffers));
+
+    /* Track base address for each buffer slot to compute relative offsets */
+    DkGpuAddr bufferBaseAddrs[SGL_MAX_ATTRIBS];
+    memset(bufferBaseAddrs, 0, sizeof(bufferBaseAddrs));
+
+    /* Track original client pointers for computing offsets in interleaved data */
+    uintptr_t bufferClientPtrs[SGL_MAX_ATTRIBS];
+    memset(bufferClientPtrs, 0, sizeof(bufferClientPtrs));
+
+    /* Track VBO pointer offsets per buffer slot (for interleaving detection) */
+    uint32_t bufferVBOPtrs[SGL_MAX_ATTRIBS];
+    memset(bufferVBOPtrs, 0, sizeof(bufferVBOPtrs));
+
+    /*
+     * Shared constant buffer for disabled attributes.
+     * Allocates one buffer slot for ALL disabled attributes, with stride=0
+     * so every vertex reads the same constant value per attribute.
+     */
+    int constBufSlot = -1;
+    uint32_t constBufOffset = 0;  /* offset within constant buffer */
+
+    /* Build attribute and buffer states */
+    for (int i = 0; i < numAttribs; i++) {
+        const sgl_vertex_attrib_t *attr = &attribs[i];
+
+        if (!attr->enabled) {
+            /* Disabled attribute - use constant value from glVertexAttrib*f */
+            if (constBufSlot < 0) {
+                /* First disabled attribute: allocate shared constant buffer */
+                uint32_t alignedOff = SGL_ALIGN_UP(dk->client_array_offset, SGL_UNIFORM_ALIGNMENT);
+                uint32_t totalSize = numAttribs * 16; /* worst case: all disabled */
+                uint32_t clientAddr = dk->client_array_base + alignedOff;
+
+                if (alignedOff + totalSize <= dk->client_array_slot_end) {
+                    constBufSlot = numBuffers;
+                    boundBuffers[numBuffers] = 0xFFFFFFFF; /* marker for constant buffer */
+                    bufferStates[numBuffers].stride = 0;  /* same value for all vertices */
+                    bufferStates[numBuffers].divisor = 0;
+                    bufferExtents[numBuffers].addr = data_gpu_base + clientAddr;
+                    bufferExtents[numBuffers].size = totalSize;
+                    dk->client_array_offset = alignedOff + totalSize;
+                    numBuffers++;
+                } else {
+                    /* Fallback: use isFixed if out of memory */
+                    attribStates[i].bufferId = 0;
+                    attribStates[i].isFixed = 1;
+                    attribStates[i].offset = 0;
+                    attribStates[i].size = DkVtxAttribSize_1x32;
+                    attribStates[i].type = DkVtxAttribType_Float;
+                    attribStates[i].isBgra = 0;
+                    continue;
+                }
+            }
+
+            /* Write constant value (vec4) to the shared buffer */
+            uint32_t writeAddr = (uint32_t)(bufferExtents[constBufSlot].addr - data_gpu_base) + constBufOffset;
+            float *dst = (float *)(data_cpu_base + writeAddr);
+            dst[0] = attr->current_value[0];
+            dst[1] = attr->current_value[1];
+            dst[2] = attr->current_value[2];
+            dst[3] = attr->current_value[3];
+
+            attribStates[i].bufferId = (uint32_t)constBufSlot;
+            attribStates[i].isFixed = 0;
+            attribStates[i].offset = constBufOffset;
+            attribStates[i].size = DkVtxAttribSize_4x32;
+            attribStates[i].type = DkVtxAttribType_Float;
+            attribStates[i].isBgra = 0;
+
+            constBufOffset += 16;
+            continue;
+        }
+
+        /* Calculate effective stride (0 means tightly packed) */
+        GLsizei effectiveStride = attr->stride;
+        if (effectiveStride == 0) {
+            effectiveStride = attr->size * dk_get_type_size(attr->type);
+        }
+
+        /*
+         * For interleaved vertex data, multiple attributes share the same buffer
+         * but with different pointer offsets. We need to:
+         * 1. Use the buffer's BASE address (without pointer offset) for the extent
+         * 2. Store the pointer offset in attribStates[i].offset
+         *
+         * For VBOs: buffer_offset = buf->data_offset + pointer
+         *           base = buf->data_offset
+         *           attr_offset = pointer
+         *
+         * For client arrays: we copy data starting from the pointer, so offset = 0
+         */
+
+        uint32_t attrOffset = 0;
+
+        if (attr->buffer > 0) {
+            /* VBO path: pointer value is the offset within the buffer */
+            attrOffset = (uint32_t)(uintptr_t)attr->pointer;
+        } else if (attr->pointer != NULL) {
+            /* Client-side array - will copy to GPU, offset is 0 */
+            attrOffset = 0;
+        } else {
+            continue;  /* Skip this attribute */
+        }
+
+        /* GL_FIXED requires CPU-side conversion to float — always gets its own
+         * staging buffer slot, never shares with other attributes. */
+        int bufIdx = -1;
+        if (attr->type != GL_FIXED) {
+            /* Find or add buffer to our list
+             * Match by: buffer ID AND stride AND offset proximity.
+             * Only share a buffer slot if the attribute offsets are within one stride
+             * of each other (interleaved data). Non-interleaved data (like spearmint's
+             * tess buffer) has large offsets between attributes and must NOT share slots,
+             * otherwise the buffer extent is too small for later attributes. */
+            for (int j = 0; j < numBuffers; j++) {
+                if (boundBuffers[j] == attr->buffer &&
+                    bufferStates[j].stride == (uint32_t)effectiveStride) {
+                    if (attr->buffer == 0 && bufferClientPtrs[j] != 0) {
+                        /* Client-side array: check pointer proximity */
+                        uintptr_t basePtr = bufferClientPtrs[j];
+                        uintptr_t thisPtr = (uintptr_t)attr->pointer;
+                        if (thisPtr >= basePtr && (thisPtr - basePtr) < (uintptr_t)effectiveStride) {
+                            bufIdx = j;
+                            attrOffset = (uint32_t)(thisPtr - basePtr);
+                            break;
+                        }
+                    } else if (attr->buffer > 0) {
+                        /* VBO path: check VBO offset proximity (same interleaving logic)
+                         * Only share if this attribute's offset is within one stride of
+                         * the slot's base offset. Non-interleaved VBOs (offsets differ by
+                         * thousands of bytes) must get separate buffer slots. */
+                        uint32_t baseVBOPtr = bufferVBOPtrs[j];
+                        uint32_t thisVBOPtr = (uint32_t)(uintptr_t)attr->pointer;
+                        uint32_t diff = (thisVBOPtr >= baseVBOPtr) ?
+                                        (thisVBOPtr - baseVBOPtr) : (baseVBOPtr - thisVBOPtr);
+                        if (diff < (uint32_t)effectiveStride) {
+                            bufIdx = j;
+                            /* Compute offset relative to buffer slot's base VBO pointer */
+                            attrOffset = thisVBOPtr - baseVBOPtr;
+                            break;
+                        }
+                    } else {
+                        bufIdx = j;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (bufIdx < 0) {
+            /* New buffer - add it */
+            bufIdx = numBuffers;
+            boundBuffers[numBuffers] = attr->buffer;
+
+            bufferStates[numBuffers].stride = effectiveStride;
+            bufferStates[numBuffers].divisor = 0;
+
+            if (attr->type == GL_FIXED) {
+                /* GL_FIXED: convert 16.16 fixed-point → float via client array staging.
+                 * Both VBO and client array sources go through conversion. */
+                GLsizei totalVertices = first + count;
+                GLsizei dataSize = totalVertices * effectiveStride;
+
+                uint32_t alignedOffset = SGL_ALIGN_UP(dk->client_array_offset, SGL_UNIFORM_ALIGNMENT);
+                uint32_t clientArrayAddr = dk->client_array_base + alignedOffset;
+
+                if (alignedOffset + dataSize <= dk->client_array_slot_end) {
+                    const void *src;
+                    if (attr->buffer > 0) {
+                        /* VBO: read from CPU-visible GPU memory */
+                        src = data_cpu_base + attr->buffer_offset;
+                    } else {
+                        src = attr->pointer;
+                    }
+
+                    void *dst = data_cpu_base + clientArrayAddr;
+                    dk_convert_fixed_to_float(dst, src, totalVertices, attr->size,
+                                               effectiveStride, effectiveStride);
+
+                    bufferExtents[numBuffers].addr = data_gpu_base + clientArrayAddr;
+                    bufferBaseAddrs[numBuffers] = bufferExtents[numBuffers].addr;
+                    bufferExtents[numBuffers].size = dataSize;
+
+                    dk->client_array_offset = alignedOffset + dataSize;
+                } else {
+                    SGL_ERROR_BACKEND("bind_vertex_attribs: out of client array for GL_FIXED");
+                }
+                attrOffset = 0;
+            } else if (attr->buffer > 0) {
+                /* VBO path - use the attribute's data region as buffer base.
+                 * For non-interleaved VBOs, each attribute region gets its own slot.
+                 * The buffer base = VBO GPU base + this attribute's pointer offset.
+                 * The attribute offset within this slot is 0 (or small for interleaved). */
+                uint32_t vboBase = attr->buffer_offset - (uint32_t)(uintptr_t)attr->pointer;
+                uint32_t thisPtr = (uint32_t)(uintptr_t)attr->pointer;
+                bufferExtents[numBuffers].addr = data_gpu_base + vboBase + thisPtr;
+                bufferBaseAddrs[numBuffers] = bufferExtents[numBuffers].addr;
+                bufferVBOPtrs[numBuffers] = thisPtr;
+                /* Size: use full remaining VBO space from this attribute's start.
+                 * Using (first+count)*stride is WRONG for indexed draws where indices
+                 * reference vertices beyond first+count-1 (e.g. EBO with offset). */
+                if (attr->buffer_data_size > thisPtr) {
+                    bufferExtents[numBuffers].size = attr->buffer_data_size - thisPtr;
+                } else {
+                    bufferExtents[numBuffers].size = (first + count) * effectiveStride;
+                }
+                /* attrOffset is 0 for the first attribute in this slot */
+                attrOffset = 0;
+            } else if (attr->pointer != NULL) {
+                /*
+                 * Client-side vertex array - copy data to GPU memory.
+                 * Use bump allocator that persists until frame end.
+                 */
+                GLsizei totalVertices = first + count;
+                GLsizei dataSize = totalVertices * effectiveStride;
+
+                /* Align current offset to 256 bytes */
+                uint32_t alignedOffset = SGL_ALIGN_UP(dk->client_array_offset, SGL_UNIFORM_ALIGNMENT);
+                uint32_t clientArrayAddr = dk->client_array_base + alignedOffset;
+
+                /* Check we have space in this slot's sub-region */
+                if (alignedOffset + dataSize <= dk->client_array_slot_end) {
+                    /* Copy vertex data from client memory to GPU memory */
+                    void *dst = data_cpu_base + clientArrayAddr;
+                    memcpy(dst, attr->pointer, dataSize);
+
+                    bufferExtents[numBuffers].addr = data_gpu_base + clientArrayAddr;
+                    bufferBaseAddrs[numBuffers] = bufferExtents[numBuffers].addr;
+                    bufferExtents[numBuffers].size = dataSize;
+
+                    /* Store client pointer for computing offsets in interleaved data */
+                    bufferClientPtrs[numBuffers] = (uintptr_t)attr->pointer;
+
+                    /* Advance bump allocator */
+                    dk->client_array_offset = alignedOffset + dataSize;
+                } else {
+                    SGL_ERROR_BACKEND("bind_vertex_attribs: out of client array memory");
+                }
+            }
+
+            numBuffers++;
+        }
+
+        /* Get deko3d format */
+        DkVtxAttribSize attrSize;
+        DkVtxAttribType attrType;
+        dk_get_attrib_format(attr->type, attr->size, attr->normalized, &attrSize, &attrType);
+
+        /* Attribute state */
+        attribStates[i].bufferId = (uint32_t)bufIdx;
+        attribStates[i].isFixed = 0;
+        /* Use the pointer value as the offset within the buffer */
+        attribStates[i].offset = attrOffset;
+        attribStates[i].size = attrSize;
+        attribStates[i].type = attrType;
+        attribStates[i].isBgra = 0;
+    }
+
+    if (numBuffers == 0) {
+        return;  /* No valid buffers */
+    }
+
+    /* Bind in same order as legacy:
+     * 1. dkCmdBufBindVtxAttribState - attribute format descriptions
+     * 2. dkCmdBufBindVtxBufferState - buffer stride/divisor
+     * 3. dkCmdBufBindVtxBuffers - actual GPU addresses (plural!)
+     */
+    DK_VERBOSE_PRINT("[DK] bind_vertex_attribs: numAttribs=%d numBuffers=%d\n", numAttribs, numBuffers);
+
+    /* Ensure all CPU writes to client array staging area are committed to DRAM
+     * before recording GPU commands that reference them. CpuUncached writes
+     * bypass the CPU cache but may sit in the ARM write combine buffer. */
+    __asm__ volatile("dsb st" ::: "memory");
+
+    dkCmdBufBindVtxAttribState(dk->cmdbuf, attribStates, numAttribs);
+    dkCmdBufBindVtxBufferState(dk->cmdbuf, bufferStates, numBuffers);
+    dkCmdBufBindVtxBuffers(dk->cmdbuf, 0, bufferExtents, numBuffers);
+
+    SGL_TRACE_DRAW("bind_vertex_attribs numAttribs=%d numBuffers=%d first=%d count=%d",
+                   numAttribs, numBuffers, first, count);
+}
+
+/* ============================================================================
+ * Draw Arrays
+ * ============================================================================ */
+
+void dk_draw_arrays(sgl_backend_t *be, GLenum mode, GLint first, GLsizei count) {
+    dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
+
+    if (count <= 0 || !dk->program_bound) {
+        return;
+    }
+
+    /* Proactive mid-frame flush: prevent cmdbuf overflow.
+     * Each draw + state setup uses ~500-1000 bytes of cmdbuf space.
+     * With 4MB cmdbuf, flush every ~4000 draws to stay safe. */
+    if (dk->draws_since_flush >= 4000) {
+        dk_submit_and_reset(dk);
+    }
+
+    DkPrimitive prim = dk_convert_primitive(mode);
+
+    /* Invalidate GPU L2 cache if VBO data was written by CPU since last draw.
+     * CpuUncached writes go to DRAM, but GPU L2 may hold stale reads of the
+     * same addresses from a previous draw. Without this, glBufferSubData
+     * updates are invisible to subsequent draws (dEQP buffer.write.random). */
+    if (dk->vbo_data_dirty) {
+        dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_L2Cache);
+        dk->vbo_data_dirty = false;
+    }
+
+    dk->diag_draw_count++;
+    dk->draws_since_flush++;
+    dkCmdBufDraw(dk->cmdbuf, prim, count, 1, first, 0);
+
+    /* Insert barrier after FBO draws to ensure proper synchronization */
+    if (dk->current_fbo != 0) {
+        dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, 0);
+    }
+
+    DK_VERBOSE_PRINT("[DK] draw_arrays: mode=0x%X first=%d count=%d\n", mode, first, count);
+    SGL_TRACE_DRAW("draw_arrays mode=0x%X first=%d count=%d", mode, first, count);
+}
+
+/* ============================================================================
+ * Draw Elements
+ * ============================================================================ */
+
+void dk_draw_elements(sgl_backend_t *be, GLenum mode, GLsizei count,
+                      GLenum type, const void *indices, sgl_handle_t ebo) {
+    dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
+
+    if (count <= 0 || !dk->program_bound) {
+        return;
+    }
+
+    /* Proactive mid-frame flush: prevent cmdbuf overflow. */
+    if (dk->draws_since_flush >= 4000) {
+        dk_submit_and_reset(dk);
+    }
+
+    DkPrimitive prim = dk_convert_primitive(mode);
+
+    /* Determine index format and size */
+    DkIdxFormat idxFormat;
+    size_t idxSize;
+    switch (type) {
+        case GL_UNSIGNED_BYTE:
+            /* DkIdxFormat_Uint8 is NOT supported by Maxwell GPU!
+             * Must convert to 16-bit indices. */
+            idxFormat = DkIdxFormat_Uint16;
+            idxSize = 2;  /* Will convert */
+            break;
+        case GL_UNSIGNED_SHORT:
+            idxFormat = DkIdxFormat_Uint16;
+            idxSize = 2;
+            break;
+        case GL_UNSIGNED_INT:
+            idxFormat = DkIdxFormat_Uint32;
+            idxSize = 4;
+            break;
+        default:
+            SGL_ERROR_BACKEND("draw_elements: unsupported index type 0x%X", type);
+            return;
+    }
+
+    DkGpuAddr idxAddr;
+
+    if (ebo != 0) {
+        /* EBO bound - ebo already contains buf->data_offset + indices byte offset
+         * (computed by gl_draw.c). Don't add indices again! */
+        DkGpuAddr data_gpu_base = dkMemBlockGetGpuAddr(dk->data_memblock);
+        uint8_t *cpu_base = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock);
+
+        if (type == GL_UNSIGNED_BYTE) {
+            /* DkIdxFormat_Uint8 NOT supported — convert EBO 8-bit indices to 16-bit.
+             * Read from EBO's GPU memory, write converted data to client array staging. */
+            uint32_t alignedOffset = SGL_ALIGN_UP(dk->client_array_offset, SGL_UNIFORM_ALIGNMENT);
+            uint32_t clientAddr = dk->client_array_base + alignedOffset;
+            size_t size16 = count * 2;
+
+            if (alignedOffset + size16 <= dk->client_array_slot_end) {
+                uint16_t *dst = (uint16_t*)(cpu_base + clientAddr);
+                const uint8_t *src = cpu_base + (uint32_t)ebo;
+                for (GLsizei i = 0; i < count; i++) {
+                    dst[i] = src[i];
+                }
+                SGL_TRACE_DRAW("U8_CONV ebo_off=%u count=%d first5_src=[%u,%u,%u,%u,%u] first5_dst=[%u,%u,%u,%u,%u]",
+                              (uint32_t)ebo, count,
+                              count > 0 ? src[0] : 0, count > 1 ? src[1] : 0,
+                              count > 2 ? src[2] : 0, count > 3 ? src[3] : 0,
+                              count > 4 ? src[4] : 0,
+                              count > 0 ? dst[0] : 0, count > 1 ? dst[1] : 0,
+                              count > 2 ? dst[2] : 0, count > 3 ? dst[3] : 0,
+                              count > 4 ? dst[4] : 0);
+                /* Ensure converted indices are committed to DRAM */
+                __asm__ volatile("dsb st" ::: "memory");
+                dk->client_array_offset = alignedOffset + size16;
+                idxAddr = data_gpu_base + clientAddr;
+            } else {
+                SGL_ERROR_BACKEND("draw_elements: out of client array memory for EBO uint8 conversion");
+                return;
+            }
+        } else {
+            idxAddr = data_gpu_base + (uint32_t)ebo;
+        }
+    } else {
+        /* Client-side indices - copy to GPU staging area */
+        uint8_t *cpu_base = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock);
+        DkGpuAddr gpu_base = dkMemBlockGetGpuAddr(dk->data_memblock);
+
+        /* Align offset */
+        uint32_t alignedOffset = SGL_ALIGN_UP(dk->client_array_offset, SGL_UNIFORM_ALIGNMENT);
+        uint32_t clientAddr = dk->client_array_base + alignedOffset;
+
+        if (type == GL_UNSIGNED_BYTE) {
+            /* Convert 8-bit indices to 16-bit */
+            size_t size16 = count * 2;
+            if (alignedOffset + size16 > dk->client_array_slot_end) {
+                SGL_ERROR_BACKEND("draw_elements: out of client array memory for index conversion");
+                return;
+            }
+
+            uint16_t *dst = (uint16_t*)(cpu_base + clientAddr);
+            const uint8_t *src = (const uint8_t*)indices;
+            for (GLsizei i = 0; i < count; i++) {
+                dst[i] = src[i];
+            }
+
+            /* Ensure converted indices are committed to DRAM */
+            __asm__ volatile("dsb st" ::: "memory");
+            dk->client_array_offset = alignedOffset + size16;
+            idxAddr = gpu_base + clientAddr;
+        } else {
+            /* Direct copy for 16-bit and 32-bit indices */
+            size_t dataSize = count * idxSize;
+            if (alignedOffset + dataSize > dk->client_array_slot_end) {
+                SGL_ERROR_BACKEND("draw_elements: out of client array memory");
+                return;
+            }
+
+            memcpy(cpu_base + clientAddr, indices, dataSize);
+            /* Ensure copied indices are committed to DRAM */
+            __asm__ volatile("dsb st" ::: "memory");
+            dk->client_array_offset = alignedOffset + dataSize;
+            idxAddr = gpu_base + clientAddr;
+        }
+    }
+
+    /* Invalidate GPU L2 cache if VBO data was written by CPU since last draw.
+     * See dk_draw_arrays for detailed explanation. */
+    if (dk->vbo_data_dirty) {
+        dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_L2Cache);
+        dk->vbo_data_dirty = false;
+    }
+
+    /* Bind index buffer and draw */
+    dk->diag_draw_count++;
+    dk->draws_since_flush++;
+    dkCmdBufBindIdxBuffer(dk->cmdbuf, idxFormat, idxAddr);
+    dkCmdBufDrawIndexed(dk->cmdbuf, prim, count, 1, 0, 0, 0);
+
+    /* Insert barrier after FBO draws to ensure proper synchronization */
+    if (dk->current_fbo != 0) {
+        dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, 0);
+    }
+
+    DK_VERBOSE_PRINT("[DK] draw_elements: mode=0x%X count=%d type=0x%X ebo=%u\n",
+                     mode, count, type, ebo);
+    SGL_TRACE_DRAW("draw_elements mode=0x%X count=%d type=0x%X ebo=%u",
+                   mode, count, type, ebo);
+}

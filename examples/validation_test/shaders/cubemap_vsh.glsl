@@ -1,0 +1,12 @@
+#version 460
+
+layout(location = 0) in vec2 a_position;
+layout(location = 1) in vec3 a_direction;
+
+layout(location = 0) out vec3 v_texcoord;
+
+void main() {
+    gl_Position = vec4(a_position, 0.0, 1.0);
+    gl_Position.z = (gl_Position.z + gl_Position.w) / 2.0;
+    v_texcoord = a_direction;
+}
