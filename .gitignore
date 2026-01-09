@@ -1,0 +1,33 @@
+# Build artifacts
+build/
+*.o
+*.d
+*.elf
+*.map
+*.nacp
+*.nro
+*.dksh
+
+# Libraries (keep lib/ folder but ignore built files)
+lib/*.a
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Internal/development folders (uncomment to exclude from public repo)
+# _docs/
+# _archive/
+# _internal/
+# legacy/
+
+# Temporary files
+*.tmp
+*.bak

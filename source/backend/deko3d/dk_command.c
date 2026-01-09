@@ -1,0 +1,166 @@
+/*
+ * SwitchGLES - OpenGL ES 2.0 / EGL implementation for Nintendo Switch
+ * deko3d Backend - Frame and Command Management
+ *
+ * This module handles:
+ * - Frame lifecycle (begin, end, present)
+ * - Swapchain image acquisition
+ * - Fence synchronization
+ * - Flush/finish operations
+ * - Pipeline barriers
+ */
+
+#include "dk_internal.h"
+
+/* ============================================================================
+ * Frame Management
+ * ============================================================================ */
+
+void dk_begin_frame(sgl_backend_t *be, int slot) {
+    dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
+
+    dk->current_slot = slot;
+    dk->cmdbuf = dk->cmdbufs[slot];
+    dk->current_cmdbuf = slot;
+
+    /* Reset client array allocator for this frame */
+    dk->client_array_offset = 0;
+
+    /* Bind render target - use per-slot depth buffer */
+    if (dk->framebuffers) {
+        DkImageView colorView, depthView;
+        dkImageViewDefaults(&colorView, &dk->framebuffers[slot]);
+        if (dk->depth_images[slot]) {
+            dkImageViewDefaults(&depthView, dk->depth_images[slot]);
+            dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, &depthView);
+        } else {
+            dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, NULL);
+        }
+    }
+
+    SGL_TRACE_BACKEND("begin_frame slot=%d", slot);
+}
+
+void dk_end_frame(sgl_backend_t *be, int slot) {
+    dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
+
+    /* Signal fence before finishing command list */
+    dkCmdBufSignalFence(dk->cmdbufs[slot], &dk->fences[slot], false);
+    dk->fence_active[slot] = true;
+
+    /* Finish and submit command list */
+    DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbufs[slot]);
+    dkQueueSubmitCommands(dk->queue, cmdlist);
+
+    SGL_TRACE_BACKEND("end_frame slot=%d", slot);
+}
+
+void dk_present(sgl_backend_t *be, int slot) {
+    dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
+
+    dkQueuePresentImage(dk->queue, dk->swapchain, slot);
+
+    SGL_TRACE_BACKEND("present slot=%d", slot);
+}
+
+int dk_acquire_image(sgl_backend_t *be) {
+    dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
+
+    int slot = dkQueueAcquireImage(dk->queue, dk->swapchain);
+
+    SGL_TRACE_BACKEND("acquire_image -> slot=%d", slot);
+    return slot;
+}
+
+void dk_wait_fence(sgl_backend_t *be, int slot) {
+    dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
+
+    if (dk->fence_active[slot]) {
+        dkFenceWait(&dk->fences[slot], -1);
+        dk->fence_active[slot] = false;
+    }
+
+    /* Reset command buffer for new frame */
+    dkCmdBufClear(dk->cmdbufs[slot]);
+    dkCmdBufAddMemory(dk->cmdbufs[slot], dk->cmdbuf_memblock[slot], 0, SGL_CMD_MEM_SIZE);
+
+    /* Reset descriptors_bound flag since command buffer was cleared */
+    dk->descriptors_bound = false;
+
+    /* Reset uniform allocator for new frame.
+     * This is safe because pushConstants copied uniform data into the command buffer
+     * at record time, so the GPU no longer references the CPU uniform memory. */
+    dk->uniform_offset = 0;
+
+    SGL_TRACE_BACKEND("wait_fence slot=%d", slot);
+}
+
+/* ============================================================================
+ * Sync Operations
+ * ============================================================================ */
+
+void dk_flush(sgl_backend_t *be) {
+    dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
+
+    /* Submit current commands without waiting */
+    DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
+    dkQueueSubmitCommands(dk->queue, cmdlist);
+
+    /* Reset command buffer for continued use */
+    dkCmdBufClear(dk->cmdbuf);
+    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+    dk->descriptors_bound = false;
+
+    /* Re-bind render target - use per-slot depth buffer */
+    if (dk->framebuffers) {
+        DkImageView colorView;
+        dkImageViewDefaults(&colorView, &dk->framebuffers[dk->current_slot]);
+        if (dk->depth_images[dk->current_slot]) {
+            DkImageView depthView;
+            dkImageViewDefaults(&depthView, dk->depth_images[dk->current_slot]);
+            dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, &depthView);
+        } else {
+            dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, NULL);
+        }
+    }
+
+    SGL_TRACE_BACKEND("flush");
+}
+
+void dk_finish(sgl_backend_t *be) {
+    dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
+
+    /* Submit current commands and wait for completion */
+    DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
+    dkQueueSubmitCommands(dk->queue, cmdlist);
+    dkQueueWaitIdle(dk->queue);
+
+    /* Reset command buffer for continued use */
+    dkCmdBufClear(dk->cmdbuf);
+    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+    dk->descriptors_bound = false;
+
+    /* Re-bind render target - use per-slot depth buffer */
+    if (dk->framebuffers) {
+        DkImageView colorView;
+        dkImageViewDefaults(&colorView, &dk->framebuffers[dk->current_slot]);
+        if (dk->depth_images[dk->current_slot]) {
+            DkImageView depthView;
+            dkImageViewDefaults(&depthView, dk->depth_images[dk->current_slot]);
+            dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, &depthView);
+        } else {
+            dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, NULL);
+        }
+    }
+
+    SGL_TRACE_BACKEND("finish");
+}
+
+void dk_insert_barrier(sgl_backend_t *be) {
+    dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
+
+    dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
+                    DkInvalidateFlags_Image | DkInvalidateFlags_Descriptors);
+
+    SGL_TRACE_BACKEND("insert_barrier");
+}
