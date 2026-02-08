@@ -167,8 +167,8 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
                 uint32_t alignedOffset = (dk->client_array_offset + 255) & ~255;
                 uint32_t clientArrayAddr = dk->client_array_base + alignedOffset;
 
-                /* Check we have space */
-                if (clientArrayAddr + dataSize <= dk->uniform_base) {
+                /* Check we have space in this slot's sub-region */
+                if (alignedOffset + dataSize <= dk->client_array_slot_end) {
                     /* Copy vertex data from client memory to GPU memory */
                     void *dst = data_cpu_base + clientArrayAddr;
                     memcpy(dst, attr->pointer, dataSize);
@@ -304,7 +304,7 @@ void dk_draw_elements(sgl_backend_t *be, GLenum mode, GLsizei count,
         if (type == GL_UNSIGNED_BYTE) {
             /* Convert 8-bit indices to 16-bit */
             size_t size16 = count * 2;
-            if (clientAddr + size16 > dk->uniform_base) {
+            if (alignedOffset + size16 > dk->client_array_slot_end) {
                 SGL_ERROR_BACKEND("draw_elements: out of client array memory for index conversion");
                 return;
             }
@@ -320,7 +320,7 @@ void dk_draw_elements(sgl_backend_t *be, GLenum mode, GLsizei count,
         } else {
             /* Direct copy for 16-bit and 32-bit indices */
             size_t dataSize = count * idxSize;
-            if (clientAddr + dataSize > dk->uniform_base) {
+            if (alignedOffset + dataSize > dk->client_array_slot_end) {
                 SGL_ERROR_BACKEND("draw_elements: out of client array memory");
                 return;
             }

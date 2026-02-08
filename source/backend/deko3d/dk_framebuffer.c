@@ -37,6 +37,11 @@ void dk_bind_framebuffer(sgl_backend_t *be, sgl_handle_t handle,
     dk->current_fbo_color = color_tex;
     dk->current_fbo_depth = depth_rb;
 
+    /* Mark texture as used as render target (for barrier optimization) */
+    if (color_tex > 0 && color_tex < SGL_MAX_TEXTURES) {
+        dk->texture_used_as_rt[color_tex] = true;
+    }
+
     /* Insert barrier before switching render targets
      * This ensures any previous rendering is complete before we switch
      * Include L2Cache invalidation for proper cache coherency when switching

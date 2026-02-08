@@ -25,6 +25,11 @@ extern "C" {
 #define SGL_STAGE_FRAGMENT  1
 
 /*
+ * Binary format for glShaderBinary - deko3d precompiled DKSH format
+ */
+#define GL_DKSH_BINARY_FORMAT_NX 0x10DE0001
+
+/*
  * sglRegisterUniform - Register a uniform name to a specific shader binding
  *
  * For deko3d precompiled shaders, you must register each uniform name

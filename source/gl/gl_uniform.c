@@ -131,6 +131,7 @@ GL_APICALL GLint GL_APIENTRY glGetUniformLocation(GLuint program, const GLchar *
         strcmp(name, "u_modelViewProj") == 0 ||
         strcmp(name, "u_mvpMatrix") == 0 ||
         strcmp(name, "u_matrix") == 0 ||
+        strcmp(name, "u_projection") == 0 ||   /* SDL_Renderer */
         strcmp(name, "u_testScale") == 0 ||
         strcmp(name, "ModelViewProjectionMatrix") == 0) {  /* es2gears */
         return (0 << 16) | 0;

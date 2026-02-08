@@ -70,6 +70,8 @@ void sgl_ensure_frame_ready(void) {
     }
     dk->num_framebuffers = SGL_FB_NUM;
     dk->swapchain = surf->swapchain;
+    dk->fb_width = surf->width;
+    dk->fb_height = surf->height;
 
     /* CRITICAL FIX: If an FBO is bound, re-bind it as render target.
      * We had to bind the default FB first to set up backend state,
@@ -786,6 +788,8 @@ EGLAPI EGLBoolean EGLAPIENTRY eglMakeCurrent(EGLDisplay dpy, EGLSurface draw,
         }
         dk->num_framebuffers = SGL_FB_NUM;
         dk->swapchain = draw_surf->swapchain;
+        dk->fb_width = draw_surf->width;
+        dk->fb_height = draw_surf->height;
     }
 
     /* Begin first frame */

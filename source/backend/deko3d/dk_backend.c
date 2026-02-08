@@ -77,7 +77,7 @@ const sgl_backend_ops_t dk_backend_ops = {
     /* Shader Operations (dk_shader.c) */
     .create_shader = NULL,   /* Handled at GL layer */
     .delete_shader = NULL,   /* Handled at GL layer */
-    .load_shader_binary = NULL,
+    .load_shader_binary = dk_load_shader_binary,
     .load_shader_file = dk_load_shader_file,
 
     /* Program Operations (dk_shader.c) */
@@ -282,6 +282,7 @@ int dk_init(sgl_backend_t *be, void *device) {
     dk->uniform_offset = 0;
     dk->client_array_base = dk->uniform_base - (4 * 1024 * 1024);  /* 4MB for client arrays */
     dk->client_array_offset = 0;
+    dk->client_array_slot_end = dk->uniform_base - dk->client_array_base;  /* Full region initially */
 
     /* Create texture memory */
     DkMemBlockMaker texMaker;
@@ -314,6 +315,7 @@ int dk_init(sgl_backend_t *be, void *device) {
     /* Initialize texture tracking */
     memset(dk->texture_initialized, 0, sizeof(dk->texture_initialized));
     memset(dk->texture_is_cubemap, 0, sizeof(dk->texture_is_cubemap));
+    memset(dk->texture_used_as_rt, 0, sizeof(dk->texture_used_as_rt));
     memset(dk->shader_loaded, 0, sizeof(dk->shader_loaded));
     memset(dk->program_shader_valid, 0, sizeof(dk->program_shader_valid));
 

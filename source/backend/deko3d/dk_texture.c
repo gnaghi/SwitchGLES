@@ -499,11 +499,14 @@ void dk_bind_texture(sgl_backend_t *be, GLuint unit, sgl_handle_t handle) {
         return;
     }
 
-    /* Add barrier to ensure any prior rendering to this texture is visible.
-     * This is needed when a texture was used as a render target (FBO) and
-     * is now being sampled. */
-    dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
-                    DkInvalidateFlags_Image | DkInvalidateFlags_Descriptors | DkInvalidateFlags_L2Cache);
+    /* Only insert barrier if this texture was used as a render target (FBO).
+     * This avoids expensive full barriers on every texture bind when sampling
+     * normal textures that were never rendered to. */
+    if (dk->texture_used_as_rt[handle]) {
+        dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
+                        DkInvalidateFlags_Image | DkInvalidateFlags_Descriptors | DkInvalidateFlags_L2Cache);
+        dk->texture_used_as_rt[handle] = false;
+    }
 
     /* Bind descriptor block if not already done */
     if (!dk->descriptors_bound) {
@@ -727,9 +730,15 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
     /* Copy from framebuffer to texture
      * OpenGL Y=0 is bottom, deko3d Y=0 is top
-     * Framebuffer height is 720 (SCREEN_HEIGHT) */
-    uint32_t fb_height = 720;  /* TODO: get actual framebuffer height */
-    uint32_t dk_src_y = fb_height - (uint32_t)y - (uint32_t)height;
+     * Use actual framebuffer height (FBO texture height or default FB height) */
+    uint32_t src_height;
+    if (dk->current_fbo != 0 && dk->current_fbo_color > 0 &&
+        dk->current_fbo_color < SGL_MAX_TEXTURES) {
+        src_height = dk->texture_height[dk->current_fbo_color];
+    } else {
+        src_height = dk->fb_height;
+    }
+    uint32_t dk_src_y = src_height - (uint32_t)y - (uint32_t)height;
 
     DkImageView srcView, dstView;
     dkImageViewDefaults(&srcView, srcImage);
@@ -800,9 +809,16 @@ void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image);
 
     /* Copy from framebuffer to texture
-     * OpenGL Y=0 is bottom, deko3d Y=0 is top */
-    uint32_t fb_height = 720;  /* TODO: get actual framebuffer height */
-    uint32_t dk_src_y = fb_height - (uint32_t)y - (uint32_t)height;
+     * OpenGL Y=0 is bottom, deko3d Y=0 is top
+     * Use actual framebuffer height (FBO texture height or default FB height) */
+    uint32_t src_height;
+    if (dk->current_fbo != 0 && dk->current_fbo_color > 0 &&
+        dk->current_fbo_color < SGL_MAX_TEXTURES) {
+        src_height = dk->texture_height[dk->current_fbo_color];
+    } else {
+        src_height = dk->fb_height;
+    }
+    uint32_t dk_src_y = src_height - (uint32_t)y - (uint32_t)height;
     uint32_t dk_dst_y = tex_height - (uint32_t)yoffset - (uint32_t)height;
 
     DkImageView srcView, dstView;

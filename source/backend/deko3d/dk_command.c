@@ -23,8 +23,17 @@ void dk_begin_frame(sgl_backend_t *be, int slot) {
     dk->cmdbuf = dk->cmdbufs[slot];
     dk->current_cmdbuf = slot;
 
-    /* Reset client array allocator for this frame */
-    dk->client_array_offset = 0;
+    /* Reset client array allocator to this slot's sub-region.
+     * The client array memory is partitioned per-slot to avoid GPU race conditions:
+     * Without this, frame N+1 would overwrite frame N's vertex data in shared memory
+     * before the GPU finishes rendering frame N (since vertex data is read directly
+     * from shared memory, unlike uniforms which use pushConstants). */
+    {
+        uint32_t total_client_size = dk->uniform_base - dk->client_array_base;
+        uint32_t per_slot_size = total_client_size / SGL_FB_NUM;
+        dk->client_array_offset = slot * per_slot_size;
+        dk->client_array_slot_end = (slot + 1) * per_slot_size;
+    }
 
     /* Bind render target - use per-slot depth buffer */
     if (dk->framebuffers) {

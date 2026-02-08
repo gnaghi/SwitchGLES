@@ -7,6 +7,44 @@
 #include <string.h>
 #include <stdio.h>
 
+/* Compressed texture formats supported by deko3d (Tegra X1 Maxwell GPU) */
+static const GLint s_compressed_formats[] = {
+    /* ETC1 */
+    0x8D64,  /* GL_ETC1_RGB8_OES */
+    /* ETC2 */
+    0x9274,  /* GL_COMPRESSED_RGB8_ETC2 */
+    0x9275,  /* GL_COMPRESSED_SRGB8_ETC2 */
+    0x9276,  /* GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2 */
+    0x9277,  /* GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2 */
+    0x9278,  /* GL_COMPRESSED_RGBA8_ETC2_EAC */
+    0x9279,  /* GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC */
+    0x9270,  /* GL_COMPRESSED_R11_EAC */
+    0x9271,  /* GL_COMPRESSED_SIGNED_R11_EAC */
+    0x9272,  /* GL_COMPRESSED_RG11_EAC */
+    0x9273,  /* GL_COMPRESSED_SIGNED_RG11_EAC */
+    /* S3TC / BC */
+    0x83F0,  /* GL_COMPRESSED_RGB_S3TC_DXT1_EXT */
+    0x83F1,  /* GL_COMPRESSED_RGBA_S3TC_DXT1_EXT */
+    0x83F2,  /* GL_COMPRESSED_RGBA_S3TC_DXT3_EXT */
+    0x83F3,  /* GL_COMPRESSED_RGBA_S3TC_DXT5_EXT */
+    /* ASTC LDR */
+    0x93B0,  /* GL_COMPRESSED_RGBA_ASTC_4x4_KHR */
+    0x93B1,  /* GL_COMPRESSED_RGBA_ASTC_5x4_KHR */
+    0x93B2,  /* GL_COMPRESSED_RGBA_ASTC_5x5_KHR */
+    0x93B3,  /* GL_COMPRESSED_RGBA_ASTC_6x5_KHR */
+    0x93B4,  /* GL_COMPRESSED_RGBA_ASTC_6x6_KHR */
+    0x93B5,  /* GL_COMPRESSED_RGBA_ASTC_8x5_KHR */
+    0x93B6,  /* GL_COMPRESSED_RGBA_ASTC_8x6_KHR */
+    0x93B7,  /* GL_COMPRESSED_RGBA_ASTC_8x8_KHR */
+    0x93B8,  /* GL_COMPRESSED_RGBA_ASTC_10x5_KHR */
+    0x93B9,  /* GL_COMPRESSED_RGBA_ASTC_10x6_KHR */
+    0x93BA,  /* GL_COMPRESSED_RGBA_ASTC_10x8_KHR */
+    0x93BB,  /* GL_COMPRESSED_RGBA_ASTC_10x10_KHR */
+    0x93BC,  /* GL_COMPRESSED_RGBA_ASTC_12x10_KHR */
+    0x93BD,  /* GL_COMPRESSED_RGBA_ASTC_12x12_KHR */
+};
+#define NUM_COMPRESSED_FORMATS (sizeof(s_compressed_formats) / sizeof(s_compressed_formats[0]))
+
 /* Error Function */
 
 GL_APICALL GLenum GL_APIENTRY glGetError(void) {
@@ -31,7 +69,16 @@ GL_APICALL const GLubyte *GL_APIENTRY glGetString(GLenum name) {
         case GL_SHADING_LANGUAGE_VERSION:
             return (const GLubyte*)"OpenGL ES GLSL ES 1.00 (dksh precompiled)";
         case GL_EXTENSIONS:
-            return (const GLubyte*)"GL_OES_rgb8_rgba8 GL_OES_depth24 GL_OES_packed_depth_stencil";
+            return (const GLubyte*)
+                "GL_OES_rgb8_rgba8 "
+                "GL_OES_depth24 "
+                "GL_OES_packed_depth_stencil "
+                "GL_OES_element_index_uint "
+                "GL_OES_texture_npot "
+                "GL_OES_compressed_ETC1_RGB8_texture "
+                "GL_EXT_blend_minmax "
+                "GL_EXT_texture_compression_s3tc "
+                "GL_KHR_texture_compression_astc_ldr";
         default:
             return NULL;
     }
@@ -110,16 +157,18 @@ GL_APICALL void GL_APIENTRY glGetIntegerv(GLenum pname, GLint *params) {
             *params = 4;
             break;
         case GL_NUM_COMPRESSED_TEXTURE_FORMATS:
-            *params = 0;
+            *params = NUM_COMPRESSED_FORMATS;
             break;
         case GL_COMPRESSED_TEXTURE_FORMATS:
-            /* No compressed formats */
+            for (int i = 0; i < (int)NUM_COMPRESSED_FORMATS; i++) {
+                params[i] = s_compressed_formats[i];
+            }
             break;
         case GL_NUM_SHADER_BINARY_FORMATS:
             *params = 1;
             break;
         case GL_SHADER_BINARY_FORMATS:
-            *params = 0;  /* Custom dksh format */
+            *params = 0x10DE0001;  /* GL_DKSH_BINARY_FORMAT_NX */
             break;
 
         /* Bindings */
@@ -260,10 +309,10 @@ GL_APICALL void GL_APIENTRY glGetIntegerv(GLenum pname, GLint *params) {
 
         /* Pack/unpack alignment */
         case GL_PACK_ALIGNMENT:
-            *params = 4;
+            *params = ctx->pack_alignment;
             break;
         case GL_UNPACK_ALIGNMENT:
-            *params = 4;
+            *params = ctx->unpack_alignment;
             break;
 
         default:
@@ -413,9 +462,25 @@ GL_APICALL void GL_APIENTRY glPolygonOffset(GLfloat factor, GLfloat units) {
 /* Pixel Store */
 
 GL_APICALL void GL_APIENTRY glPixelStorei(GLenum pname, GLint param) {
-    (void)pname;
-    (void)param;
-    /* Only support default alignment of 4 */
+    GET_CTX();
+
+    /* Only valid alignment values are 1, 2, 4, 8 */
+    if (param != 1 && param != 2 && param != 4 && param != 8) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    switch (pname) {
+        case GL_PACK_ALIGNMENT:
+            ctx->pack_alignment = param;
+            break;
+        case GL_UNPACK_ALIGNMENT:
+            ctx->unpack_alignment = param;
+            break;
+        default:
+            sgl_set_error(ctx, GL_INVALID_ENUM);
+            break;
+    }
 }
 
 /* Buffer Queries */
@@ -467,8 +532,25 @@ GL_APICALL void GL_APIENTRY glReleaseShaderCompiler(void) {
 
 GL_APICALL void GL_APIENTRY glShaderBinary(GLsizei count, const GLuint *shaders,
                                             GLenum binaryformat, const void *binary, GLsizei length) {
-    (void)count; (void)shaders; (void)binaryformat; (void)binary; (void)length;
-    /* Could be used to load precompiled deko3d shaders */
+    (void)binaryformat;  /* SwitchGLES only supports DKSH format */
+    GET_CTX();
+
+    if (count < 1 || !shaders || !binary || length <= 0) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    /* Load precompiled DKSH shader binary into each specified shader */
+    for (GLsizei i = 0; i < count; i++) {
+        sgl_shader_t *shader = GET_SHADER(shaders[i]);
+        if (!shader) continue;
+
+        if (ctx->backend && ctx->backend->ops->load_shader_binary) {
+            if (ctx->backend->ops->load_shader_binary(ctx->backend, shaders[i], binary, length)) {
+                shader->compiled = true;
+            }
+        }
+    }
 }
 
 GL_APICALL void GL_APIENTRY glGetShaderPrecisionFormat(GLenum shadertype, GLenum precisiontype,

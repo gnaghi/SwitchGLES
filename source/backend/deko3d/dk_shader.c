@@ -78,6 +78,51 @@ bool dk_load_shader_file(sgl_backend_t *be, sgl_handle_t handle, const char *pat
 }
 
 /* ============================================================================
+ * Shader Binary Loading
+ *
+ * Loads a pre-compiled .dksh shader from a memory buffer into GPU code memory.
+ * Same logic as dk_load_shader_file but reads from data/size instead of file.
+ * ============================================================================ */
+
+bool dk_load_shader_binary(sgl_backend_t *be, sgl_handle_t handle,
+                           const void *data, size_t size) {
+    dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
+
+    /* Validate handle */
+    if (handle == 0 || handle >= SGL_MAX_SHADERS) {
+        SGL_ERROR_BACKEND("Invalid shader handle: %u", handle);
+        return false;
+    }
+
+    if (!data || size == 0) {
+        SGL_ERROR_BACKEND("Invalid shader binary data");
+        return false;
+    }
+
+    if ((uint32_t)size > SGL_CODE_MEM_SIZE - dk->code_offset) {
+        SGL_ERROR_BACKEND("Shader binary too large: %zu bytes", size);
+        return false;
+    }
+
+    /* Align code offset to 256 bytes */
+    uint32_t aligned_offset = (dk->code_offset + 255) & ~255;
+    uint8_t *code_ptr = (uint8_t*)dkMemBlockGetCpuAddr(dk->code_memblock) + aligned_offset;
+
+    memcpy(code_ptr, data, size);
+
+    /* Initialize shader at the handle index */
+    DkShaderMaker shaderMaker;
+    dkShaderMakerDefaults(&shaderMaker, dk->code_memblock, aligned_offset);
+    dkShaderInitialize(&dk->dk_shaders[handle], &shaderMaker);
+    dk->shader_loaded[handle] = true;
+    dk->code_offset = aligned_offset + ((size + 255) & ~255);
+
+    SGL_TRACE_SHADER("load_shader_binary: handle=%u size=%zu at offset=%u",
+                     handle, size, aligned_offset);
+    return true;
+}
+
+/* ============================================================================
  * Program Linking
  *
  * Links vertex and fragment shaders into a program.

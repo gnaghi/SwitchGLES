@@ -274,7 +274,7 @@ typedef struct {
     const char *details;
 } TestResult;
 
-#define MAX_TESTS 100
+#define MAX_TESTS 120
 static TestResult s_results[MAX_TESTS];
 static int s_numResults = 0;
 
@@ -1999,6 +1999,94 @@ static void testReadPixels(void) {
 }
 
 /*==========================================================================
+ * TEST: Query extensions, compressed formats, pixel store
+ *==========================================================================*/
+
+static void testQueries(void) {
+    printf("\n--- Test: GL Queries & Extensions ---\n");
+
+    /* Test GL_EXTENSIONS string */
+    const char *ext = (const char *)glGetString(GL_EXTENSIONS);
+    recordResult("glGetString(GL_EXTENSIONS)", ext != NULL, NULL);
+
+    if (ext) {
+        /* Check for new extensions we added */
+        recordResult("GL_EXT_blend_minmax",
+                     strstr(ext, "GL_EXT_blend_minmax") != NULL, NULL);
+        recordResult("GL_OES_element_index_uint",
+                     strstr(ext, "GL_OES_element_index_uint") != NULL, NULL);
+        recordResult("GL_OES_texture_npot",
+                     strstr(ext, "GL_OES_texture_npot") != NULL, NULL);
+        recordResult("GL_KHR_texture_compression_astc_ldr",
+                     strstr(ext, "GL_KHR_texture_compression_astc_ldr") != NULL, NULL);
+        recordResult("GL_EXT_texture_compression_s3tc",
+                     strstr(ext, "GL_EXT_texture_compression_s3tc") != NULL, NULL);
+    }
+
+    /* Test compressed texture format enumeration */
+    GLint numCompressed = 0;
+    glGetIntegerv(GL_NUM_COMPRESSED_TEXTURE_FORMATS, &numCompressed);
+    recordResult("GL_NUM_COMPRESSED_TEXTURE_FORMATS > 0",
+                 numCompressed > 0, NULL);
+    printf("  [INFO] GL_NUM_COMPRESSED_TEXTURE_FORMATS = %d\n", numCompressed);
+
+    if (numCompressed > 0 && numCompressed <= 64) {
+        GLint formats[64];
+        glGetIntegerv(GL_COMPRESSED_TEXTURE_FORMATS, formats);
+        /* Check that ETC1 (0x8D64) is in the list */
+        bool hasETC1 = false;
+        for (int i = 0; i < numCompressed; i++) {
+            if (formats[i] == 0x8D64) hasETC1 = true;
+        }
+        recordResult("GL_COMPRESSED_TEXTURE_FORMATS has ETC1", hasETC1, NULL);
+    }
+
+    /* Test shader binary format queries */
+    GLint numBinaryFormats = 0;
+    glGetIntegerv(GL_NUM_SHADER_BINARY_FORMATS, &numBinaryFormats);
+    recordResult("GL_NUM_SHADER_BINARY_FORMATS == 1",
+                 numBinaryFormats == 1, NULL);
+
+    GLint binaryFormat = 0;
+    glGetIntegerv(GL_SHADER_BINARY_FORMATS, &binaryFormat);
+    recordResult("GL_SHADER_BINARY_FORMATS == DKSH",
+                 binaryFormat == 0x10DE0001, NULL);
+
+    /* Test glPixelStorei - set and read back */
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    GLenum err1 = glGetError();
+    recordResult("glPixelStorei(GL_PACK_ALIGNMENT, 1)", err1 == GL_NO_ERROR, NULL);
+
+    GLint packAlign = 0;
+    glGetIntegerv(GL_PACK_ALIGNMENT, &packAlign);
+    recordResult("GL_PACK_ALIGNMENT == 1", packAlign == 1, NULL);
+
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 2);
+    GLint unpackAlign = 0;
+    glGetIntegerv(GL_UNPACK_ALIGNMENT, &unpackAlign);
+    recordResult("GL_UNPACK_ALIGNMENT == 2", unpackAlign == 2, NULL);
+
+    /* Test invalid alignment */
+    glPixelStorei(GL_PACK_ALIGNMENT, 3);
+    GLenum err2 = glGetError();
+    recordResult("glPixelStorei(invalid=3) -> GL_INVALID_VALUE",
+                 err2 == GL_INVALID_VALUE, NULL);
+
+    /* Restore defaults */
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+
+    /* Test GL_VERSION and GL_RENDERER */
+    const char *version = (const char *)glGetString(GL_VERSION);
+    recordResult("glGetString(GL_VERSION)",
+                 version != NULL && strstr(version, "OpenGL ES 2.0") != NULL, NULL);
+
+    const char *renderer = (const char *)glGetString(GL_RENDERER);
+    recordResult("glGetString(GL_RENDERER)",
+                 renderer != NULL && strstr(renderer, "deko3d") != NULL, NULL);
+}
+
+/*==========================================================================
  * Print summary
  *==========================================================================*/
 
@@ -2183,6 +2271,12 @@ int main(int argc, char* argv[]) {
         "Black background\n"
         "Should show RED outer area, GREEN center\n"
         "(Green quad is closer, depth test via renderbuffer)");
+
+    testQueries();
+    waitForA("GL Queries & Extensions",
+        "No visual output\n"
+        "Tests GL_EXTENSIONS, compressed formats,\n"
+        "shader binary formats, glPixelStorei");
 
     /* Print summary */
     printSummary();

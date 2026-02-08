@@ -40,9 +40,10 @@ typedef struct dk_backend_data {
     uint32_t uniform_base;
     uint32_t uniform_offset;
 
-    /* Client array region (per-frame) */
+    /* Client array region (per-frame, per-slot to avoid GPU race conditions) */
     uint32_t client_array_base;
     uint32_t client_array_offset;
+    uint32_t client_array_slot_end;  /* End boundary for current slot's sub-region */
 
     /* Texture memory */
     DkMemBlock texture_memblock;
@@ -65,11 +66,16 @@ typedef struct dk_backend_data {
     /* Current framebuffer slot */
     int current_slot;
 
+    /* Default framebuffer dimensions (from surface) */
+    uint32_t fb_width;
+    uint32_t fb_height;
+
     /* Texture data for binding - store directly, indexed by texture ID */
     DkImage textures[SGL_MAX_TEXTURES];
     DkImageDescriptor texture_descriptors[SGL_MAX_TEXTURES];
     bool texture_initialized[SGL_MAX_TEXTURES];
     bool texture_is_cubemap[SGL_MAX_TEXTURES];  /* true if texture is cubemap, false if 2D */
+    bool texture_used_as_rt[SGL_MAX_TEXTURES];  /* true if texture was used as FBO render target */
 
     /* Texture dimensions and mipmap info - indexed by texture ID */
     uint32_t texture_width[SGL_MAX_TEXTURES];

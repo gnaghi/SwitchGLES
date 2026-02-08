@@ -49,6 +49,10 @@ typedef struct sgl_context {
     sgl_surface_t          *draw_surface;
     sgl_surface_t          *read_surface;
 
+    /* Pixel store state */
+    GLint                   pack_alignment;    /* GL_PACK_ALIGNMENT (default 4) */
+    GLint                   unpack_alignment;  /* GL_UNPACK_ALIGNMENT (default 4) */
+
     /* Error */
     GLenum                  error;
 

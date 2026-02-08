@@ -46,6 +46,10 @@ void sgl_context_init(sgl_context_t *ctx) {
         ctx->vertex_attribs[i].buffer = 0;
     }
 
+    /* Pixel store defaults */
+    ctx->pack_alignment = 4;
+    ctx->unpack_alignment = 4;
+
     ctx->error = GL_NO_ERROR;
     ctx->initialized = true;
 

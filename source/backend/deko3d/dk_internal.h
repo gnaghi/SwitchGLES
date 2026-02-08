@@ -337,6 +337,18 @@ void dk_write_uniform(sgl_backend_t *be, uint32_t offset, const void *data, uint
 bool dk_load_shader_file(sgl_backend_t *be, sgl_handle_t handle, const char *path);
 
 /**
+ * Load a compiled shader from a memory buffer.
+ *
+ * @param be        Backend pointer
+ * @param handle    Shader handle to load into
+ * @param data      Pointer to DKSH binary data
+ * @param size      Size of binary data in bytes
+ * @return true on success, false on failure
+ */
+bool dk_load_shader_binary(sgl_backend_t *be, sgl_handle_t handle,
+                           const void *data, size_t size);
+
+/**
  * Link vertex and fragment shaders into a program.
  * Copies shader code to per-program storage for independent binding.
  *
