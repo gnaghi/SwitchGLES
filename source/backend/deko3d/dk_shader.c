@@ -174,7 +174,10 @@ void dk_bind_program(sgl_backend_t *be, sgl_handle_t program,
                      sgl_handle_t vertex_shader, sgl_handle_t fragment_shader,
                      const sgl_uniform_binding_t *vertex_uniforms,
                      const sgl_uniform_binding_t *fragment_uniforms,
-                     int max_uniforms) {
+                     int max_uniforms,
+                     const sgl_packed_ubo_t *packed_vertex,
+                     const sgl_packed_ubo_t *packed_fragment,
+                     int max_packed_ubos) {
     (void)vertex_shader;  /* Not used - we use per-program shader copies */
     (void)fragment_shader;
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
@@ -235,6 +238,46 @@ void dk_bind_program(sgl_backend_t *be, sgl_handle_t program,
             uint32_t push_size = ub->data_size > 0 ? ub->data_size : ub->size;
 
             dkCmdBufPushConstants(dk->cmdbuf, gpu_addr, ub->size, 0, push_size, uniform_data);
+        }
+    }
+
+    /* ---- Bind packed UBOs (vertex stage) ---- */
+    if (packed_vertex) {
+        uint8_t *cpu_base = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock);
+        for (int i = 0; i < max_packed_ubos; i++) {
+            const sgl_packed_ubo_t *packed = &packed_vertex[i];
+            if (!packed->valid || packed->size == 0) continue;
+
+            uint32_t aligned = (packed->size + SGL_UNIFORM_ALIGNMENT - 1) & ~(SGL_UNIFORM_ALIGNMENT - 1);
+            uint32_t offset = dk_alloc_uniform(be, aligned);
+
+            /* Copy shadow buffer to CPU-visible GPU memory */
+            memcpy(cpu_base + dk->uniform_base + offset, packed->data, packed->size);
+
+            DkGpuAddr gpu_addr = uniform_gpu_base + offset;
+            dkCmdBufBindUniformBuffer(dk->cmdbuf, DkStage_Vertex, i, gpu_addr, aligned);
+            dkCmdBufPushConstants(dk->cmdbuf, gpu_addr, aligned, 0, packed->size,
+                                  cpu_base + dk->uniform_base + offset);
+        }
+    }
+
+    /* ---- Bind packed UBOs (fragment stage) ---- */
+    if (packed_fragment) {
+        uint8_t *cpu_base = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock);
+        for (int i = 0; i < max_packed_ubos; i++) {
+            const sgl_packed_ubo_t *packed = &packed_fragment[i];
+            if (!packed->valid || packed->size == 0) continue;
+
+            uint32_t aligned = (packed->size + SGL_UNIFORM_ALIGNMENT - 1) & ~(SGL_UNIFORM_ALIGNMENT - 1);
+            uint32_t offset = dk_alloc_uniform(be, aligned);
+
+            /* Copy shadow buffer to CPU-visible GPU memory */
+            memcpy(cpu_base + dk->uniform_base + offset, packed->data, packed->size);
+
+            DkGpuAddr gpu_addr = uniform_gpu_base + offset;
+            dkCmdBufBindUniformBuffer(dk->cmdbuf, DkStage_Fragment, i, gpu_addr, aligned);
+            dkCmdBufPushConstants(dk->cmdbuf, gpu_addr, aligned, 0, packed->size,
+                                  cpu_base + dk->uniform_base + offset);
         }
     }
 

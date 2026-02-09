@@ -274,7 +274,7 @@ typedef struct {
     const char *details;
 } TestResult;
 
-#define MAX_TESTS 120
+#define MAX_TESTS 130
 static TestResult s_results[MAX_TESTS];
 static int s_numResults = 0;
 
@@ -2087,6 +2087,165 @@ static void testQueries(void) {
 }
 
 /*==========================================================================
+ * TEST: Packed UBO
+ *==========================================================================*/
+
+static GLuint s_packedProgram = 0;
+
+static GLuint getPackedProgram(void) {
+    if (!s_packedProgram) {
+        s_packedProgram = createProgramFromFiles(
+            "romfs:/shaders/packed_vsh.dksh",
+            "romfs:/shaders/packed_fsh.dksh");
+    }
+    return s_packedProgram;
+}
+
+static void testPackedUBO(void) {
+    printf("\n--- Test: Packed UBO ---\n");
+
+    GLuint prog = getPackedProgram();
+    if (!prog) {
+        recordResult("Packed UBO: shader load", false, "failed to load shaders");
+        return;
+    }
+    recordResult("Packed UBO: shader load", true, NULL);
+
+    /* Clear previous user-registered uniforms */
+    sglClearUniformRegistry();
+
+    /*
+     * Register packed uniforms for vertex stage:
+     * binding 0, total 80 bytes (mat4=64 + vec4=16)
+     */
+    sglSetPackedUBOSize(SGL_STAGE_VERTEX, 0, 80);
+    sglRegisterPackedUniform("u_packedMatrix", SGL_STAGE_VERTEX, 0, 0);
+    sglRegisterPackedUniform("u_packedOffset", SGL_STAGE_VERTEX, 0, 64);
+
+    /*
+     * Register packed uniforms for fragment stage:
+     * binding 0, total 32 bytes (vec4=16 + vec4=16)
+     */
+    sglSetPackedUBOSize(SGL_STAGE_FRAGMENT, 0, 32);
+    sglRegisterPackedUniform("u_packedColor",  SGL_STAGE_FRAGMENT, 0, 0);
+    sglRegisterPackedUniform("u_packedParams", SGL_STAGE_FRAGMENT, 0, 16);
+
+    glUseProgram(prog);
+
+    /* Verify locations are packed (bit 31 set) */
+    GLint matLoc = glGetUniformLocation(prog, "u_packedMatrix");
+    GLint offLoc = glGetUniformLocation(prog, "u_packedOffset");
+    GLint colLoc = glGetUniformLocation(prog, "u_packedColor");
+    GLint parLoc = glGetUniformLocation(prog, "u_packedParams");
+
+    bool locsOk = (matLoc != -1) && (offLoc != -1) &&
+                  (colLoc != -1) && (parLoc != -1) &&
+                  (matLoc & (1 << 31)) && (offLoc & (1 << 31)) &&
+                  (colLoc & (1 << 31)) && (parLoc & (1 << 31));
+    recordResult("Packed UBO: location encoding", locsOk, NULL);
+
+    if (!locsOk) {
+        printf("[DEBUG] matLoc=0x%x offLoc=0x%x colLoc=0x%x parLoc=0x%x\n",
+               matLoc, offLoc, colLoc, parLoc);
+        sglClearUniformRegistry();
+        return;
+    }
+
+    /* Set up viewport and clear */
+    glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    /* Identity matrix (no transform) */
+    float identity[16] = {
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1
+    };
+
+    /* Set packed vertex uniforms */
+    glUniformMatrix4fv(matLoc, 1, GL_FALSE, identity);
+
+    float offset[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    glUniform4fv(offLoc, 1, offset);
+
+    /* Set packed fragment uniforms: CYAN color (0, 1, 1, 1) with alpha=1 */
+    float color[4] = { 0.0f, 1.0f, 1.0f, 1.0f };
+    glUniform4fv(colLoc, 1, color);
+
+    float params[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
+    glUniform4fv(parLoc, 1, params);
+
+    /* Draw a quad covering most of the screen */
+    float quadVerts[] = {
+        -0.8f, -0.8f,
+         0.8f, -0.8f,
+        -0.8f,  0.8f,
+         0.8f,  0.8f,
+    };
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, quadVerts);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glDisableVertexAttribArray(0);
+
+    eglSwapBuffers(s_display, s_surface);
+
+    /* Read pixel from center */
+    GLubyte pixel[4];
+    glReadPixels(640, 360, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+    printf("[DEBUG] Packed UBO pixel: R=%d G=%d B=%d A=%d\n",
+           pixel[0], pixel[1], pixel[2], pixel[3]);
+
+    /* Expect CYAN: R~0, G~255, B~255 */
+    bool colorOk = (pixel[0] < 10) &&
+                   (pixel[1] > 245) &&
+                   (pixel[2] > 245);
+    recordResult("Packed UBO: vertex + fragment rendering", colorOk, NULL);
+
+    /*
+     * Test 2: Change only the color via packed UBO (verify shadow buffer update)
+     * Change to YELLOW (1, 1, 0, 1) with alpha multiplier = 0.5
+     */
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    /* Re-set ALL uniforms (SwitchGLES resets each frame) */
+    glUniformMatrix4fv(matLoc, 1, GL_FALSE, identity);
+    glUniform4fv(offLoc, 1, offset);
+
+    float color2[4] = { 1.0f, 1.0f, 0.0f, 1.0f };
+    glUniform4fv(colLoc, 1, color2);
+
+    float params2[4] = { 0.5f, 0.0f, 0.0f, 0.0f };
+    glUniform4fv(parLoc, 1, params2);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, quadVerts);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glDisableVertexAttribArray(0);
+
+    eglSwapBuffers(s_display, s_surface);
+
+    glReadPixels(640, 360, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+    printf("[DEBUG] Packed UBO pixel2: R=%d G=%d B=%d A=%d\n",
+           pixel[0], pixel[1], pixel[2], pixel[3]);
+
+    /* Expect YELLOW with alpha=0.5: R~255, G~255, B~0, A~127 */
+    bool color2Ok = (pixel[0] > 245) &&
+                    (pixel[1] > 245) &&
+                    (pixel[2] < 10) &&
+                    (pixel[3] >= 120 && pixel[3] <= 135);
+    recordResult("Packed UBO: shadow buffer update + alpha", color2Ok, NULL);
+
+    /* Clean up: restore built-in mappings */
+    sglClearUniformRegistry();
+}
+
+/*==========================================================================
  * Print summary
  *==========================================================================*/
 
@@ -2278,6 +2437,12 @@ int main(int argc, char* argv[]) {
         "Tests GL_EXTENSIONS, compressed formats,\n"
         "shader binary formats, glPixelStorei");
 
+    testPackedUBO();
+    waitForA("Packed UBO",
+        "Black background\n"
+        "YELLOW quad with semi-transparent alpha\n"
+        "(Tests packed uniform shadow buffer)");
+
     /* Print summary */
     printSummary();
 
@@ -2288,6 +2453,7 @@ int main(int argc, char* argv[]) {
     if (s_allUniformProgram) glDeleteProgram(s_allUniformProgram);
     if (s_multiTexProgram) glDeleteProgram(s_multiTexProgram);
     if (s_cubemapProgram) glDeleteProgram(s_cubemapProgram);
+    if (s_packedProgram) glDeleteProgram(s_packedProgram);
 
     /* Wait for user to exit */
     printf("\nPress + to exit...\n");

@@ -96,6 +96,8 @@ shaders:
 	@uam -s frag $(SHADERS_DIR)/multitex_fsh.glsl -o $(SHADERS_OUT)/multitex_fsh.dksh
 	@uam -s vert $(SHADERS_DIR)/cubemap_vsh.glsl -o $(SHADERS_OUT)/cubemap_vsh.dksh
 	@uam -s frag $(SHADERS_DIR)/cubemap_fsh.glsl -o $(SHADERS_OUT)/cubemap_fsh.dksh
+	@uam -s vert $(SHADERS_DIR)/packed_vsh.glsl -o $(SHADERS_OUT)/packed_vsh.dksh
+	@uam -s frag $(SHADERS_DIR)/packed_fsh.glsl -o $(SHADERS_OUT)/packed_fsh.dksh
 
 $(BUILD):
 	@[ -d $@ ] || mkdir -p $@

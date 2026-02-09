@@ -16,19 +16,23 @@
  * ============================================================================
  */
 
-#define SGL_MAX_REGISTERED_UNIFORMS 128
+#define SGL_MAX_REGISTERED_UNIFORMS 256
 #define SGL_UNIFORM_NAME_MAX 64
 
 typedef struct {
     char name[SGL_UNIFORM_NAME_MAX];
-    int stage;   /* 0 = vertex, 1 = fragment */
+    int stage;       /* 0 = vertex, 1 = fragment */
     int binding;
+    int byte_offset; /* -1 for legacy, >=0 for packed */
     bool used;
 } sgl_uniform_entry_t;
 
 static sgl_uniform_entry_t s_registered_uniforms[SGL_MAX_REGISTERED_UNIFORMS];
 static int s_registered_count = 0;
 static bool s_registry_initialized = false;
+
+/* Packed UBO size registry (set via sglSetPackedUBOSize, applied to programs at glGetUniformLocation time) */
+static int s_packed_ubo_sizes[2][SGL_MAX_PACKED_UBOS]; /* [stage][binding] = size in bytes */
 
 /*
  * sglRegisterUniform - Register a uniform name to a specific shader binding
@@ -49,6 +53,7 @@ GL_APICALL GLboolean GL_APIENTRY sglRegisterUniform(const GLchar *name, GLint st
             strcmp(s_registered_uniforms[i].name, name) == 0) {
             s_registered_uniforms[i].stage = stage;
             s_registered_uniforms[i].binding = binding;
+            s_registered_uniforms[i].byte_offset = -1; /* legacy mode */
             return GL_TRUE;
         }
     }
@@ -71,6 +76,7 @@ GL_APICALL GLboolean GL_APIENTRY sglRegisterUniform(const GLchar *name, GLint st
     strcpy(s_registered_uniforms[slot].name, name);
     s_registered_uniforms[slot].stage = stage;
     s_registered_uniforms[slot].binding = binding;
+    s_registered_uniforms[slot].byte_offset = -1; /* legacy mode */
     s_registered_uniforms[slot].used = true;
     s_registry_initialized = true;
 
@@ -85,11 +91,73 @@ GL_APICALL void GL_APIENTRY sglClearUniformRegistry(void) {
         s_registered_uniforms[i].used = false;
     }
     s_registered_count = 0;
+    /* Clear packed UBO sizes */
+    memset(s_packed_ubo_sizes, 0, sizeof(s_packed_ubo_sizes));
     /* Note: built-in mappings are still available via hardcoded checks */
 }
 
 /*
- * Check user-registered uniforms first
+ * sglSetPackedUBOSize - Set the total size of a packed UBO binding
+ */
+GL_APICALL void GL_APIENTRY sglSetPackedUBOSize(GLint stage, GLint binding, GLint size) {
+    if (stage < 0 || stage > 1) return;
+    if (binding < 0 || binding >= SGL_MAX_PACKED_UBOS) return;
+    if (size < 0 || size > SGL_MAX_PACKED_UBO_SIZE) return;
+    s_packed_ubo_sizes[stage][binding] = size;
+}
+
+/*
+ * sglRegisterPackedUniform - Register a uniform into a packed UBO
+ */
+GL_APICALL GLboolean GL_APIENTRY sglRegisterPackedUniform(const GLchar *name,
+                                                           GLint stage,
+                                                           GLint binding,
+                                                           GLint byte_offset) {
+    if (!name || stage < 0 || stage > 1) return GL_FALSE;
+    if (binding < 0 || binding >= SGL_MAX_PACKED_UBOS) return GL_FALSE;
+    if (byte_offset < 0 || byte_offset >= SGL_MAX_PACKED_UBO_SIZE) return GL_FALSE;
+
+    size_t len = strlen(name);
+    if (len == 0 || len >= SGL_UNIFORM_NAME_MAX) return GL_FALSE;
+
+    /* Check if already registered - update if so */
+    for (int i = 0; i < s_registered_count; i++) {
+        if (s_registered_uniforms[i].used &&
+            strcmp(s_registered_uniforms[i].name, name) == 0) {
+            s_registered_uniforms[i].stage = stage;
+            s_registered_uniforms[i].binding = binding;
+            s_registered_uniforms[i].byte_offset = byte_offset;
+            return GL_TRUE;
+        }
+    }
+
+    /* Find empty slot or add new entry */
+    int slot = -1;
+    for (int i = 0; i < s_registered_count; i++) {
+        if (!s_registered_uniforms[i].used) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) {
+        if (s_registered_count >= SGL_MAX_REGISTERED_UNIFORMS) return GL_FALSE;
+        slot = s_registered_count++;
+    }
+
+    strcpy(s_registered_uniforms[slot].name, name);
+    s_registered_uniforms[slot].stage = stage;
+    s_registered_uniforms[slot].binding = binding;
+    s_registered_uniforms[slot].byte_offset = byte_offset;
+    s_registered_uniforms[slot].used = true;
+    s_registry_initialized = true;
+
+    return GL_TRUE;
+}
+
+/*
+ * Check user-registered uniforms first.
+ * Returns legacy encoding (stage << 16 | binding) or
+ * packed encoding (1 << 31 | stage << 24 | binding << 16 | byte_offset).
  */
 static GLint lookup_registered_uniform(const GLchar *name) {
     if (!s_registry_initialized) return -1;
@@ -97,7 +165,16 @@ static GLint lookup_registered_uniform(const GLchar *name) {
     for (int i = 0; i < s_registered_count; i++) {
         if (s_registered_uniforms[i].used &&
             strcmp(s_registered_uniforms[i].name, name) == 0) {
-            return (s_registered_uniforms[i].stage << 16) | s_registered_uniforms[i].binding;
+            if (s_registered_uniforms[i].byte_offset >= 0) {
+                /* Packed mode encoding */
+                return (GLint)((1u << 31) |
+                       ((unsigned)s_registered_uniforms[i].stage << 24) |
+                       ((unsigned)s_registered_uniforms[i].binding << 16) |
+                       (unsigned)s_registered_uniforms[i].byte_offset);
+            } else {
+                /* Legacy encoding */
+                return (s_registered_uniforms[i].stage << 16) | s_registered_uniforms[i].binding;
+            }
         }
     }
     return -1;
@@ -119,7 +196,24 @@ GL_APICALL GLint GL_APIENTRY glGetUniformLocation(GLuint program, const GLchar *
 
     /* Check user-registered uniforms FIRST (allows overriding built-ins) */
     GLint registered = lookup_registered_uniform(name);
-    if (registered >= 0) {
+    if (registered != -1) {
+        /* If packed mode, configure the program's packed UBO size */
+        if (registered & (1 << 31)) {
+            int stage = (registered >> 24) & 0x7F;
+            int binding = (registered >> 16) & 0xFF;
+            sgl_packed_ubo_t *packed = (stage == 0)
+                ? &prog->packed_vertex[binding]
+                : &prog->packed_fragment[binding];
+            if (!packed->valid) {
+                int ubo_size = s_packed_ubo_sizes[stage][binding];
+                if (ubo_size > 0 && ubo_size <= SGL_MAX_PACKED_UBO_SIZE) {
+                    packed->size = ubo_size;
+                    packed->valid = true;
+                    packed->dirty = false;
+                    memset(packed->data, 0, ubo_size);
+                }
+            }
+        }
         return registered;
     }
 
@@ -263,10 +357,29 @@ GL_APICALL void GL_APIENTRY glGetUniformiv(GLuint program, GLint location, GLint
 static void set_float_uniform(GLint location, int num_components, const GLfloat *values) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx || !ctx->backend) return;
-    if (location < 0) return;
+    if (location == -1) return;
 
     sgl_program_t *prog = GET_PROGRAM(ctx->current_program);
     if (!prog) return;
+
+    /* Packed mode: write directly to shadow buffer */
+    if (location & (1 << 31)) {
+        int stage = (location >> 24) & 0x7F;
+        int binding = (location >> 16) & 0xFF;
+        int offset = location & 0xFFFF;
+
+        sgl_packed_ubo_t *packed = (stage == 0)
+            ? &prog->packed_vertex[binding]
+            : &prog->packed_fragment[binding];
+
+        /* Write exact bytes: num_components * sizeof(float) */
+        uint32_t dataSize = num_components * sizeof(float);
+        if (!packed->valid || offset + dataSize > packed->size) return;
+
+        memcpy(packed->data + offset, values, dataSize);
+        packed->dirty = true;
+        return;
+    }
 
     int stage = (location >> 16) & 0xFFFF;
     int binding = location & 0xFFFF;
@@ -337,10 +450,29 @@ GL_APICALL void GL_APIENTRY glUniform4f(GLint location, GLfloat v0, GLfloat v1, 
 static void set_int_uniform(GLint location, int num_components, const GLint *values) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx || !ctx->backend) return;
-    if (location < 0) return;
+    if (location == -1) return;
 
     sgl_program_t *prog = GET_PROGRAM(ctx->current_program);
     if (!prog) return;
+
+    /* Packed mode: write directly to shadow buffer */
+    if (location & (1 << 31)) {
+        int stage = (location >> 24) & 0x7F;
+        int binding = (location >> 16) & 0xFF;
+        int offset = location & 0xFFFF;
+
+        sgl_packed_ubo_t *packed = (stage == 0)
+            ? &prog->packed_vertex[binding]
+            : &prog->packed_fragment[binding];
+
+        /* Write exact bytes: num_components * sizeof(int32_t) */
+        uint32_t dataSize = num_components * sizeof(int32_t);
+        if (!packed->valid || offset + dataSize > packed->size) return;
+
+        memcpy(packed->data + offset, values, dataSize);
+        packed->dirty = true;
+        return;
+    }
 
     int stage = (location >> 16) & 0xFFFF;
     int binding = location & 0xFFFF;
@@ -456,10 +588,36 @@ GL_APICALL void GL_APIENTRY glUniform4iv(GLint location, GLsizei count, const GL
 GL_APICALL void GL_APIENTRY glUniformMatrix2fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx || !ctx->backend) return;
-    if (location < 0 || count <= 0 || !value) return;
+    if (location == -1 || count <= 0 || !value) return;
 
     sgl_program_t *prog = GET_PROGRAM(ctx->current_program);
     if (!prog || !prog->linked) return;
+
+    /* Packed mode: write std140 mat2 to shadow buffer */
+    if (location & (1 << 31)) {
+        int stage = (location >> 24) & 0x7F;
+        int binding = (location >> 16) & 0xFF;
+        int offset = location & 0xFFFF;
+        sgl_packed_ubo_t *packed = (stage == 0)
+            ? &prog->packed_vertex[binding]
+            : &prog->packed_fragment[binding];
+        uint32_t dataSize = 32 * count; /* mat2 std140: 2 vec4 = 32 bytes */
+        if (!packed->valid || offset + dataSize > packed->size) return;
+        for (GLsizei m = 0; m < count; m++) {
+            const float *src = value + m * 4;
+            float *dst = (float *)(packed->data + offset + m * 32);
+            if (transpose == GL_FALSE) {
+                dst[0] = src[0]; dst[1] = src[1]; dst[2] = 0.0f; dst[3] = 0.0f;
+                dst[4] = src[2]; dst[5] = src[3]; dst[6] = 0.0f; dst[7] = 0.0f;
+            } else {
+                dst[0] = src[0]; dst[1] = src[2]; dst[2] = 0.0f; dst[3] = 0.0f;
+                dst[4] = src[1]; dst[5] = src[3]; dst[6] = 0.0f; dst[7] = 0.0f;
+            }
+        }
+        packed->dirty = true;
+        SGL_TRACE_UNIFORM("glUniformMatrix2fv(packed loc=0x%X, count=%d)", location, count);
+        return;
+    }
 
     int stage = (location >> 16) & 0xFFFF;
     int binding = location & 0xFFFF;
@@ -510,10 +668,38 @@ GL_APICALL void GL_APIENTRY glUniformMatrix2fv(GLint location, GLsizei count, GL
 GL_APICALL void GL_APIENTRY glUniformMatrix3fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx || !ctx->backend) return;
-    if (location < 0 || count <= 0 || !value) return;
+    if (location == -1 || count <= 0 || !value) return;
 
     sgl_program_t *prog = GET_PROGRAM(ctx->current_program);
     if (!prog || !prog->linked) return;
+
+    /* Packed mode: write std140 mat3 to shadow buffer */
+    if (location & (1 << 31)) {
+        int stage = (location >> 24) & 0x7F;
+        int binding = (location >> 16) & 0xFF;
+        int offset = location & 0xFFFF;
+        sgl_packed_ubo_t *packed = (stage == 0)
+            ? &prog->packed_vertex[binding]
+            : &prog->packed_fragment[binding];
+        uint32_t dataSize = 48 * count; /* mat3 std140: 3 vec4 = 48 bytes */
+        if (!packed->valid || offset + dataSize > packed->size) return;
+        for (GLsizei m = 0; m < count; m++) {
+            const float *src = value + m * 9;
+            float *dst = (float *)(packed->data + offset + m * 48);
+            if (transpose == GL_FALSE) {
+                dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2]; dst[3] = 0.0f;
+                dst[4] = src[3]; dst[5] = src[4]; dst[6] = src[5]; dst[7] = 0.0f;
+                dst[8] = src[6]; dst[9] = src[7]; dst[10] = src[8]; dst[11] = 0.0f;
+            } else {
+                dst[0] = src[0]; dst[1] = src[3]; dst[2] = src[6]; dst[3] = 0.0f;
+                dst[4] = src[1]; dst[5] = src[4]; dst[6] = src[7]; dst[7] = 0.0f;
+                dst[8] = src[2]; dst[9] = src[5]; dst[10] = src[8]; dst[11] = 0.0f;
+            }
+        }
+        packed->dirty = true;
+        SGL_TRACE_UNIFORM("glUniformMatrix3fv(packed loc=0x%X, count=%d)", location, count);
+        return;
+    }
 
     int stage = (location >> 16) & 0xFFFF;
     int binding = location & 0xFFFF;
@@ -567,10 +753,36 @@ GL_APICALL void GL_APIENTRY glUniformMatrix3fv(GLint location, GLsizei count, GL
 GL_APICALL void GL_APIENTRY glUniformMatrix4fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx || !ctx->backend) return;
-    if (location < 0 || count <= 0 || !value) return;
+    if (location == -1 || count <= 0 || !value) return;
 
     sgl_program_t *prog = GET_PROGRAM(ctx->current_program);
     if (!prog || !prog->linked) return;
+
+    /* Packed mode: write std140 mat4 to shadow buffer */
+    if (location & (1 << 31)) {
+        int stage = (location >> 24) & 0x7F;
+        int binding = (location >> 16) & 0xFF;
+        int offset = location & 0xFFFF;
+        sgl_packed_ubo_t *packed = (stage == 0)
+            ? &prog->packed_vertex[binding]
+            : &prog->packed_fragment[binding];
+        uint32_t dataSize = 64 * count; /* mat4 std140: 4 vec4 = 64 bytes */
+        if (!packed->valid || offset + dataSize > packed->size) return;
+        if (transpose == GL_FALSE) {
+            memcpy(packed->data + offset, value, dataSize);
+        } else {
+            for (GLsizei m = 0; m < count; m++) {
+                const float *src = value + m * 16;
+                float *dst = (float *)(packed->data + offset + m * 64);
+                for (int i = 0; i < 4; i++)
+                    for (int j = 0; j < 4; j++)
+                        dst[i * 4 + j] = src[j * 4 + i];
+            }
+        }
+        packed->dirty = true;
+        SGL_TRACE_UNIFORM("glUniformMatrix4fv(packed loc=0x%X, count=%d)", location, count);
+        return;
+    }
 
     int stage = (location >> 16) & 0xFFFF;
     int binding = location & 0xFFFF;

@@ -377,7 +377,10 @@ void dk_bind_program(sgl_backend_t *be, sgl_handle_t program,
                      sgl_handle_t vertex_shader, sgl_handle_t fragment_shader,
                      const sgl_uniform_binding_t *vertex_uniforms,
                      const sgl_uniform_binding_t *fragment_uniforms,
-                     int max_uniforms);
+                     int max_uniforms,
+                     const sgl_packed_ubo_t *packed_vertex,
+                     const sgl_packed_ubo_t *packed_fragment,
+                     int max_packed_ubos);
 
 /* ============================================================================
  * Texture Operations (dk_texture.c)

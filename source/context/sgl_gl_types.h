@@ -15,10 +15,10 @@
 #define SGL_FB_WIDTH            1280
 #define SGL_FB_HEIGHT           720
 
-#define SGL_CODE_MEM_SIZE       (64 * 1024)
+#define SGL_CODE_MEM_SIZE       (4 * 1024 * 1024)   /* 4MB for precompiled shaders */
 #define SGL_CMD_MEM_SIZE        (1 * 1024 * 1024)  /* 1MB - reset each frame via wait_fence */
 #define SGL_DATA_MEM_SIZE       (16 * 1024 * 1024)
-#define SGL_UNIFORM_BUF_SIZE    (64 * 1024)
+#define SGL_UNIFORM_BUF_SIZE    (256 * 1024)
 #define SGL_UNIFORM_ALIGNMENT   0x100   /* DK_UNIFORM_BUF_ALIGNMENT */
 #define SGL_TEXTURE_MEM_SIZE    (32 * 1024 * 1024)
 #define SGL_DESCRIPTOR_MEM_SIZE (4 * 1024)
@@ -27,14 +27,26 @@
 #define SGL_MAX_SURFACES        4
 #define SGL_MAX_CONTEXTS        4
 #define SGL_MAX_BUFFERS         64
-#define SGL_MAX_SHADERS         32
-#define SGL_MAX_PROGRAMS        16
-#define SGL_MAX_TEXTURES        32
+#define SGL_MAX_SHADERS         1024
+#define SGL_MAX_PROGRAMS        512
+#define SGL_MAX_TEXTURES        64
 #define SGL_MAX_FRAMEBUFFERS    8
 #define SGL_MAX_RENDERBUFFERS   8
-#define SGL_MAX_ATTRIBS         8
-#define SGL_MAX_UNIFORMS        8
+#define SGL_MAX_ATTRIBS         17
+#define SGL_MAX_UNIFORMS        16
 #define SGL_MAX_TEXTURE_UNITS   8
+
+/* Packed UBO configuration */
+#define SGL_MAX_PACKED_UBO_SIZE  8192  /* Max bytes per packed UBO (supports 128 bones) */
+#define SGL_MAX_PACKED_UBOS      2     /* Per stage: 0=main, 1=bones */
+
+/* Packed UBO shadow buffer (CPU-side, flushed to GPU at draw time) */
+typedef struct sgl_packed_ubo {
+    uint8_t data[SGL_MAX_PACKED_UBO_SIZE];  /* CPU shadow buffer */
+    uint32_t size;       /* Total used size (set at registration time) */
+    bool dirty;          /* Any uniform written since last bind? */
+    bool valid;          /* Has been configured? */
+} sgl_packed_ubo_t;
 
 /* Buffer object */
 typedef struct sgl_buffer {
@@ -75,6 +87,9 @@ typedef struct sgl_program {
     uint32_t backend_handle;
     sgl_uniform_binding_t vertex_uniforms[SGL_MAX_UNIFORMS];
     sgl_uniform_binding_t fragment_uniforms[SGL_MAX_UNIFORMS];
+    /* Packed UBO shadow buffers (per-stage, per-binding) */
+    sgl_packed_ubo_t packed_vertex[SGL_MAX_PACKED_UBOS];
+    sgl_packed_ubo_t packed_fragment[SGL_MAX_PACKED_UBOS];
 } sgl_program_t;
 
 /* Texture object */

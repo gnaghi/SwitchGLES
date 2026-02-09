@@ -13,6 +13,7 @@
 typedef struct sgl_backend_ops sgl_backend_ops_t;
 typedef struct sgl_uniform_binding sgl_uniform_binding_t;
 typedef struct sgl_vertex_attrib sgl_vertex_attrib_t;
+typedef struct sgl_packed_ubo sgl_packed_ubo_t;
 
 /* Backend interface */
 struct sgl_backend_ops {
@@ -107,7 +108,10 @@ struct sgl_backend_ops {
                          sgl_handle_t vertex_shader, sgl_handle_t fragment_shader,
                          const sgl_uniform_binding_t *vertex_uniforms,
                          const sgl_uniform_binding_t *fragment_uniforms,
-                         int max_uniforms);
+                         int max_uniforms,
+                         const sgl_packed_ubo_t *packed_vertex,
+                         const sgl_packed_ubo_t *packed_fragment,
+                         int max_packed_ubos);
 
     /* ======== Uniform Operations ======== */
     /* Write uniform data to CPU buffer (backend handles offset allocation) */

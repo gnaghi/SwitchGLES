@@ -100,23 +100,21 @@ examples: library
 install: library
 	@echo "Installing SwitchGLES to $(DEVKITPRO)/portlibs/switch..."
 	@mkdir -p $(DEVKITPRO)/portlibs/switch/lib
-	@mkdir -p $(DEVKITPRO)/portlibs/switch/include/EGL
-	@mkdir -p $(DEVKITPRO)/portlibs/switch/include/GLES2
-	@mkdir -p $(DEVKITPRO)/portlibs/switch/include/KHR
+	@mkdir -p $(DEVKITPRO)/portlibs/switch/include/switchgles/EGL
+	@mkdir -p $(DEVKITPRO)/portlibs/switch/include/switchgles/GLES2
+	@mkdir -p $(DEVKITPRO)/portlibs/switch/include/switchgles/KHR
 	@cp lib/libSwitchGLES.a $(DEVKITPRO)/portlibs/switch/lib/
-	@cp include/EGL/*.h $(DEVKITPRO)/portlibs/switch/include/EGL/
-	@cp include/GLES2/*.h $(DEVKITPRO)/portlibs/switch/include/GLES2/
-	@cp include/KHR/*.h $(DEVKITPRO)/portlibs/switch/include/KHR/
+	@cp include/EGL/*.h $(DEVKITPRO)/portlibs/switch/include/switchgles/EGL/
+	@cp include/GLES2/*.h $(DEVKITPRO)/portlibs/switch/include/switchgles/GLES2/
+	@cp include/KHR/*.h $(DEVKITPRO)/portlibs/switch/include/switchgles/KHR/
 	@echo "SwitchGLES installed successfully!"
 	@echo "  Library: $(DEVKITPRO)/portlibs/switch/lib/libSwitchGLES.a"
-	@echo "  Headers: $(DEVKITPRO)/portlibs/switch/include/{EGL,GLES2,KHR}/"
+	@echo "  Headers: $(DEVKITPRO)/portlibs/switch/include/switchgles/{EGL,GLES2,KHR}/"
 
 uninstall:
 	@echo "Uninstalling SwitchGLES from $(DEVKITPRO)/portlibs/switch..."
 	@rm -f $(DEVKITPRO)/portlibs/switch/lib/libSwitchGLES.a
-	@rm -rf $(DEVKITPRO)/portlibs/switch/include/EGL
-	@rm -rf $(DEVKITPRO)/portlibs/switch/include/GLES2
-	@rm -rf $(DEVKITPRO)/portlibs/switch/include/KHR
+	@rm -rf $(DEVKITPRO)/portlibs/switch/include/switchgles
 	@echo "SwitchGLES uninstalled."
 
 clean:

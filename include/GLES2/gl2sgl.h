@@ -69,6 +69,48 @@ GL_APICALL GLboolean GL_APIENTRY sglRegisterUniform(const GLchar *name, GLint st
 GL_APICALL void GL_APIENTRY sglClearUniformRegistry(void);
 
 /*
+ * sglRegisterPackedUniform - Register a uniform into a packed UBO
+ *
+ * Instead of each uniform occupying a separate 256-byte UBO binding,
+ * packed uniforms share a single UBO binding at specific byte offsets.
+ * This allows far more uniforms per shader stage (limited only by
+ * buffer size, not by the 16-binding hardware limit).
+ *
+ * Parameters:
+ *   name        - The uniform name as used in glGetUniformLocation()
+ *   stage       - SGL_STAGE_VERTEX (0) or SGL_STAGE_FRAGMENT (1)
+ *   binding     - Packed UBO index (0=main, 1=bones)
+ *   byte_offset - std140 byte offset within the packed buffer
+ *
+ * Returns:
+ *   GL_TRUE on success, GL_FALSE on failure
+ *
+ * The location returned by glGetUniformLocation() will encode:
+ *   bit 31 = 1 (packed mode flag)
+ *   bits 24-30 = stage
+ *   bits 16-23 = binding
+ *   bits 0-15  = byte_offset
+ */
+GL_APICALL GLboolean GL_APIENTRY sglRegisterPackedUniform(const GLchar *name,
+                                                           GLint stage,
+                                                           GLint binding,
+                                                           GLint byte_offset);
+
+/*
+ * sglSetPackedUBOSize - Set the total size of a packed UBO binding
+ *
+ * Must be called before any sglRegisterPackedUniform calls for this
+ * stage/binding combination. Sets how many bytes the packed UBO uses.
+ *
+ * Parameters:
+ *   stage   - SGL_STAGE_VERTEX (0) or SGL_STAGE_FRAGMENT (1)
+ *   binding - Packed UBO index (0=main, 1=bones)
+ *   size    - Total size in bytes (max SGL_MAX_PACKED_UBO_SIZE)
+ */
+GL_APICALL void GL_APIENTRY sglSetPackedUBOSize(GLint stage, GLint binding,
+                                                  GLint size);
+
+/*
  * sgl_load_shader_from_file - Load a precompiled deko3d shader from file
  *
  * Parameters:

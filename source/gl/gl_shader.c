@@ -298,7 +298,10 @@ bool sgl_bind_program_for_draw(sgl_context_t *ctx, GLuint program_id) {
                                         prog->fragment_shader,
                                         prog->vertex_uniforms,
                                         prog->fragment_uniforms,
-                                        SGL_MAX_UNIFORMS);
+                                        SGL_MAX_UNIFORMS,
+                                        prog->packed_vertex,
+                                        prog->packed_fragment,
+                                        SGL_MAX_PACKED_UBOS);
     }
 
     return true;
