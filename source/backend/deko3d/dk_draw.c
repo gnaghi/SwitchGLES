@@ -63,18 +63,63 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
     uintptr_t bufferClientPtrs[SGL_MAX_ATTRIBS];
     memset(bufferClientPtrs, 0, sizeof(bufferClientPtrs));
 
+    /*
+     * Shared constant buffer for disabled attributes.
+     * Allocates one buffer slot for ALL disabled attributes, with stride=0
+     * so every vertex reads the same constant value per attribute.
+     */
+    int constBufSlot = -1;
+    uint32_t constBufOffset = 0;  /* offset within constant buffer */
+
     /* Build attribute and buffer states */
     for (int i = 0; i < numAttribs; i++) {
         const sgl_vertex_attrib_t *attr = &attribs[i];
 
         if (!attr->enabled) {
-            /* Disabled attribute - use fixed value like legacy */
-            attribStates[i].bufferId = 0;
-            attribStates[i].isFixed = 1;
-            attribStates[i].offset = 0;
-            attribStates[i].size = DkVtxAttribSize_1x32;
+            /* Disabled attribute - use constant value from glVertexAttrib*f */
+            if (constBufSlot < 0) {
+                /* First disabled attribute: allocate shared constant buffer */
+                uint32_t alignedOff = (dk->client_array_offset + 255) & ~255;
+                uint32_t totalSize = numAttribs * 16; /* worst case: all disabled */
+                uint32_t clientAddr = dk->client_array_base + alignedOff;
+
+                if (alignedOff + totalSize <= dk->client_array_slot_end) {
+                    constBufSlot = numBuffers;
+                    boundBuffers[numBuffers] = 0xFFFFFFFF; /* marker for constant buffer */
+                    bufferStates[numBuffers].stride = 0;  /* same value for all vertices */
+                    bufferStates[numBuffers].divisor = 0;
+                    bufferExtents[numBuffers].addr = data_gpu_base + clientAddr;
+                    bufferExtents[numBuffers].size = totalSize;
+                    dk->client_array_offset = alignedOff + totalSize;
+                    numBuffers++;
+                } else {
+                    /* Fallback: use isFixed if out of memory */
+                    attribStates[i].bufferId = 0;
+                    attribStates[i].isFixed = 1;
+                    attribStates[i].offset = 0;
+                    attribStates[i].size = DkVtxAttribSize_1x32;
+                    attribStates[i].type = DkVtxAttribType_Float;
+                    attribStates[i].isBgra = 0;
+                    continue;
+                }
+            }
+
+            /* Write constant value (vec4) to the shared buffer */
+            uint32_t writeAddr = (uint32_t)(bufferExtents[constBufSlot].addr - data_gpu_base) + constBufOffset;
+            float *dst = (float *)(data_cpu_base + writeAddr);
+            dst[0] = attr->current_value[0];
+            dst[1] = attr->current_value[1];
+            dst[2] = attr->current_value[2];
+            dst[3] = attr->current_value[3];
+
+            attribStates[i].bufferId = (uint32_t)constBufSlot;
+            attribStates[i].isFixed = 0;
+            attribStates[i].offset = constBufOffset;
+            attribStates[i].size = DkVtxAttribSize_4x32;
             attribStates[i].type = DkVtxAttribType_Float;
             attribStates[i].isBgra = 0;
+
+            constBufOffset += 16;
             continue;
         }
 

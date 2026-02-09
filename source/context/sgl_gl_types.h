@@ -26,10 +26,10 @@
 /* Maximum resources */
 #define SGL_MAX_SURFACES        4
 #define SGL_MAX_CONTEXTS        4
-#define SGL_MAX_BUFFERS         64
+#define SGL_MAX_BUFFERS         256
 #define SGL_MAX_SHADERS         1024
 #define SGL_MAX_PROGRAMS        512
-#define SGL_MAX_TEXTURES        64
+#define SGL_MAX_TEXTURES        256
 #define SGL_MAX_FRAMEBUFFERS    8
 #define SGL_MAX_RENDERBUFFERS   8
 #define SGL_MAX_ATTRIBS         17
@@ -114,6 +114,8 @@ typedef struct sgl_framebuffer {
     GLuint stencil_attachment;  /* Renderbuffer ID or 0 */
     uint32_t backend_handle;
     bool is_complete;
+    bool depth_is_renderbuffer;   /* true if depth_attachment is a renderbuffer */
+    bool stencil_is_renderbuffer; /* true if stencil_attachment is a renderbuffer */
 } sgl_framebuffer_t;
 
 /* Renderbuffer object */
@@ -134,6 +136,7 @@ typedef struct sgl_vertex_attrib {
     const void *pointer;
     GLuint buffer;  /* Bound VBO or 0 for client array */
     uint32_t buffer_offset;  /* GPU buffer offset (computed before draw) */
+    GLfloat current_value[4]; /* Constant value when array is disabled (default: 0,0,0,1) */
 } sgl_vertex_attrib_t;
 
 #endif /* SGL_GL_TYPES_H */

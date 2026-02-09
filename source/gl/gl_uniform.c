@@ -354,7 +354,7 @@ GL_APICALL void GL_APIENTRY glGetUniformiv(GLuint program, GLint location, GLint
  * use the same address, later draws overwrite earlier ones before the
  * GPU executes them.
  */
-static void set_float_uniform(GLint location, int num_components, const GLfloat *values) {
+static void set_float_uniform(GLint location, int num_components, GLsizei count, const GLfloat *values) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx || !ctx->backend) return;
     if (location == -1) return;
@@ -372,11 +372,23 @@ static void set_float_uniform(GLint location, int num_components, const GLfloat 
             ? &prog->packed_vertex[binding]
             : &prog->packed_fragment[binding];
 
-        /* Write exact bytes: num_components * sizeof(float) */
-        uint32_t dataSize = num_components * sizeof(float);
-        if (!packed->valid || offset + dataSize > packed->size) return;
-
-        memcpy(packed->data + offset, values, dataSize);
+        if (count == 1) {
+            /* Single element: write exact bytes (no array padding) */
+            uint32_t dataSize = num_components * sizeof(float);
+            if (!packed->valid || offset + dataSize > packed->size) return;
+            memcpy(packed->data + offset, values, dataSize);
+        } else {
+            /* Array: each element padded to vec4 (16 bytes) in std140 */
+            uint32_t totalSize = count * 16;
+            if (!packed->valid || offset + totalSize > packed->size) return;
+            for (GLsizei e = 0; e < count; e++) {
+                float elem[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                for (int j = 0; j < num_components && j < 4; j++) {
+                    elem[j] = values[e * num_components + j];
+                }
+                memcpy(packed->data + offset + e * 16, elem, 16);
+            }
+        }
         packed->dirty = true;
         return;
     }
@@ -389,8 +401,8 @@ static void set_float_uniform(GLint location, int num_components, const GLfloat 
     sgl_uniform_binding_t *uniforms = (stage == 0) ? prog->vertex_uniforms : prog->fragment_uniforms;
     sgl_uniform_binding_t *ub = &uniforms[binding];
 
-    /* std140: all uniforms padded to 16 bytes */
-    uint32_t dataSize = 16;
+    /* std140: each array element padded to 16 bytes (vec4) */
+    uint32_t dataSize = count * 16;
     uint32_t alignedSize = (dataSize + SGL_UNIFORM_ALIGNMENT - 1) & ~(SGL_UNIFORM_ALIGNMENT - 1);
 
     /* ALWAYS allocate a new offset for each uniform write.
@@ -403,13 +415,17 @@ static void set_float_uniform(GLint location, int num_components, const GLfloat 
         ub->valid = true;
     }
 
-    /* Write data via backend - pad to vec4 */
+    /* Write data via backend - pad each element to vec4 */
     if (ub->valid && ctx->backend->ops->write_uniform) {
-        float data[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-        for (int i = 0; i < num_components && i < 4; i++) {
-            data[i] = values[i];
+        float array_data[4 * 64]; /* support up to 64 elements on stack */
+        GLsizei clampedCount = count > 64 ? 64 : count;
+        memset(array_data, 0, clampedCount * 16);
+        for (GLsizei e = 0; e < clampedCount; e++) {
+            for (int j = 0; j < num_components && j < 4; j++) {
+                array_data[e * 4 + j] = values[e * num_components + j];
+            }
         }
-        ctx->backend->ops->write_uniform(ctx->backend, ub->offset, data, dataSize);
+        ctx->backend->ops->write_uniform(ctx->backend, ub->offset, array_data, clampedCount * 16);
     }
 
     ub->dirty = true;
@@ -417,25 +433,25 @@ static void set_float_uniform(GLint location, int num_components, const GLfloat 
 
 GL_APICALL void GL_APIENTRY glUniform1f(GLint location, GLfloat v0) {
     GLfloat values[1] = { v0 };
-    set_float_uniform(location, 1, values);
+    set_float_uniform(location, 1, 1, values);
     SGL_TRACE_UNIFORM("glUniform1f(loc=%d, %.2f)", location, v0);
 }
 
 GL_APICALL void GL_APIENTRY glUniform2f(GLint location, GLfloat v0, GLfloat v1) {
     GLfloat values[2] = { v0, v1 };
-    set_float_uniform(location, 2, values);
+    set_float_uniform(location, 2, 1, values);
     SGL_TRACE_UNIFORM("glUniform2f(loc=%d, %.2f, %.2f)", location, v0, v1);
 }
 
 GL_APICALL void GL_APIENTRY glUniform3f(GLint location, GLfloat v0, GLfloat v1, GLfloat v2) {
     GLfloat values[3] = { v0, v1, v2 };
-    set_float_uniform(location, 3, values);
+    set_float_uniform(location, 3, 1, values);
     SGL_TRACE_UNIFORM("glUniform3f(loc=%d, %.2f, %.2f, %.2f)", location, v0, v1, v2);
 }
 
 GL_APICALL void GL_APIENTRY glUniform4f(GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3) {
     GLfloat values[4] = { v0, v1, v2, v3 };
-    set_float_uniform(location, 4, values);
+    set_float_uniform(location, 4, 1, values);
     SGL_TRACE_UNIFORM("glUniform4f(loc=%d, %.2f, %.2f, %.2f, %.2f)", location, v0, v1, v2, v3);
 }
 
@@ -447,7 +463,7 @@ GL_APICALL void GL_APIENTRY glUniform4f(GLint location, GLfloat v0, GLfloat v1, 
  * IMPORTANT: We allocate a NEW offset for each glUniform call to avoid
  * data races when multiple draws use different values in the same frame.
  */
-static void set_int_uniform(GLint location, int num_components, const GLint *values) {
+static void set_int_uniform(GLint location, int num_components, GLsizei count, const GLint *values) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx || !ctx->backend) return;
     if (location == -1) return;
@@ -465,11 +481,23 @@ static void set_int_uniform(GLint location, int num_components, const GLint *val
             ? &prog->packed_vertex[binding]
             : &prog->packed_fragment[binding];
 
-        /* Write exact bytes: num_components * sizeof(int32_t) */
-        uint32_t dataSize = num_components * sizeof(int32_t);
-        if (!packed->valid || offset + dataSize > packed->size) return;
-
-        memcpy(packed->data + offset, values, dataSize);
+        if (count == 1) {
+            /* Single element: write exact bytes (no array padding) */
+            uint32_t dataSize = num_components * sizeof(int32_t);
+            if (!packed->valid || offset + dataSize > packed->size) return;
+            memcpy(packed->data + offset, values, dataSize);
+        } else {
+            /* Array: each element padded to ivec4 (16 bytes) in std140 */
+            uint32_t totalSize = count * 16;
+            if (!packed->valid || offset + totalSize > packed->size) return;
+            for (GLsizei e = 0; e < count; e++) {
+                int32_t elem[4] = { 0, 0, 0, 0 };
+                for (int j = 0; j < num_components && j < 4; j++) {
+                    elem[j] = values[e * num_components + j];
+                }
+                memcpy(packed->data + offset + e * 16, elem, 16);
+            }
+        }
         packed->dirty = true;
         return;
     }
@@ -482,8 +510,8 @@ static void set_int_uniform(GLint location, int num_components, const GLint *val
     sgl_uniform_binding_t *uniforms = (stage == 0) ? prog->vertex_uniforms : prog->fragment_uniforms;
     sgl_uniform_binding_t *ub = &uniforms[binding];
 
-    /* std140: all uniforms padded to 16 bytes */
-    uint32_t dataSize = 16;
+    /* std140: each array element padded to 16 bytes (ivec4) */
+    uint32_t dataSize = count * 16;
     uint32_t alignedSize = (dataSize + SGL_UNIFORM_ALIGNMENT - 1) & ~(SGL_UNIFORM_ALIGNMENT - 1);
 
     /* ALWAYS allocate new offset to avoid data races between draws */
@@ -494,13 +522,17 @@ static void set_int_uniform(GLint location, int num_components, const GLint *val
         ub->valid = true;
     }
 
-    /* Write data via backend - pad to ivec4 */
+    /* Write data via backend - pad each element to ivec4 */
     if (ub->valid && ctx->backend->ops->write_uniform) {
-        int32_t data[4] = { 0, 0, 0, 0 };
-        for (int i = 0; i < num_components && i < 4; i++) {
-            data[i] = values[i];
+        int32_t array_data[4 * 64]; /* support up to 64 elements on stack */
+        GLsizei clampedCount = count > 64 ? 64 : count;
+        memset(array_data, 0, clampedCount * 16);
+        for (GLsizei e = 0; e < clampedCount; e++) {
+            for (int j = 0; j < num_components && j < 4; j++) {
+                array_data[e * 4 + j] = values[e * num_components + j];
+            }
         }
-        ctx->backend->ops->write_uniform(ctx->backend, ub->offset, data, dataSize);
+        ctx->backend->ops->write_uniform(ctx->backend, ub->offset, array_data, clampedCount * 16);
     }
 
     ub->dirty = true;
@@ -508,76 +540,75 @@ static void set_int_uniform(GLint location, int num_components, const GLint *val
 
 GL_APICALL void GL_APIENTRY glUniform1i(GLint location, GLint v0) {
     GLint values[1] = { v0 };
-    set_int_uniform(location, 1, values);
+    set_int_uniform(location, 1, 1, values);
     SGL_TRACE_UNIFORM("glUniform1i(loc=%d, %d)", location, v0);
 }
 
 GL_APICALL void GL_APIENTRY glUniform2i(GLint location, GLint v0, GLint v1) {
     GLint values[2] = { v0, v1 };
-    set_int_uniform(location, 2, values);
+    set_int_uniform(location, 2, 1, values);
     SGL_TRACE_UNIFORM("glUniform2i(loc=%d, %d, %d)", location, v0, v1);
 }
 
 GL_APICALL void GL_APIENTRY glUniform3i(GLint location, GLint v0, GLint v1, GLint v2) {
     GLint values[3] = { v0, v1, v2 };
-    set_int_uniform(location, 3, values);
+    set_int_uniform(location, 3, 1, values);
     SGL_TRACE_UNIFORM("glUniform3i(loc=%d, %d, %d, %d)", location, v0, v1, v2);
 }
 
 GL_APICALL void GL_APIENTRY glUniform4i(GLint location, GLint v0, GLint v1, GLint v2, GLint v3) {
     GLint values[4] = { v0, v1, v2, v3 };
-    set_int_uniform(location, 4, values);
+    set_int_uniform(location, 4, 1, values);
     SGL_TRACE_UNIFORM("glUniform4i(loc=%d, %d, %d, %d, %d)", location, v0, v1, v2, v3);
 }
 
-/* Vector variants (fv) */
+/* Vector variants (fv) - support count>1 for uniform arrays */
 GL_APICALL void GL_APIENTRY glUniform1fv(GLint location, GLsizei count, const GLfloat *value) {
     if (count <= 0 || !value) return;
-    /* For arrays, we only support count=1 for now (single uniform) */
-    set_float_uniform(location, 1, value);
+    set_float_uniform(location, 1, count, value);
     SGL_TRACE_UNIFORM("glUniform1fv(loc=%d, count=%d)", location, count);
 }
 
 GL_APICALL void GL_APIENTRY glUniform2fv(GLint location, GLsizei count, const GLfloat *value) {
     if (count <= 0 || !value) return;
-    set_float_uniform(location, 2, value);
+    set_float_uniform(location, 2, count, value);
     SGL_TRACE_UNIFORM("glUniform2fv(loc=%d, count=%d)", location, count);
 }
 
 GL_APICALL void GL_APIENTRY glUniform3fv(GLint location, GLsizei count, const GLfloat *value) {
     if (count <= 0 || !value) return;
-    set_float_uniform(location, 3, value);
+    set_float_uniform(location, 3, count, value);
     SGL_TRACE_UNIFORM("glUniform3fv(loc=%d, count=%d)", location, count);
 }
 
 GL_APICALL void GL_APIENTRY glUniform4fv(GLint location, GLsizei count, const GLfloat *value) {
     if (count <= 0 || !value) return;
-    set_float_uniform(location, 4, value);
+    set_float_uniform(location, 4, count, value);
     SGL_TRACE_UNIFORM("glUniform4fv(loc=%d, count=%d)", location, count);
 }
 
-/* Vector variants (iv) */
+/* Vector variants (iv) - support count>1 for uniform arrays */
 GL_APICALL void GL_APIENTRY glUniform1iv(GLint location, GLsizei count, const GLint *value) {
     if (count <= 0 || !value) return;
-    set_int_uniform(location, 1, value);
+    set_int_uniform(location, 1, count, value);
     SGL_TRACE_UNIFORM("glUniform1iv(loc=%d, count=%d)", location, count);
 }
 
 GL_APICALL void GL_APIENTRY glUniform2iv(GLint location, GLsizei count, const GLint *value) {
     if (count <= 0 || !value) return;
-    set_int_uniform(location, 2, value);
+    set_int_uniform(location, 2, count, value);
     SGL_TRACE_UNIFORM("glUniform2iv(loc=%d, count=%d)", location, count);
 }
 
 GL_APICALL void GL_APIENTRY glUniform3iv(GLint location, GLsizei count, const GLint *value) {
     if (count <= 0 || !value) return;
-    set_int_uniform(location, 3, value);
+    set_int_uniform(location, 3, count, value);
     SGL_TRACE_UNIFORM("glUniform3iv(loc=%d, count=%d)", location, count);
 }
 
 GL_APICALL void GL_APIENTRY glUniform4iv(GLint location, GLsizei count, const GLint *value) {
     if (count <= 0 || !value) return;
-    set_int_uniform(location, 4, value);
+    set_int_uniform(location, 4, count, value);
     SGL_TRACE_UNIFORM("glUniform4iv(loc=%d, count=%d)", location, count);
 }
 

@@ -547,6 +547,15 @@ EGLAPI EGLSurface EGLAPIENTRY eglCreateWindowSurface(EGLDisplay dpy, EGLConfig c
 
             if (surf->depthbuffer_memblocks[i]) {
                 dkImageInitialize(&surf->depthbuffers[i], &depthLayout, surf->depthbuffer_memblocks[i], 0);
+            } else {
+                /* Cleanup previously allocated depth buffers and framebuffer */
+                for (int j = 0; j < i; j++) {
+                    if (surf->depthbuffer_memblocks[j]) dkMemBlockDestroy(surf->depthbuffer_memblocks[j]);
+                }
+                dkMemBlockDestroy(surf->framebuffer_memblock);
+                memset(surf, 0, sizeof(sgl_surface));
+                sgl_egl_set_error(EGL_BAD_ALLOC);
+                return EGL_NO_SURFACE;
             }
         }
     }

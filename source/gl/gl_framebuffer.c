@@ -131,6 +131,7 @@ GL_APICALL void GL_APIENTRY glFramebufferTexture2D(GLenum target, GLenum attachm
             break;
         case GL_DEPTH_ATTACHMENT:
             fbo->depth_attachment = texture;
+            fbo->depth_is_renderbuffer = false;  /* texture attachment */
             /* Re-bind to update depth attachment */
             if (ctx->backend && ctx->backend->ops->bind_framebuffer && fbo->color_attachment) {
                 ctx->backend->ops->bind_framebuffer(ctx->backend, ctx->bound_framebuffer,
@@ -139,6 +140,7 @@ GL_APICALL void GL_APIENTRY glFramebufferTexture2D(GLenum target, GLenum attachm
             break;
         case GL_STENCIL_ATTACHMENT:
             fbo->stencil_attachment = texture;
+            fbo->stencil_is_renderbuffer = false;  /* texture attachment */
             break;
         default:
             sgl_set_error(ctx, GL_INVALID_ENUM);
@@ -204,6 +206,7 @@ GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer(GLenum target, GLenum atta
     switch (attachment) {
         case GL_DEPTH_ATTACHMENT:
             fbo->depth_attachment = renderbuffer;
+            fbo->depth_is_renderbuffer = true;
             /* Re-bind to update depth attachment */
             if (ctx->backend && ctx->backend->ops->bind_framebuffer && fbo->color_attachment) {
                 ctx->backend->ops->bind_framebuffer(ctx->backend, ctx->bound_framebuffer,
@@ -212,10 +215,13 @@ GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer(GLenum target, GLenum atta
             break;
         case GL_STENCIL_ATTACHMENT:
             fbo->stencil_attachment = renderbuffer;
+            fbo->stencil_is_renderbuffer = true;
             break;
         case GL_DEPTH_STENCIL_ATTACHMENT:
             fbo->depth_attachment = renderbuffer;
             fbo->stencil_attachment = renderbuffer;
+            fbo->depth_is_renderbuffer = true;
+            fbo->stencil_is_renderbuffer = true;
             /* Re-bind to update depth attachment */
             if (ctx->backend && ctx->backend->ops->bind_framebuffer && fbo->color_attachment) {
                 ctx->backend->ops->bind_framebuffer(ctx->backend, ctx->bound_framebuffer,
@@ -266,12 +272,23 @@ GL_APICALL void GL_APIENTRY glGetFramebufferAttachmentParameteriv(GLenum target,
             return;
     }
 
+    /* Determine if this attachment is a renderbuffer */
+    bool is_renderbuffer = false;
+    if (attachment == GL_DEPTH_ATTACHMENT) {
+        is_renderbuffer = fbo->depth_is_renderbuffer;
+    } else if (attachment == GL_STENCIL_ATTACHMENT) {
+        is_renderbuffer = fbo->stencil_is_renderbuffer;
+    }
+    /* GL_COLOR_ATTACHMENT0 is always a texture in our implementation */
+
     switch (pname) {
         case GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE:
             if (obj == 0) {
                 *params = GL_NONE;
+            } else if (is_renderbuffer) {
+                *params = GL_RENDERBUFFER;
             } else {
-                *params = GL_TEXTURE;  /* We only support texture attachments */
+                *params = GL_TEXTURE;
             }
             break;
         case GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME:

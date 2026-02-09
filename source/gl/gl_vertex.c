@@ -65,24 +65,156 @@ GL_APICALL void GL_APIENTRY glVertexAttribPointer(GLuint index, GLint size, GLen
 }
 
 GL_APICALL void GL_APIENTRY glGetVertexAttribfv(GLuint index, GLenum pname, GLfloat *params) {
-    (void)index; (void)pname; (void)params;
+    GET_CTX();
+
+    if (index >= SGL_MAX_ATTRIBS || !params) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    const sgl_vertex_attrib_t *attr = &ctx->vertex_attribs[index];
+
+    switch (pname) {
+        case GL_VERTEX_ATTRIB_ARRAY_ENABLED:
+            *params = attr->enabled ? 1.0f : 0.0f;
+            break;
+        case GL_VERTEX_ATTRIB_ARRAY_SIZE:
+            *params = (GLfloat)attr->size;
+            break;
+        case GL_VERTEX_ATTRIB_ARRAY_STRIDE:
+            *params = (GLfloat)attr->stride;
+            break;
+        case GL_VERTEX_ATTRIB_ARRAY_TYPE:
+            *params = (GLfloat)attr->type;
+            break;
+        case GL_VERTEX_ATTRIB_ARRAY_NORMALIZED:
+            *params = attr->normalized ? 1.0f : 0.0f;
+            break;
+        case GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING:
+            *params = (GLfloat)attr->buffer;
+            break;
+        case GL_CURRENT_VERTEX_ATTRIB:
+            params[0] = attr->current_value[0];
+            params[1] = attr->current_value[1];
+            params[2] = attr->current_value[2];
+            params[3] = attr->current_value[3];
+            break;
+        default:
+            sgl_set_error(ctx, GL_INVALID_ENUM);
+            break;
+    }
 }
 
 GL_APICALL void GL_APIENTRY glGetVertexAttribiv(GLuint index, GLenum pname, GLint *params) {
-    (void)index; (void)pname; (void)params;
+    GET_CTX();
+
+    if (index >= SGL_MAX_ATTRIBS || !params) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    const sgl_vertex_attrib_t *attr = &ctx->vertex_attribs[index];
+
+    switch (pname) {
+        case GL_VERTEX_ATTRIB_ARRAY_ENABLED:
+            *params = attr->enabled ? 1 : 0;
+            break;
+        case GL_VERTEX_ATTRIB_ARRAY_SIZE:
+            *params = attr->size;
+            break;
+        case GL_VERTEX_ATTRIB_ARRAY_STRIDE:
+            *params = attr->stride;
+            break;
+        case GL_VERTEX_ATTRIB_ARRAY_TYPE:
+            *params = (GLint)attr->type;
+            break;
+        case GL_VERTEX_ATTRIB_ARRAY_NORMALIZED:
+            *params = attr->normalized ? 1 : 0;
+            break;
+        case GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING:
+            *params = (GLint)attr->buffer;
+            break;
+        case GL_CURRENT_VERTEX_ATTRIB:
+            params[0] = (GLint)attr->current_value[0];
+            params[1] = (GLint)attr->current_value[1];
+            params[2] = (GLint)attr->current_value[2];
+            params[3] = (GLint)attr->current_value[3];
+            break;
+        default:
+            sgl_set_error(ctx, GL_INVALID_ENUM);
+            break;
+    }
 }
 
 GL_APICALL void GL_APIENTRY glGetVertexAttribPointerv(GLuint index, GLenum pname, void **pointer) {
-    (void)index; (void)pname; (void)pointer;
+    GET_CTX();
+
+    if (index >= SGL_MAX_ATTRIBS || !pointer) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    if (pname != GL_VERTEX_ATTRIB_ARRAY_POINTER) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
+
+    *pointer = (void *)ctx->vertex_attribs[index].pointer;
 }
 
-/* Vertex Attrib Constant Values (stubs) */
-GL_APICALL void GL_APIENTRY glVertexAttrib1f(GLuint index, GLfloat x) { (void)index; (void)x; }
-GL_APICALL void GL_APIENTRY glVertexAttrib2f(GLuint index, GLfloat x, GLfloat y) { (void)index; (void)x; (void)y; }
-GL_APICALL void GL_APIENTRY glVertexAttrib3f(GLuint index, GLfloat x, GLfloat y, GLfloat z) { (void)index; (void)x; (void)y; (void)z; }
-GL_APICALL void GL_APIENTRY glVertexAttrib4f(GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w) { (void)index; (void)x; (void)y; (void)z; (void)w; }
+/* Vertex Attrib Constant Values */
+GL_APICALL void GL_APIENTRY glVertexAttrib1f(GLuint index, GLfloat x) {
+    GET_CTX();
+    if (index >= SGL_MAX_ATTRIBS) { sgl_set_error(ctx, GL_INVALID_VALUE); return; }
+    ctx->vertex_attribs[index].current_value[0] = x;
+    ctx->vertex_attribs[index].current_value[1] = 0.0f;
+    ctx->vertex_attribs[index].current_value[2] = 0.0f;
+    ctx->vertex_attribs[index].current_value[3] = 1.0f;
+}
 
-GL_APICALL void GL_APIENTRY glVertexAttrib1fv(GLuint index, const GLfloat *v) { (void)index; (void)v; }
-GL_APICALL void GL_APIENTRY glVertexAttrib2fv(GLuint index, const GLfloat *v) { (void)index; (void)v; }
-GL_APICALL void GL_APIENTRY glVertexAttrib3fv(GLuint index, const GLfloat *v) { (void)index; (void)v; }
-GL_APICALL void GL_APIENTRY glVertexAttrib4fv(GLuint index, const GLfloat *v) { (void)index; (void)v; }
+GL_APICALL void GL_APIENTRY glVertexAttrib2f(GLuint index, GLfloat x, GLfloat y) {
+    GET_CTX();
+    if (index >= SGL_MAX_ATTRIBS) { sgl_set_error(ctx, GL_INVALID_VALUE); return; }
+    ctx->vertex_attribs[index].current_value[0] = x;
+    ctx->vertex_attribs[index].current_value[1] = y;
+    ctx->vertex_attribs[index].current_value[2] = 0.0f;
+    ctx->vertex_attribs[index].current_value[3] = 1.0f;
+}
+
+GL_APICALL void GL_APIENTRY glVertexAttrib3f(GLuint index, GLfloat x, GLfloat y, GLfloat z) {
+    GET_CTX();
+    if (index >= SGL_MAX_ATTRIBS) { sgl_set_error(ctx, GL_INVALID_VALUE); return; }
+    ctx->vertex_attribs[index].current_value[0] = x;
+    ctx->vertex_attribs[index].current_value[1] = y;
+    ctx->vertex_attribs[index].current_value[2] = z;
+    ctx->vertex_attribs[index].current_value[3] = 1.0f;
+}
+
+GL_APICALL void GL_APIENTRY glVertexAttrib4f(GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w) {
+    GET_CTX();
+    if (index >= SGL_MAX_ATTRIBS) { sgl_set_error(ctx, GL_INVALID_VALUE); return; }
+    ctx->vertex_attribs[index].current_value[0] = x;
+    ctx->vertex_attribs[index].current_value[1] = y;
+    ctx->vertex_attribs[index].current_value[2] = z;
+    ctx->vertex_attribs[index].current_value[3] = w;
+}
+
+GL_APICALL void GL_APIENTRY glVertexAttrib1fv(GLuint index, const GLfloat *v) {
+    if (!v) return;
+    glVertexAttrib1f(index, v[0]);
+}
+
+GL_APICALL void GL_APIENTRY glVertexAttrib2fv(GLuint index, const GLfloat *v) {
+    if (!v) return;
+    glVertexAttrib2f(index, v[0], v[1]);
+}
+
+GL_APICALL void GL_APIENTRY glVertexAttrib3fv(GLuint index, const GLfloat *v) {
+    if (!v) return;
+    glVertexAttrib3f(index, v[0], v[1], v[2]);
+}
+
+GL_APICALL void GL_APIENTRY glVertexAttrib4fv(GLuint index, const GLfloat *v) {
+    if (!v) return;
+    glVertexAttrib4f(index, v[0], v[1], v[2], v[3]);
+}

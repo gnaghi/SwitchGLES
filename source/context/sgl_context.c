@@ -44,6 +44,12 @@ void sgl_context_init(sgl_context_t *ctx) {
         ctx->vertex_attribs[i].stride = 0;
         ctx->vertex_attribs[i].pointer = NULL;
         ctx->vertex_attribs[i].buffer = 0;
+        ctx->vertex_attribs[i].buffer_offset = 0;
+        /* GL spec default: (0, 0, 0, 1) */
+        ctx->vertex_attribs[i].current_value[0] = 0.0f;
+        ctx->vertex_attribs[i].current_value[1] = 0.0f;
+        ctx->vertex_attribs[i].current_value[2] = 0.0f;
+        ctx->vertex_attribs[i].current_value[3] = 1.0f;
     }
 
     /* Pixel store defaults */

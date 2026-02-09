@@ -93,9 +93,4 @@ typedef struct sgl_color_state {
     float clear_color[4];
 } sgl_color_state_t;
 
-/* Maximum constants */
-#define SGL_MAX_VERTEX_ATTRIBS  8
-#define SGL_MAX_TEXTURE_UNITS   8
-#define SGL_MAX_UNIFORMS        8
-
 #endif /* SGL_BACKEND_TYPES_H */
