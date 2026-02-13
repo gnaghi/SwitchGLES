@@ -41,7 +41,7 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
                                     GLenum format, GLenum type, const void *pixels) {
     int face_index = dk_cubemap_face_index(target);
 
-    /* Create cubemap on first face upload */
+    /* Create cubemap GPU image on first face upload (allocates memory for all 6 faces) */
     if (!dk->texture_initialized[handle]) {
         /* Initialize DkImage as cubemap */
         DkImageLayoutMaker layoutMaker;
@@ -71,6 +71,8 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
         dk->texture_offset = aligned_offset + texSize;
         dk->texture_initialized[handle] = true;
         dk->texture_is_cubemap[handle] = true;
+        dk->cubemap_face_mask[handle] = 0;  /* No faces uploaded yet */
+        dk->cubemap_needs_barrier[handle] = false;
 
         dk->texture_width[handle] = width;
         dk->texture_height[handle] = height;
@@ -82,15 +84,11 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
         dk->texture_wrap_s[handle] = GL_CLAMP_TO_EDGE;
         dk->texture_wrap_t[handle] = GL_CLAMP_TO_EDGE;
 
-        /* Create cubemap image descriptor */
-        DkImageView imageView;
-        dkImageViewDefaults(&imageView, texImage);
-        imageView.type = DkImageType_Cubemap;
+        /* NOTE: Descriptor creation is DEFERRED until all 6 faces are uploaded.
+         * This follows the GLOVE pattern where GPU resources are fully initialized
+         * before creating the sampling descriptor. */
 
-        DkImageDescriptor *imgDesc = &dk->texture_descriptors[handle];
-        dkImageDescriptorInitialize(imgDesc, &imageView, false, false);
-
-        SGL_TRACE_TEXTURE("cubemap created handle=%u %dx%d", handle, width, height);
+        SGL_TRACE_TEXTURE("cubemap created handle=%u %dx%d (descriptor deferred)", handle, width, height);
     }
 
     /* Upload face pixels if provided */
@@ -159,6 +157,34 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
         dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
         dk->descriptors_bound = false;
 
+        /* Track this face as uploaded */
+        dk->cubemap_face_mask[handle] |= (1 << face_index);
+
+        SGL_TRACE_TEXTURE("cubemap face %d uploaded handle=%u (mask=0x%02X)",
+                          face_index, handle, dk->cubemap_face_mask[handle]);
+
+        /* GLOVE pattern: Create descriptor only after ALL 6 faces are uploaded.
+         * This ensures the cubemap image is fully populated before creating
+         * the sampling descriptor. */
+        if (dk->cubemap_face_mask[handle] == 0x3F) {
+            /* All 6 faces uploaded - create the cubemap image descriptor now */
+            DkImageView imageView;
+            dkImageViewDefaults(&imageView, texImage);
+            imageView.type = DkImageType_Cubemap;
+
+            DkImageDescriptor *imgDesc = &dk->texture_descriptors[handle];
+            dkImageDescriptorInitialize(imgDesc, &imageView, false, false);
+
+            /* Mark cubemap as needing L2 cache barrier before first sampling.
+             * The DMA copy engine writes directly to DRAM, but the texture sampler
+             * reads through L2 cache. Without invalidation, the sampler may read
+             * stale (zero) data from L2 instead of the freshly DMA'd face data. */
+            dk->cubemap_needs_barrier[handle] = true;
+
+            SGL_TRACE_TEXTURE("cubemap COMPLETE handle=%u - descriptor created, barrier pending",
+                              handle);
+        }
+
         if (dk->framebuffers) {
             DkImageView colorView;
             dkImageViewDefaults(&colorView, &dk->framebuffers[dk->current_slot]);
@@ -170,8 +196,6 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
                 dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, NULL);
             }
         }
-
-        SGL_TRACE_TEXTURE("cubemap face %d uploaded handle=%u", face_index, handle);
     }
 }
 
@@ -499,13 +523,24 @@ void dk_bind_texture(sgl_backend_t *be, GLuint unit, sgl_handle_t handle) {
         return;
     }
 
-    /* Only insert barrier if this texture was used as a render target (FBO).
+    /* Skip binding incomplete cubemaps (not all 6 faces uploaded yet).
+     * The descriptor is only created after all 6 faces, so binding an
+     * incomplete cubemap would push an uninitialized descriptor. */
+    if (dk->texture_is_cubemap[handle] && dk->cubemap_face_mask[handle] != 0x3F) {
+        SGL_TRACE_TEXTURE("bind_texture: skipping incomplete cubemap handle=%u (mask=0x%02X)",
+                          handle, dk->cubemap_face_mask[handle]);
+        return;
+    }
+
+    /* Insert barrier if this texture was used as a render target (FBO)
+     * or if it's a freshly-completed cubemap needing L2 cache coherency.
      * This avoids expensive full barriers on every texture bind when sampling
      * normal textures that were never rendered to. */
-    if (dk->texture_used_as_rt[handle]) {
+    if (dk->texture_used_as_rt[handle] || dk->cubemap_needs_barrier[handle]) {
         dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
                         DkInvalidateFlags_Image | DkInvalidateFlags_Descriptors | DkInvalidateFlags_L2Cache);
         dk->texture_used_as_rt[handle] = false;
+        dk->cubemap_needs_barrier[handle] = false;
     }
 
     /* Bind descriptor block if not already done */

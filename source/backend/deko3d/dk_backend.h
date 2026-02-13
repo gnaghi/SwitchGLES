@@ -76,6 +76,8 @@ typedef struct dk_backend_data {
     bool texture_initialized[SGL_MAX_TEXTURES];
     bool texture_is_cubemap[SGL_MAX_TEXTURES];  /* true if texture is cubemap, false if 2D */
     bool texture_used_as_rt[SGL_MAX_TEXTURES];  /* true if texture was used as FBO render target */
+    uint8_t cubemap_face_mask[SGL_MAX_TEXTURES]; /* bitmask of uploaded cubemap faces (6 bits) */
+    bool cubemap_needs_barrier[SGL_MAX_TEXTURES]; /* true after cubemap complete, cleared after first barrier */
 
     /* Texture dimensions and mipmap info - indexed by texture ID */
     uint32_t texture_width[SGL_MAX_TEXTURES];

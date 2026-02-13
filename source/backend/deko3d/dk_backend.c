@@ -316,6 +316,8 @@ int dk_init(sgl_backend_t *be, void *device) {
     memset(dk->texture_initialized, 0, sizeof(dk->texture_initialized));
     memset(dk->texture_is_cubemap, 0, sizeof(dk->texture_is_cubemap));
     memset(dk->texture_used_as_rt, 0, sizeof(dk->texture_used_as_rt));
+    memset(dk->cubemap_face_mask, 0, sizeof(dk->cubemap_face_mask));
+    memset(dk->cubemap_needs_barrier, 0, sizeof(dk->cubemap_needs_barrier));
     memset(dk->shader_loaded, 0, sizeof(dk->shader_loaded));
     memset(dk->program_shader_valid, 0, sizeof(dk->program_shader_valid));
 
