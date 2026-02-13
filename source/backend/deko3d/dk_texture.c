@@ -149,7 +149,7 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
 
         dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &faceView, &dstRect, 0);
 
-        /* Flush and wait */
+        /* Submit and wait for copy to complete */
         DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
         dkQueueSubmitCommands(dk->queue, cmdlist);
         dkQueueWaitIdle(dk->queue);
@@ -313,7 +313,7 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
             dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &imageView, &dstRect, 0);
 
-            /* Flush and wait for copy to complete (like legacy) */
+            /* Submit and wait for copy to complete */
             DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
             dkQueueSubmitCommands(dk->queue, cmdlist);
             dkQueueWaitIdle(dk->queue);
@@ -427,7 +427,7 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
     dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &imageView, &dstRect, 0);
 
-    /* Flush and wait for copy to complete */
+    /* Submit and wait for copy to complete */
     DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
     dkQueueSubmitCommands(dk->queue, cmdlist);
     dkQueueWaitIdle(dk->queue);
@@ -660,6 +660,15 @@ void dk_generate_mipmap(sgl_backend_t *be, sgl_handle_t handle) {
 
 /* ============================================================================
  * Copy Framebuffer to Texture (glCopyTexImage2D)
+ *
+ * Based on GLOVE (GL Over Vulkan) pattern: GPU → CPU → GPU.
+ * 1. Finish() — submit all pending rendering, wait for GPU idle
+ * 2. ReadBack — CopyImageToBuffer to CPU-accessible memory (like glReadPixels)
+ * 3. Upload — CPU pixels to staging, CopyBufferToImage (like glTexImage2D)
+ *
+ * Both readback and upload are individually proven operations in SwitchGLES.
+ * Previous attempts using direct GPU→GPU copies (BlitImage, DMA copy) all
+ * failed with white textures. The CPU roundtrip avoids GPU copy issues.
  * ============================================================================ */
 
 void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
@@ -672,14 +681,68 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     if (handle == 0 || handle >= SGL_MAX_TEXTURES) return;
     if (width <= 0 || height <= 0) return;
 
-    /* Get current render target (source) */
-    DkImage *srcImage = dk->framebuffers ? &dk->framebuffers[dk->current_slot] : NULL;
+    /* Get current render target - check FBO binding (like dk_read_pixels) */
+    DkImage *srcImage = NULL;
+    uint32_t src_height;
+    if (dk->current_fbo != 0 && dk->current_fbo_color > 0 &&
+        dk->current_fbo_color < SGL_MAX_TEXTURES &&
+        dk->texture_initialized[dk->current_fbo_color]) {
+        srcImage = &dk->textures[dk->current_fbo_color];
+        src_height = dk->texture_height[dk->current_fbo_color];
+    } else if (dk->framebuffers) {
+        srcImage = &dk->framebuffers[dk->current_slot];
+        src_height = dk->fb_height;
+    }
     if (!srcImage) {
         SGL_ERROR_BACKEND("copy_tex_image_2d: no framebuffer");
         return;
     }
 
-    /* Create new texture with specified dimensions */
+    /* === Step 1: Finish() — submit pending rendering, wait for idle ===
+     * GLOVE pattern: rendering MUST be fully completed in a SEPARATE
+     * submission before the readback begins. Not just a barrier. */
+    DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
+    dkQueueSubmitCommands(dk->queue, cmdlist);
+    dkQueueWaitIdle(dk->queue);
+
+    dkCmdBufClear(dk->cmdbuf);
+    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+
+    /* === Step 2: Read framebuffer to CPU-accessible memory ===
+     * Same approach as dk_read_pixels (proven to work). */
+    size_t pixelBufSize = (size_t)width * (size_t)height * 4;
+    size_t alignedBufSize = (pixelBufSize + 0xFFF) & ~0xFFF;  /* 4KB align */
+
+    DkMemBlock readbackMem;
+    DkMemBlockMaker memMaker;
+    dkMemBlockMakerDefaults(&memMaker, dk->device, alignedBufSize);
+    memMaker.flags = DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached;
+    readbackMem = dkMemBlockCreate(&memMaker);
+    if (!readbackMem) {
+        SGL_ERROR_BACKEND("copy_tex_image_2d: failed to allocate readback buffer");
+        return;
+    }
+
+    /* Source Y: GL Y=0 is bottom, storage Y=0 is top */
+    uint32_t dk_src_y = src_height - (uint32_t)y - (uint32_t)height;
+
+    /* Readback in a separate command list (GLOVE uses auxiliary command buffer) */
+    dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image);
+
+    DkImageView srcView;
+    dkImageViewDefaults(&srcView, srcImage);
+
+    /* Use width*4 as rowLength — matches dk_read_pixels (no extra alignment) */
+    DkImageRect srcRect = { (uint32_t)x, dk_src_y, 0, (uint32_t)width, (uint32_t)height, 1 };
+    DkCopyBuf readbackBuf = { dkMemBlockGetGpuAddr(readbackMem), (uint32_t)(width * 4), (uint32_t)height };
+
+    dkCmdBufCopyImageToBuffer(dk->cmdbuf, &srcView, &srcRect, &readbackBuf, 0);
+
+    cmdlist = dkCmdBufFinishList(dk->cmdbuf);
+    dkQueueSubmitCommands(dk->queue, cmdlist);
+    dkQueueWaitIdle(dk->queue);
+
+    /* === Step 3: Create destination texture === */
     DkImageLayoutMaker layoutMaker;
     dkImageLayoutMakerDefaults(&layoutMaker, dk->device);
     layoutMaker.flags = DkImageFlags_UsageRender | DkImageFlags_Usage2DEngine;
@@ -695,10 +758,10 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     uint64_t texSize = dkImageLayoutGetSize(&layout);
     uint32_t texAlign = dkImageLayoutGetAlignment(&layout);
 
-    /* Align texture offset */
     uint32_t aligned_offset = (dk->texture_offset + texAlign - 1) & ~(texAlign - 1);
     if (aligned_offset + texSize > SGL_TEXTURE_MEM_SIZE) {
         SGL_ERROR_BACKEND("copy_tex_image_2d: texture memory overflow");
+        dkMemBlockDestroy(readbackMem);
         return;
     }
 
@@ -707,61 +770,89 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     dk->texture_offset = aligned_offset + texSize;
     dk->texture_initialized[handle] = true;
 
-    /* Store texture dimensions */
     dk->texture_width[handle] = width;
     dk->texture_height[handle] = height;
     dk->texture_mip_levels[handle] = 1;
     dk->texture_format[handle] = layoutMaker.format;
 
-    /* Initialize default sampler parameters */
     dk->texture_min_filter[handle] = GL_NEAREST;
     dk->texture_mag_filter[handle] = GL_LINEAR;
     dk->texture_wrap_s[handle] = GL_REPEAT;
     dk->texture_wrap_t[handle] = GL_REPEAT;
 
-    /* Create image descriptor */
-    DkImageView imageView;
-    dkImageViewDefaults(&imageView, texImage);
+    DkImageView texView;
+    dkImageViewDefaults(&texView, texImage);
     DkImageDescriptor *imgDesc = &dk->texture_descriptors[handle];
-    dkImageDescriptorInitialize(imgDesc, &imageView, false, false);
+    dkImageDescriptorInitialize(imgDesc, &texView, false, false);
 
-    /* Add barrier before copy to ensure framebuffer rendering is complete */
-    dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image);
+    /* === Step 4: CPU reads readback data, Y-flips, writes to staging ===
+     * Readback buffer has storage order (top of screen at row 0).
+     * We flip rows so row 0 = bottom of captured region = GL y origin.
+     * Then upload without flip (same as glTexImage2D convention).
+     * GLOVE does this in CopyPixelsToHost → InvertImageYAxis. */
+    uint8_t *gpuData = (uint8_t *)dkMemBlockGetCpuAddr(readbackMem);
+    size_t row_bytes = (size_t)width * 4;
 
-    /* Copy from framebuffer to texture
-     * OpenGL Y=0 is bottom, deko3d Y=0 is top
-     * Use actual framebuffer height (FBO texture height or default FB height) */
-    uint32_t src_height;
-    if (dk->current_fbo != 0 && dk->current_fbo_color > 0 &&
-        dk->current_fbo_color < SGL_MAX_TEXTURES) {
-        src_height = dk->texture_height[dk->current_fbo_color];
-    } else {
-        src_height = dk->fb_height;
+    uint32_t aligned_row_size = ((uint32_t)(width * 4) + 31) & ~31;
+    uint32_t staging_size = aligned_row_size * height;
+
+    uint32_t stagingOffset = (dk->client_array_offset + 31) & ~31;
+    if (stagingOffset + staging_size > dk->uniform_base - dk->client_array_base) {
+        SGL_ERROR_BACKEND("copy_tex_image_2d: staging buffer overflow");
+        dkMemBlockDestroy(readbackMem);
+        return;
     }
-    uint32_t dk_src_y = src_height - (uint32_t)y - (uint32_t)height;
 
-    DkImageView srcView, dstView;
-    dkImageViewDefaults(&srcView, srcImage);
-    dkImageViewDefaults(&dstView, texImage);
+    uint8_t *staging = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock)
+                       + dk->client_array_base + stagingOffset;
 
-    DkImageRect srcRect = { (uint32_t)x, dk_src_y, 0, (uint32_t)width, (uint32_t)height, 1 };
+    /* Copy with Y-flip from readback → staging (matching GLOVE's InvertImageYAxis) */
+    for (int row = 0; row < height; row++) {
+        memcpy(staging + row * aligned_row_size,
+               gpuData + (height - 1 - row) * row_bytes,
+               row_bytes);
+    }
+
+    dk->client_array_offset = stagingOffset + staging_size;
+
+    /* Done with readback buffer */
+    dkMemBlockDestroy(readbackMem);
+
+    /* === Step 5: Upload staging to texture (same as dk_texture_image_2d) === */
+    dkCmdBufClear(dk->cmdbuf);
+    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+
+    DkGpuAddr stagingAddr = dkMemBlockGetGpuAddr(dk->data_memblock)
+                            + dk->client_array_base + stagingOffset;
+    DkCopyBuf srcBuf = { stagingAddr, aligned_row_size, (uint32_t)height };
     DkImageRect dstRect = { 0, 0, 0, (uint32_t)width, (uint32_t)height, 1 };
 
-    /* Use BlitImage for potential format conversion */
-    dkCmdBufBlitImage(dk->cmdbuf, &srcView, &srcRect, &dstView, &dstRect, 0, 0);
+    dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &texView, &dstRect, 0);
 
-    /* Submit and wait for copy to complete */
-    DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
+    cmdlist = dkCmdBufFinishList(dk->cmdbuf);
     dkQueueSubmitCommands(dk->queue, cmdlist);
     dkQueueWaitIdle(dk->queue);
 
-    /* Reset command buffer */
+    /* === Step 6: Restore command buffer state === */
     dkCmdBufClear(dk->cmdbuf);
     dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
     dk->descriptors_bound = false;
 
-    /* Re-bind render target */
-    if (dk->framebuffers) {
+    /* Re-bind render target (check FBO — from dk_read_pixels pattern) */
+    if (dk->current_fbo != 0 && dk->current_fbo_color > 0 &&
+        dk->current_fbo_color < SGL_MAX_TEXTURES &&
+        dk->texture_initialized[dk->current_fbo_color]) {
+        DkImageView colorView;
+        dkImageViewDefaults(&colorView, &dk->textures[dk->current_fbo_color]);
+        DkImageView *pDepthView = NULL;
+        DkImageView depthView;
+        if (dk->current_fbo_depth > 0 && dk->current_fbo_depth < SGL_MAX_RENDERBUFFERS &&
+            dk->renderbuffer_initialized[dk->current_fbo_depth]) {
+            dkImageViewDefaults(&depthView, &dk->renderbuffer_images[dk->current_fbo_depth]);
+            pDepthView = &depthView;
+        }
+        dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, pDepthView);
+    } else if (dk->framebuffers) {
         DkImageView colorView;
         dkImageViewDefaults(&colorView, &dk->framebuffers[dk->current_slot]);
         if (dk->depth_images[dk->current_slot]) {
@@ -778,6 +869,9 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
 /* ============================================================================
  * Copy Framebuffer to Texture Sub-Region (glCopyTexSubImage2D)
+ *
+ * Same GPU → CPU → GPU approach as CopyTexImage2D (GLOVE pattern).
+ * Writes to a sub-region of an existing texture.
  * ============================================================================ */
 
 void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
@@ -795,54 +889,128 @@ void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     }
     if (width <= 0 || height <= 0) return;
 
-    /* Get current render target (source) */
-    DkImage *srcImage = dk->framebuffers ? &dk->framebuffers[dk->current_slot] : NULL;
+    /* Get current render target - check FBO binding (like dk_read_pixels) */
+    DkImage *srcImage = NULL;
+    uint32_t src_height;
+    if (dk->current_fbo != 0 && dk->current_fbo_color > 0 &&
+        dk->current_fbo_color < SGL_MAX_TEXTURES &&
+        dk->texture_initialized[dk->current_fbo_color]) {
+        srcImage = &dk->textures[dk->current_fbo_color];
+        src_height = dk->texture_height[dk->current_fbo_color];
+    } else if (dk->framebuffers) {
+        srcImage = &dk->framebuffers[dk->current_slot];
+        src_height = dk->fb_height;
+    }
     if (!srcImage) {
         SGL_ERROR_BACKEND("copy_tex_sub_image_2d: no framebuffer");
         return;
     }
 
     DkImage *texImage = &dk->textures[handle];
-    uint32_t tex_height = dk->texture_height[handle];
 
-    /* Add barrier before copy to ensure framebuffer rendering is complete */
-    dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image);
-
-    /* Copy from framebuffer to texture
-     * OpenGL Y=0 is bottom, deko3d Y=0 is top
-     * Use actual framebuffer height (FBO texture height or default FB height) */
-    uint32_t src_height;
-    if (dk->current_fbo != 0 && dk->current_fbo_color > 0 &&
-        dk->current_fbo_color < SGL_MAX_TEXTURES) {
-        src_height = dk->texture_height[dk->current_fbo_color];
-    } else {
-        src_height = dk->fb_height;
-    }
-    uint32_t dk_src_y = src_height - (uint32_t)y - (uint32_t)height;
-    uint32_t dk_dst_y = tex_height - (uint32_t)yoffset - (uint32_t)height;
-
-    DkImageView srcView, dstView;
-    dkImageViewDefaults(&srcView, srcImage);
-    dkImageViewDefaults(&dstView, texImage);
-
-    DkImageRect srcRect = { (uint32_t)x, dk_src_y, 0, (uint32_t)width, (uint32_t)height, 1 };
-    DkImageRect dstRect = { (uint32_t)xoffset, dk_dst_y, 0, (uint32_t)width, (uint32_t)height, 1 };
-
-    /* Use BlitImage for potential format conversion */
-    dkCmdBufBlitImage(dk->cmdbuf, &srcView, &srcRect, &dstView, &dstRect, 0, 0);
-
-    /* Submit and wait for copy to complete */
+    /* === Step 1: Finish() — submit pending rendering, wait for idle === */
     DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
     dkQueueSubmitCommands(dk->queue, cmdlist);
     dkQueueWaitIdle(dk->queue);
 
-    /* Reset command buffer */
+    dkCmdBufClear(dk->cmdbuf);
+    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+
+    /* === Step 2: Read framebuffer to CPU-accessible memory === */
+    size_t pixelBufSize = (size_t)width * (size_t)height * 4;
+    size_t alignedBufSize = (pixelBufSize + 0xFFF) & ~0xFFF;
+
+    DkMemBlock readbackMem;
+    DkMemBlockMaker memMaker;
+    dkMemBlockMakerDefaults(&memMaker, dk->device, alignedBufSize);
+    memMaker.flags = DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached;
+    readbackMem = dkMemBlockCreate(&memMaker);
+    if (!readbackMem) {
+        SGL_ERROR_BACKEND("copy_tex_sub_image_2d: failed to allocate readback buffer");
+        return;
+    }
+
+    uint32_t dk_src_y = src_height - (uint32_t)y - (uint32_t)height;
+
+    dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image);
+
+    DkImageView srcView;
+    dkImageViewDefaults(&srcView, srcImage);
+
+    DkImageRect srcRect = { (uint32_t)x, dk_src_y, 0, (uint32_t)width, (uint32_t)height, 1 };
+    DkCopyBuf readbackBuf = { dkMemBlockGetGpuAddr(readbackMem), (uint32_t)(width * 4), (uint32_t)height };
+
+    dkCmdBufCopyImageToBuffer(dk->cmdbuf, &srcView, &srcRect, &readbackBuf, 0);
+
+    cmdlist = dkCmdBufFinishList(dk->cmdbuf);
+    dkQueueSubmitCommands(dk->queue, cmdlist);
+    dkQueueWaitIdle(dk->queue);
+
+    /* === Step 3: CPU Y-flip from readback to staging === */
+    uint8_t *gpuData = (uint8_t *)dkMemBlockGetCpuAddr(readbackMem);
+    size_t row_bytes = (size_t)width * 4;
+
+    uint32_t aligned_row_size = ((uint32_t)(width * 4) + 31) & ~31;
+    uint32_t staging_size = aligned_row_size * height;
+
+    uint32_t stagingOffset = (dk->client_array_offset + 31) & ~31;
+    if (stagingOffset + staging_size > dk->uniform_base - dk->client_array_base) {
+        SGL_ERROR_BACKEND("copy_tex_sub_image_2d: staging buffer overflow");
+        dkMemBlockDestroy(readbackMem);
+        return;
+    }
+
+    uint8_t *staging = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock)
+                       + dk->client_array_base + stagingOffset;
+
+    for (int row = 0; row < height; row++) {
+        memcpy(staging + row * aligned_row_size,
+               gpuData + (height - 1 - row) * row_bytes,
+               row_bytes);
+    }
+
+    dk->client_array_offset = stagingOffset + staging_size;
+    dkMemBlockDestroy(readbackMem);
+
+    /* === Step 4: Upload staging to texture sub-region === */
+    dkCmdBufClear(dk->cmdbuf);
+    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+
+    DkImageView dstView;
+    dkImageViewDefaults(&dstView, texImage);
+
+    /* Destination Y: GL yoffset maps directly to storage row
+     * (same convention as glTexSubImage2D upload) */
+    DkGpuAddr stagingAddr = dkMemBlockGetGpuAddr(dk->data_memblock)
+                            + dk->client_array_base + stagingOffset;
+    DkCopyBuf srcBuf = { stagingAddr, aligned_row_size, (uint32_t)height };
+    DkImageRect dstRect = { (uint32_t)xoffset, (uint32_t)yoffset, 0, (uint32_t)width, (uint32_t)height, 1 };
+
+    dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &dstView, &dstRect, 0);
+
+    cmdlist = dkCmdBufFinishList(dk->cmdbuf);
+    dkQueueSubmitCommands(dk->queue, cmdlist);
+    dkQueueWaitIdle(dk->queue);
+
+    /* === Step 5: Restore command buffer state === */
     dkCmdBufClear(dk->cmdbuf);
     dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
     dk->descriptors_bound = false;
 
-    /* Re-bind render target */
-    if (dk->framebuffers) {
+    if (dk->current_fbo != 0 && dk->current_fbo_color > 0 &&
+        dk->current_fbo_color < SGL_MAX_TEXTURES &&
+        dk->texture_initialized[dk->current_fbo_color]) {
+        DkImageView colorView;
+        dkImageViewDefaults(&colorView, &dk->textures[dk->current_fbo_color]);
+        DkImageView *pDepthView = NULL;
+        DkImageView depthView;
+        if (dk->current_fbo_depth > 0 && dk->current_fbo_depth < SGL_MAX_RENDERBUFFERS &&
+            dk->renderbuffer_initialized[dk->current_fbo_depth]) {
+            dkImageViewDefaults(&depthView, &dk->renderbuffer_images[dk->current_fbo_depth]);
+            pDepthView = &depthView;
+        }
+        dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, pDepthView);
+    } else if (dk->framebuffers) {
         DkImageView colorView;
         dkImageViewDefaults(&colorView, &dk->framebuffers[dk->current_slot]);
         if (dk->depth_images[dk->current_slot]) {
