@@ -47,6 +47,10 @@ GL_APICALL void GL_APIENTRY glDeleteFramebuffers(GLsizei n, const GLuint *frameb
 
         if (ctx->bound_framebuffer == id) {
             ctx->bound_framebuffer = 0;
+            /* Rebind default framebuffer via backend */
+            if (ctx->backend && ctx->backend->ops->bind_framebuffer) {
+                ctx->backend->ops->bind_framebuffer(ctx->backend, 0, 0, 0);
+            }
         }
 
         sgl_res_mgr_free_framebuffer(&ctx->res_mgr, id);
