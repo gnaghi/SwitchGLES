@@ -13,6 +13,10 @@ void sgl_state_blend_init(sgl_state_blend_t *state) {
     state->dst_alpha = GL_ZERO;
     state->equation_rgb = GL_FUNC_ADD;
     state->equation_alpha = GL_FUNC_ADD;
+    state->color[0] = 0.0f;
+    state->color[1] = 0.0f;
+    state->color[2] = 0.0f;
+    state->color[3] = 0.0f;
 }
 
 bool sgl_state_blend_set_enabled(sgl_state_blend_t *state, bool enabled) {

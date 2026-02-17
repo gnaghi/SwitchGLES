@@ -14,6 +14,7 @@ typedef struct sgl_state_blend {
     GLenum src_rgb, dst_rgb;
     GLenum src_alpha, dst_alpha;
     GLenum equation_rgb, equation_alpha;
+    GLfloat color[4];  /* Blend constant color (RGBA) */
 } sgl_state_blend_t;
 
 /* Initialize to GL defaults */

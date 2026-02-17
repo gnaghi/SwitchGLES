@@ -82,6 +82,10 @@ void dk_apply_blend(sgl_backend_t *be, const sgl_blend_state_t *state) {
             dk_convert_blend_op(state->equation_alpha));
 
         dkCmdBufBindBlendStates(dk->cmdbuf, 0, &blendState, 1);
+
+        /* Apply blend constant color */
+        dkCmdBufSetBlendConst(dk->cmdbuf, state->color[0], state->color[1],
+                              state->color[2], state->color[3]);
     }
 
     SGL_TRACE_STATE("apply_blend enabled=%d", state->enabled);

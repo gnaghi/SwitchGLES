@@ -16,6 +16,10 @@ static void apply_blend(sgl_context_t *ctx) {
         bs.dst_alpha = ctx->blend_state.dst_alpha;
         bs.equation_rgb = ctx->blend_state.equation_rgb;
         bs.equation_alpha = ctx->blend_state.equation_alpha;
+        bs.color[0] = ctx->blend_state.color[0];
+        bs.color[1] = ctx->blend_state.color[1];
+        bs.color[2] = ctx->blend_state.color[2];
+        bs.color[3] = ctx->blend_state.color[3];
         ctx->backend->ops->apply_blend(ctx->backend, &bs);
     }
 }
@@ -244,9 +248,11 @@ GL_APICALL void GL_APIENTRY glBlendEquationSeparate(GLenum modeRGB, GLenum modeA
 
 GL_APICALL void GL_APIENTRY glBlendColor(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) {
     GET_CTX();
-    if (ctx->backend && ctx->backend->ops->set_blend_color) {
-        ctx->backend->ops->set_blend_color(ctx->backend, red, green, blue, alpha);
-    }
+    ctx->blend_state.color[0] = red;
+    ctx->blend_state.color[1] = green;
+    ctx->blend_state.color[2] = blue;
+    ctx->blend_state.color[3] = alpha;
+    apply_blend(ctx);
     SGL_TRACE_STATE("glBlendColor(%.2f, %.2f, %.2f, %.2f)", red, green, blue, alpha);
 }
 
