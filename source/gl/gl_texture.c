@@ -143,8 +143,12 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint xo
     GET_CTX();
     CHECK_BACKEND();
 
-    if (target != GL_TEXTURE_2D || level != 0) {
+    if (target != GL_TEXTURE_2D) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
+    if (level < 0) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
 
@@ -213,11 +217,57 @@ GL_APICALL void GL_APIENTRY glTexParameteriv(GLenum target, GLenum pname, const 
 }
 
 GL_APICALL void GL_APIENTRY glGetTexParameterfv(GLenum target, GLenum pname, GLfloat *params) {
-    (void)target; (void)pname; (void)params;
+    GET_CTX();
+    if (!params) return;
+
+    if (target != GL_TEXTURE_2D && target != GL_TEXTURE_CUBE_MAP) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
+
+    GLuint tex_id = ctx->bound_textures[ctx->active_texture_unit];
+    sgl_texture_t *tex = (tex_id > 0) ? sgl_res_mgr_get_texture(&ctx->res_mgr, tex_id) : NULL;
+    if (!tex) {
+        sgl_set_error(ctx, GL_INVALID_OPERATION);
+        return;
+    }
+
+    switch (pname) {
+        case GL_TEXTURE_MIN_FILTER: *params = (GLfloat)tex->min_filter; break;
+        case GL_TEXTURE_MAG_FILTER: *params = (GLfloat)tex->mag_filter; break;
+        case GL_TEXTURE_WRAP_S:     *params = (GLfloat)tex->wrap_s;     break;
+        case GL_TEXTURE_WRAP_T:     *params = (GLfloat)tex->wrap_t;     break;
+        default:
+            sgl_set_error(ctx, GL_INVALID_ENUM);
+            return;
+    }
 }
 
 GL_APICALL void GL_APIENTRY glGetTexParameteriv(GLenum target, GLenum pname, GLint *params) {
-    (void)target; (void)pname; (void)params;
+    GET_CTX();
+    if (!params) return;
+
+    if (target != GL_TEXTURE_2D && target != GL_TEXTURE_CUBE_MAP) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
+
+    GLuint tex_id = ctx->bound_textures[ctx->active_texture_unit];
+    sgl_texture_t *tex = (tex_id > 0) ? sgl_res_mgr_get_texture(&ctx->res_mgr, tex_id) : NULL;
+    if (!tex) {
+        sgl_set_error(ctx, GL_INVALID_OPERATION);
+        return;
+    }
+
+    switch (pname) {
+        case GL_TEXTURE_MIN_FILTER: *params = (GLint)tex->min_filter; break;
+        case GL_TEXTURE_MAG_FILTER: *params = (GLint)tex->mag_filter; break;
+        case GL_TEXTURE_WRAP_S:     *params = (GLint)tex->wrap_s;     break;
+        case GL_TEXTURE_WRAP_T:     *params = (GLint)tex->wrap_t;     break;
+        default:
+            sgl_set_error(ctx, GL_INVALID_ENUM);
+            return;
+    }
 }
 
 GL_APICALL void GL_APIENTRY glGenerateMipmap(GLenum target) {
@@ -272,6 +322,7 @@ GL_APICALL void GL_APIENTRY glCopyTexImage2D(GLenum target, GLint level, GLenum 
     }
 
     /* Update GL-level texture state */
+    tex->used = true;  /* Mark texture as used (critical for draw-time binding) */
     tex->width = width;
     tex->height = height;
     tex->internal_format = internalformat;
@@ -397,8 +448,12 @@ GL_APICALL void GL_APIENTRY glCompressedTexSubImage2D(GLenum target, GLint level
     GET_CTX();
     CHECK_BACKEND();
 
-    if (target != GL_TEXTURE_2D || level != 0) {
+    if (target != GL_TEXTURE_2D) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
+    if (level < 0) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
 
