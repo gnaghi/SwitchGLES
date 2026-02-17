@@ -101,7 +101,7 @@ void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y,
 
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
-    if (!pixels || width <= 0 || height <= 0) {
+    if (!pixels || width <= 0 || height <= 0 || x < 0 || y < 0) {
         return;
     }
 
@@ -143,29 +143,60 @@ void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y,
     DkImageView srcView;
     dkImageViewDefaults(&srcView, srcImage);
 
-    /* Note: deko3d Y=0 is top, OpenGL Y=0 is bottom
-     * The copy reads from deko3d coordinates directly */
-    DkImageRect srcRect = { (uint32_t)x, (uint32_t)y, 0, (uint32_t)width, (uint32_t)height, 1 };
+    /* Convert GL Y coordinates to deko3d Y coordinates.
+     * OpenGL Y=0 is at the bottom of the framebuffer.
+     * deko3d Y=0 is at the top of the render target.
+     * Both default framebuffer and FBO textures use deko3d Y convention
+     * when rendered to (viewport maps NDC y=+1 to row 0). */
+    uint32_t src_height;
+    if (dk->current_fbo != 0 && dk->current_fbo_color > 0 &&
+        dk->current_fbo_color < SGL_MAX_TEXTURES) {
+        src_height = dk->texture_height[dk->current_fbo_color];
+    } else {
+        src_height = dk->fb_height;
+    }
+    /* Bounds check: prevent uint32_t underflow if read region exceeds framebuffer */
+    if ((uint32_t)y + (uint32_t)height > src_height) {
+        dkMemBlockDestroy(readbackMem);
+        return;
+    }
+    uint32_t dk_y = src_height - (uint32_t)y - (uint32_t)height;
+
+    DkImageRect srcRect = { (uint32_t)x, dk_y, 0, (uint32_t)width, (uint32_t)height, 1 };
     DkCopyBuf dstBuf = { dkMemBlockGetGpuAddr(readbackMem), (uint32_t)(width * 4), (uint32_t)height };
 
     dkCmdBufCopyImageToBuffer(dk->cmdbuf, &srcView, &srcRect, &dstBuf, 0);
 
-    /* Flush and wait for copy to complete */
+    /* Submit and wait for copy to complete */
     DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
     dkQueueSubmitCommands(dk->queue, cmdlist);
     dkQueueWaitIdle(dk->queue);
 
-    /* Copy data to user buffer */
+    /* Check if the GPU queue entered an error state (e.g., invalid shader) */
+    if (dkQueueIsInErrorState(dk->queue)) {
+        SGL_ERROR_BACKEND("read_pixels: GPU queue is in ERROR STATE!");
+    }
+
+    /* Copy data to user buffer, flipping rows to match GL convention.
+     * The GPU copy reads rows top-to-bottom (deko3d order), but GL expects
+     * row 0 = bottom of the read region. For height=1, no flip needed. */
     void *cpuAddr = dkMemBlockGetCpuAddr(readbackMem);
-    memcpy(pixels, cpuAddr, (size_t)width * (size_t)height * 4);
+    if (height == 1) {
+        memcpy(pixels, cpuAddr, (size_t)width * 4);
+    } else {
+        /* Flip rows: GPU buffer row 0 = GL top, but user expects row 0 = GL bottom */
+        uint8_t *src_ptr = (uint8_t *)cpuAddr;
+        uint8_t *dst_ptr = (uint8_t *)pixels;
+        size_t row_bytes = (size_t)width * 4;
+        for (int row = 0; row < height; row++) {
+            memcpy(dst_ptr + row * row_bytes,
+                   src_ptr + (height - 1 - row) * row_bytes,
+                   row_bytes);
+        }
+    }
 
     /* Cleanup readback memory */
     dkMemBlockDestroy(readbackMem);
-
-    /* Wait for fence before reusing command memory */
-    if (dk->fence_active[dk->current_slot]) {
-        dkFenceWait(&dk->fences[dk->current_slot], -1);
-    }
 
     /* Reset command buffer for continued use */
     dkCmdBufClear(dk->cmdbuf);
