@@ -458,9 +458,12 @@ GL_APICALL void GL_APIENTRY glReadPixels(GLint x, GLint y, GLsizei width, GLsize
     GET_CTX();
     CHECK_BACKEND();
 
-    if (!pixels || width <= 0 || height <= 0) {
+    if (width < 0 || height < 0) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
+    }
+    if (!pixels || width == 0 || height == 0) {
+        return;  /* No-op per spec */
     }
 
     if (format != GL_RGBA || type != GL_UNSIGNED_BYTE) {
