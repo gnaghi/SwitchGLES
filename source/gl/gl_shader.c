@@ -10,6 +10,7 @@
 
 #ifdef SGL_ENABLE_RUNTIME_COMPILER
 #include <libuam.h>
+#include <malloc.h>  /* memalign — needed for 256-byte aligned DKSH buffer */
 #endif
 
 /* Shader Objects */
@@ -151,12 +152,15 @@ GL_APICALL void GL_APIENTRY glCompileShader(GLuint shader) {
                shader, dksh_size, (int)(dksh_size % 256), uam_get_num_gprs(compiler));
         fflush(stdout);
 
-        /* Over-allocate to page boundary — protects against potential
-         * libuam OutputDkshToMemory padding writes near buffer end.
-         * The dksh_size passed to load_shader_binary is the exact size. */
+        /* CRITICAL: libuam OutputDkshToMemory uses pa256() which aligns to
+         * ABSOLUTE memory addresses, not relative to buffer start. If the buffer
+         * is not 256-byte aligned, the code section ends up at the wrong offset
+         * within the DKSH, causing dkShaderInitialize to read garbage → GPU fault.
+         * Fix: use memalign(256, ...) to ensure 256-byte alignment. */
         size_t alloc_size = (dksh_size + 4095) & ~(size_t)4095;
-        void *dksh = calloc(1, alloc_size);
+        void *dksh = memalign(256, alloc_size);
         if (dksh) {
+            memset(dksh, 0, alloc_size);
             uam_write_code(compiler, dksh);
 
             /* Diagnostic: dump DKSH header (first 32 bytes) for comparison */

@@ -53,6 +53,13 @@ void dk_begin_frame(sgl_backend_t *be, int slot) {
 void dk_end_frame(sgl_backend_t *be, int slot) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
+    /* Check GPU queue error state before submitting — prevents crash */
+    if (dkQueueIsInErrorState(dk->queue)) {
+        SGL_ERROR_BACKEND("end_frame: GPU queue in ERROR STATE — skipping submit for slot %d", slot);
+        dk->cmdbuf_submitted = true;  /* Mark as submitted to prevent double-submit */
+        return;
+    }
+
     /* Signal fence before finishing command list */
     dkCmdBufSignalFence(dk->cmdbufs[slot], &dk->fences[slot], false);
     dk->fence_active[slot] = true;
@@ -67,6 +74,12 @@ void dk_end_frame(sgl_backend_t *be, int slot) {
 
 void dk_present(sgl_backend_t *be, int slot) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
+
+    /* Check GPU queue error state before presenting — prevents crash */
+    if (dkQueueIsInErrorState(dk->queue)) {
+        SGL_ERROR_BACKEND("present: GPU queue in ERROR STATE — skipping present for slot %d", slot);
+        return;
+    }
 
     dkQueuePresentImage(dk->queue, dk->swapchain, slot);
 
@@ -113,6 +126,13 @@ void dk_wait_fence(sgl_backend_t *be, int slot) {
 void dk_flush(sgl_backend_t *be) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
+    /* Check GPU queue error state before any operation */
+    if (dkQueueIsInErrorState(dk->queue)) {
+        SGL_ERROR_BACKEND("flush: GPU queue in ERROR STATE — skipping");
+        dk->cmdbuf_submitted = false;
+        return;
+    }
+
     if (dk->cmdbuf_submitted) {
         /* Already submitted by dk_end_frame — just wait idle */
         dkQueueWaitIdle(dk->queue);
@@ -149,6 +169,13 @@ void dk_flush(sgl_backend_t *be) {
 
 void dk_finish(sgl_backend_t *be) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
+
+    /* Check GPU queue error state before any operation */
+    if (dkQueueIsInErrorState(dk->queue)) {
+        SGL_ERROR_BACKEND("finish: GPU queue in ERROR STATE — skipping");
+        dk->cmdbuf_submitted = false;
+        return;
+    }
 
     if (dk->cmdbuf_submitted) {
         /* Cmdbuf was already finished and submitted by dk_end_frame (eglSwapBuffers).

@@ -31,7 +31,7 @@ ARCH	:=	-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
 CFLAGS	:=	-g -Wall -O2 -ffunction-sections \
 			$(ARCH) $(DEFINES)
 
-CFLAGS	+=	$(INCLUDE) -D__SWITCH__
+CFLAGS	+=	$(INCLUDE) -D__SWITCH__ -DSGL_ENABLE_RUNTIME_COMPILER
 
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions
 
@@ -70,6 +70,7 @@ export OFILES_SRC	:=	$(CFILES:.c=.o)
 export OFILES 	:=	$(OFILES_SRC)
 export INCLUDE	:=	$(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
 			-I$(CURDIR)/../../include \
+			-I$(CURDIR)/../../../../libuam/source \
 			$(foreach dir,$(LIBDIRS),-I$(dir)/include) \
 			-I$(CURDIR)/$(BUILD)
 
@@ -101,6 +102,8 @@ shaders:
 	@uam -s frag $(SHADERS_DIR)/cubemap_fsh.glsl -o $(SHADERS_OUT)/cubemap_fsh.dksh
 	@uam -s vert $(SHADERS_DIR)/packed_vsh.glsl -o $(SHADERS_OUT)/packed_vsh.dksh
 	@uam -s frag $(SHADERS_DIR)/packed_fsh.glsl -o $(SHADERS_OUT)/packed_fsh.dksh
+	@uam -s vert $(SHADERS_DIR)/runtime_vsh.glsl -o $(SHADERS_OUT)/runtime_vsh.dksh
+	@uam -s frag $(SHADERS_DIR)/runtime_fsh.glsl -o $(SHADERS_OUT)/runtime_fsh.dksh
 
 $(BUILD):
 	@[ -d $@ ] || mkdir -p $@

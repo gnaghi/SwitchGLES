@@ -17,6 +17,11 @@
 #include <GLES2/gl2.h>
 #include <GLES2/gl2sgl.h>  /* SwitchGLES extensions */
 
+#ifdef SGL_ENABLE_RUNTIME_COMPILER
+#include <libuam.h>
+#include <malloc.h>  /* memalign */
+#endif
+
 /*==========================================================================
  * Configuration
  *==========================================================================*/
@@ -2198,8 +2203,325 @@ static void testPackedUBO(void) {
 
 static GLuint s_runtimeProgram = 0;
 
+/* Helper: draw a quad and read center pixel, return true if no GPU error */
+static bool drawAndReadPixel(const char *label, GLint colorLoc,
+                             float r, float g, float b, float a,
+                             GLubyte *outPixel) {
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    if (colorLoc >= 0) {
+        glUniform4f(colorLoc, r, g, b, a);
+    }
+
+    static const float quad[] = { -0.5f,-0.5f, 0.5f,-0.5f, 0.5f,0.5f, -0.5f,0.5f };
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, quad);
+    glEnableVertexAttribArray(0);
+    static const GLushort idx[] = { 0, 1, 2, 0, 2, 3 };
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+
+    glReadPixels(640, 360, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, outPixel);
+    printf("[DIAG] %s pixel: R=%d G=%d B=%d A=%d\n",
+           label, outPixel[0], outPixel[1], outPixel[2], outPixel[3]);
+    glDisableVertexAttribArray(0);
+
+    GLenum err = glGetError();
+    if (err != GL_NO_ERROR) {
+        printf("[DIAG] %s: glGetError=0x%X\n", label, err);
+    }
+    return true;
+}
+
 static void testRuntimeShaderCompilation(void) {
     printf("\n--- Test: Runtime Shader Compilation ---\n");
+
+    /* Reset ALL GL state */
+    glDisable(GL_BLEND);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_POLYGON_OFFSET_FILL);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glDepthMask(GL_TRUE);
+    glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    for (int a = 0; a < 8; a++) glDisableVertexAttribArray(a);
+
+    /* =================================================================
+     * DIAGNOSTIC A: Precompiled runtime shaders (same GLSL, offline uam)
+     * If this works, the shader code itself is fine.
+     * ================================================================= */
+    printf("\n[DIAG-A] PRECOMPILED runtime shaders (offline uam)...\n");
+    fflush(stdout);
+    {
+        GLuint precompProg = createProgramFromFiles(
+            "romfs:/shaders/runtime_vsh.dksh",
+            "romfs:/shaders/runtime_fsh.dksh");
+
+        if (precompProg) {
+            glUseProgram(precompProg);
+            GLint colorLoc = glGetUniformLocation(precompProg, "u_color");
+            printf("[DIAG-A] colorLoc=%d (0x%X)\n", colorLoc, colorLoc);
+            fflush(stdout);
+
+            GLubyte pixel[4];
+            drawAndReadPixel("DIAG-A precompiled", colorLoc, 0,1,1,1, pixel);
+            bool ok = (pixel[0] < 10) && (pixel[1] > 245) && (pixel[2] > 245);
+            printf("[DIAG-A] Result: %s\n", ok ? "PASS (CYAN)" : "FAIL");
+            recordResult("Runtime: precompiled same shader", ok, NULL);
+            fflush(stdout);
+
+            glDeleteProgram(precompProg);
+        } else {
+            printf("[DIAG-A] FAILED to load precompiled runtime shaders!\n");
+            recordResult("Runtime: precompiled same shader", false, "load failed");
+            fflush(stdout);
+        }
+    }
+
+    /* =================================================================
+     * DIAGNOSTIC COMPARE: Byte-level comparison of precompiled vs runtime DKSH
+     * Uses libuam directly (bypasses SwitchGLES) to isolate the issue.
+     * ================================================================= */
+#ifdef SGL_ENABLE_RUNTIME_COMPILER
+    printf("\n[DIAG-CMP] Byte-level DKSH comparison (precompiled vs runtime)...\n");
+    fflush(stdout);
+    {
+        /* Vertex shader GLSL — must match runtime_vsh.glsl exactly */
+        const char *cmpVsSrc =
+            "#version 460\n"
+            "layout(location = 0) in vec2 a_position;\n"
+            "void main() {\n"
+            "    gl_Position = vec4(a_position, 0.0, 1.0);\n"
+            "}\n";
+
+        /* Fragment shader GLSL — must match runtime_fsh.glsl exactly */
+        const char *cmpFsSrc =
+            "#version 460\n"
+            "layout(std140, binding = 0) uniform ColorBlock {\n"
+            "    vec4 u_color;\n"
+            "};\n"
+            "layout(location = 0) out vec4 fragColor;\n"
+            "void main() {\n"
+            "    fragColor = u_color;\n"
+            "}\n";
+
+        /* Compare vertex shader */
+        {
+            /* Read precompiled from romfs */
+            FILE *f = fopen("romfs:/shaders/runtime_vsh.dksh", "rb");
+            if (f) {
+                fseek(f, 0, SEEK_END);
+                long preSize = ftell(f);
+                fseek(f, 0, SEEK_SET);
+                uint8_t *preBuf = (uint8_t *)calloc(1, preSize);
+                fread(preBuf, 1, preSize, f);
+                fclose(f);
+
+                /* Runtime-compile same GLSL.
+                 * CRITICAL: memalign(256) because OutputDkshToMemory uses
+                 * absolute pointer alignment (pa256), not relative offsets. */
+                uam_compiler *c = uam_create_compiler(DkStage_Vertex);
+                if (c && uam_compile_dksh(c, cmpVsSrc)) {
+                    size_t rtSize = uam_get_code_size(c);
+                    uint8_t *rtBuf = (uint8_t *)memalign(256, rtSize);
+                    memset(rtBuf, 0, rtSize);
+                    uam_write_code(c, rtBuf);
+
+                    printf("[DIAG-CMP] VS precompiled: %ld bytes, runtime: %zu bytes\n",
+                           preSize, rtSize);
+
+                    if ((size_t)preSize == rtSize) {
+                        int diffs = 0;
+                        int firstDiff = -1;
+                        for (size_t i = 0; i < rtSize; i++) {
+                            if (preBuf[i] != rtBuf[i]) {
+                                if (diffs < 20) {
+                                    printf("[DIAG-CMP] VS diff @0x%04zX: pre=0x%02X rt=0x%02X\n",
+                                           i, preBuf[i], rtBuf[i]);
+                                }
+                                if (firstDiff < 0) firstDiff = (int)i;
+                                diffs++;
+                            }
+                        }
+                        if (diffs == 0) {
+                            printf("[DIAG-CMP] VS: IDENTICAL (0 differences)\n");
+                        } else {
+                            printf("[DIAG-CMP] VS: %d differences, first at 0x%04X\n",
+                                   diffs, firstDiff);
+                        }
+                    } else {
+                        printf("[DIAG-CMP] VS: SIZE MISMATCH!\n");
+                        /* Dump headers for both */
+                        printf("[DIAG-CMP] VS pre header:");
+                        for (int i = 0; i < 32 && i < preSize; i++)
+                            printf(" %02X", preBuf[i]);
+                        printf("\n");
+                        printf("[DIAG-CMP] VS rt  header:");
+                        for (size_t i = 0; i < 32 && i < rtSize; i++)
+                            printf(" %02X", rtBuf[i]);
+                        printf("\n");
+                    }
+                    free(rtBuf);
+                } else {
+                    printf("[DIAG-CMP] VS runtime compile FAILED\n");
+                    if (c) {
+                        const char *log = uam_get_error_log(c);
+                        if (log && log[0]) printf("[DIAG-CMP] VS error: %.200s\n", log);
+                    }
+                }
+                if (c) uam_free_compiler(c);
+                free(preBuf);
+            } else {
+                printf("[DIAG-CMP] Cannot open romfs:/shaders/runtime_vsh.dksh\n");
+            }
+        }
+
+        /* Compare fragment shader */
+        {
+            FILE *f = fopen("romfs:/shaders/runtime_fsh.dksh", "rb");
+            if (f) {
+                fseek(f, 0, SEEK_END);
+                long preSize = ftell(f);
+                fseek(f, 0, SEEK_SET);
+                uint8_t *preBuf = (uint8_t *)calloc(1, preSize);
+                fread(preBuf, 1, preSize, f);
+                fclose(f);
+
+                uam_compiler *c = uam_create_compiler(DkStage_Fragment);
+                if (c && uam_compile_dksh(c, cmpFsSrc)) {
+                    size_t rtSize = uam_get_code_size(c);
+                    uint8_t *rtBuf = (uint8_t *)memalign(256, rtSize);
+                    memset(rtBuf, 0, rtSize);
+                    uam_write_code(c, rtBuf);
+
+                    printf("[DIAG-CMP] FS precompiled: %ld bytes, runtime: %zu bytes\n",
+                           preSize, rtSize);
+
+                    if ((size_t)preSize == rtSize) {
+                        int diffs = 0;
+                        int firstDiff = -1;
+                        for (size_t i = 0; i < rtSize; i++) {
+                            if (preBuf[i] != rtBuf[i]) {
+                                if (diffs < 20) {
+                                    printf("[DIAG-CMP] FS diff @0x%04zX: pre=0x%02X rt=0x%02X\n",
+                                           i, preBuf[i], rtBuf[i]);
+                                }
+                                if (firstDiff < 0) firstDiff = (int)i;
+                                diffs++;
+                            }
+                        }
+                        if (diffs == 0) {
+                            printf("[DIAG-CMP] FS: IDENTICAL (0 differences)\n");
+                        } else {
+                            printf("[DIAG-CMP] FS: %d differences, first at 0x%04X\n",
+                                   diffs, firstDiff);
+                        }
+                    } else {
+                        printf("[DIAG-CMP] FS: SIZE MISMATCH!\n");
+                        printf("[DIAG-CMP] FS pre header:");
+                        for (int i = 0; i < 32 && i < preSize; i++)
+                            printf(" %02X", preBuf[i]);
+                        printf("\n");
+                        printf("[DIAG-CMP] FS rt  header:");
+                        for (size_t i = 0; i < 32 && i < rtSize; i++)
+                            printf(" %02X", rtBuf[i]);
+                        printf("\n");
+                    }
+                    free(rtBuf);
+                } else {
+                    printf("[DIAG-CMP] FS runtime compile FAILED\n");
+                    if (c) {
+                        const char *log = uam_get_error_log(c);
+                        if (log && log[0]) printf("[DIAG-CMP] FS error: %.200s\n", log);
+                    }
+                }
+                if (c) uam_free_compiler(c);
+                free(preBuf);
+            } else {
+                printf("[DIAG-CMP] Cannot open romfs:/shaders/runtime_fsh.dksh\n");
+            }
+        }
+        fflush(stdout);
+    }
+#endif /* SGL_ENABLE_RUNTIME_COMPILER */
+
+    /* =================================================================
+     * DIAGNOSTIC B: Runtime-compiled NO-UBO shader (constant output)
+     * If this works, libuam runtime compilation itself is OK.
+     * ================================================================= */
+    printf("\n[DIAG-B] Runtime NO-UBO shader (constant color)...\n");
+    fflush(stdout);
+    {
+        GLuint bvs = glCreateShader(GL_VERTEX_SHADER);
+        GLuint bfs = glCreateShader(GL_FRAGMENT_SHADER);
+
+        const char *bvsSrc =
+            "#version 460\n"
+            "layout(location = 0) in vec2 a_position;\n"
+            "void main() {\n"
+            "    gl_Position = vec4(a_position, 0.0, 1.0);\n"
+            "}\n";
+
+        /* Fragment shader with CONSTANT output — no UBO at all */
+        const char *bfsSrc =
+            "#version 460\n"
+            "layout(location = 0) out vec4 fragColor;\n"
+            "void main() {\n"
+            "    fragColor = vec4(1.0, 0.0, 1.0, 1.0);\n"  /* MAGENTA */
+            "}\n";
+
+        glShaderSource(bvs, 1, &bvsSrc, NULL);
+        glCompileShader(bvs);
+        GLint bvsOk = GL_FALSE;
+        glGetShaderiv(bvs, GL_COMPILE_STATUS, &bvsOk);
+
+        glShaderSource(bfs, 1, &bfsSrc, NULL);
+        glCompileShader(bfs);
+        GLint bfsOk = GL_FALSE;
+        glGetShaderiv(bfs, GL_COMPILE_STATUS, &bfsOk);
+
+        printf("[DIAG-B] VS compile: %s, FS compile: %s\n",
+               bvsOk ? "OK" : "FAIL", bfsOk ? "OK" : "FAIL");
+        fflush(stdout);
+
+        if (bvsOk && bfsOk) {
+            GLuint bprog = glCreateProgram();
+            glAttachShader(bprog, bvs);
+            glAttachShader(bprog, bfs);
+            glLinkProgram(bprog);
+
+            GLint blink = GL_FALSE;
+            glGetProgramiv(bprog, GL_LINK_STATUS, &blink);
+            printf("[DIAG-B] Link: %s\n", blink ? "OK" : "FAIL");
+            fflush(stdout);
+
+            if (blink) {
+                glUseProgram(bprog);
+                GLubyte pixel[4];
+                drawAndReadPixel("DIAG-B no-UBO", -1, 0,0,0,0, pixel);
+                bool ok = (pixel[0] > 245) && (pixel[1] < 10) && (pixel[2] > 245);
+                printf("[DIAG-B] Result: %s\n", ok ? "PASS (MAGENTA)" : "FAIL");
+                recordResult("Runtime: no-UBO constant shader", ok, NULL);
+            } else {
+                recordResult("Runtime: no-UBO constant shader", false, "link failed");
+            }
+            glDeleteProgram(bprog);
+        } else {
+            recordResult("Runtime: no-UBO constant shader", false, "compile failed");
+        }
+
+        glDeleteShader(bvs);
+        glDeleteShader(bfs);
+        fflush(stdout);
+    }
+
+    /* =================================================================
+     * DIAGNOSTIC C: Runtime-compiled WITH UBO (original test)
+     * ================================================================= */
+    printf("\n[DIAG-C] Runtime WITH UBO shader...\n");
+    fflush(stdout);
 
     /* ---- Test 1: glShaderSource stores source ---- */
     GLuint vs = glCreateShader(GL_VERTEX_SHADER);
@@ -2282,82 +2604,15 @@ static void testRuntimeShaderCompilation(void) {
             GLint colorLoc = glGetUniformLocation(program, "u_color");
             recordResult("Runtime: glGetUniformLocation", colorLoc >= 0, NULL);
 
-            /* Reset ALL GL state that may be dirty from previous tests */
-            glDisable(GL_BLEND);
-            glDisable(GL_DEPTH_TEST);
-            glDisable(GL_SCISSOR_TEST);
-            glDisable(GL_CULL_FACE);
-            glDisable(GL_POLYGON_OFFSET_FILL);
-            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-            glDepthMask(GL_TRUE);
-            glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+            printf("[DIAG-C] Runtime colorLoc=%d (0x%X)\n", colorLoc, colorLoc);
+            fflush(stdout);
 
-            /* Unbind any VBOs from previous tests */
-            glBindBuffer(GL_ARRAY_BUFFER, 0);
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-
-            /* Disable all vertex attrib arrays that might be enabled */
-            for (int a = 0; a < 8; a++) glDisableVertexAttribArray(a);
-
-            printf("[DEBUG] Runtime: colorLoc = %d (0x%X)\n", colorLoc, colorLoc);
-
-            /* CONTROL TEST: Draw CYAN with precompiled program first */
-            {
-                GLuint simProg = getSimpleProgram();
-                glUseProgram(simProg);
-                GLint simColorLoc = glGetUniformLocation(simProg, "u_color");
-                printf("[DEBUG] Precompiled: colorLoc = %d (0x%X)\n", simColorLoc, simColorLoc);
-
-                glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-                glUniform4f(simColorLoc, 0.0f, 1.0f, 1.0f, 1.0f);
-
-                static const float ctrlQuad[] = {
-                    -0.5f, -0.5f, 0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f,
-                };
-                glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, ctrlQuad);
-                glEnableVertexAttribArray(0);
-                static const GLushort ctrlIdx[] = { 0, 1, 2, 0, 2, 3 };
-                glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, ctrlIdx);
-
-                GLubyte ctrlPixel[4];
-                glReadPixels(640, 360, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, ctrlPixel);
-                printf("[DEBUG] CONTROL (precompiled) pixel: R=%d G=%d B=%d A=%d\n",
-                       ctrlPixel[0], ctrlPixel[1], ctrlPixel[2], ctrlPixel[3]);
-                glDisableVertexAttribArray(0);
-            }
-
-            /* ACTUAL TEST: Draw CYAN with runtime-compiled shader + uniform */
-            glUseProgram(program);
-            glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-            /* Set CYAN color via uniform */
-            glUniform4f(colorLoc, 0.0f, 1.0f, 1.0f, 1.0f);
-
-            static const float quad[] = {
-                -0.5f, -0.5f,
-                 0.5f, -0.5f,
-                 0.5f,  0.5f,
-                -0.5f,  0.5f,
-            };
-
-            glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, quad);
-            glEnableVertexAttribArray(0);
-
-            static const GLushort indices[] = { 0, 1, 2, 0, 2, 3 };
-            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, indices);
-
-            /* Read pixel to verify runtime shader output */
             GLubyte pixel[4];
-            glReadPixels(640, 360, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
-            printf("[DEBUG] Runtime shader pixel: R=%d G=%d B=%d A=%d\n",
-                   pixel[0], pixel[1], pixel[2], pixel[3]);
+            drawAndReadPixel("DIAG-C runtime+UBO", colorLoc, 0,1,1,1, pixel);
             bool colorOk = (pixel[0] < 10) && (pixel[1] > 245) && (pixel[2] > 245);
+            printf("[DIAG-C] Result: %s\n", colorOk ? "PASS (CYAN)" : "FAIL");
             recordResult("Runtime: rendered CYAN quad", colorOk, NULL);
-
-            glDisableVertexAttribArray(0);
-            /* Don't delete here — s_runtimeProgram holds the handle for cleanup */
+            fflush(stdout);
         } else {
             glDeleteProgram(program);
             s_runtimeProgram = 0;

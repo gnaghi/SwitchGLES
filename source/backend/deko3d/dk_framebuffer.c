@@ -167,14 +167,41 @@ void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y,
 
     dkCmdBufCopyImageToBuffer(dk->cmdbuf, &srcView, &srcRect, &dstBuf, 0);
 
+    /* Check GPU queue error state BEFORE submitting — if already in error,
+     * skip the submit to prevent crash, and return black pixels */
+    if (dkQueueIsInErrorState(dk->queue)) {
+        SGL_ERROR_BACKEND("read_pixels: GPU queue ALREADY in ERROR STATE before submit!");
+        memset(pixels, 0, (size_t)width * (size_t)height * 4);
+        dkMemBlockDestroy(readbackMem);
+
+        /* Reset command buffer anyway */
+        dkCmdBufClear(dk->cmdbuf);
+        dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+        dk->descriptors_bound = false;
+
+        /* Re-bind render target */
+        if (dk->framebuffers) {
+            DkImageView colorView2;
+            dkImageViewDefaults(&colorView2, &dk->framebuffers[dk->current_slot]);
+            if (dk->depth_images[dk->current_slot]) {
+                DkImageView depthView2;
+                dkImageViewDefaults(&depthView2, dk->depth_images[dk->current_slot]);
+                dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView2, &depthView2);
+            } else {
+                dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView2, NULL);
+            }
+        }
+        return;
+    }
+
     /* Submit and wait for copy to complete */
     DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
     dkQueueSubmitCommands(dk->queue, cmdlist);
     dkQueueWaitIdle(dk->queue);
 
-    /* Check if the GPU queue entered an error state (e.g., invalid shader) */
+    /* Check if the GPU queue entered an error state during this submit */
     if (dkQueueIsInErrorState(dk->queue)) {
-        SGL_ERROR_BACKEND("read_pixels: GPU queue is in ERROR STATE!");
+        SGL_ERROR_BACKEND("read_pixels: GPU queue entered ERROR STATE after submit!");
     }
 
     /* Copy data to user buffer, flipping rows to match GL convention.
