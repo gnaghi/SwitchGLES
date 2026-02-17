@@ -21,7 +21,7 @@
 #define SGL_UNIFORM_BUF_SIZE    (256 * 1024)
 #define SGL_UNIFORM_ALIGNMENT   0x100   /* DK_UNIFORM_BUF_ALIGNMENT */
 #define SGL_TEXTURE_MEM_SIZE    (32 * 1024 * 1024)
-#define SGL_DESCRIPTOR_MEM_SIZE (4 * 1024)
+#define SGL_DESCRIPTOR_MEM_SIZE (SGL_MAX_TEXTURES * 64)  /* 64 = sizeof(DkImageDescriptor) + sizeof(DkSamplerDescriptor) */
 
 /* Maximum resources */
 #define SGL_MAX_SURFACES        4
