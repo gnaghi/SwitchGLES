@@ -39,6 +39,7 @@
 /* Packed UBO configuration */
 #define SGL_MAX_PACKED_UBO_SIZE  8192  /* Max bytes per packed UBO (supports 128 bones) */
 #define SGL_MAX_PACKED_UBOS      2     /* Per stage: 0=main, 1=bones */
+#define SGL_ATTRIB_NAME_MAX      64    /* Max attribute name length */
 
 /* Packed UBO shadow buffer (CPU-side, flushed to GPU at draw time) */
 typedef struct sgl_packed_ubo {
@@ -77,7 +78,28 @@ typedef struct sgl_uniform_binding {
     uint32_t size;        /* Aligned size (256 bytes for deko3d) */
     uint32_t data_size;   /* Actual data size (e.g., 64 for mat4) */
     bool dirty;
+    /* Shadow copy for glGetUniformfv/iv readback (max mat4 = 64 bytes) */
+    uint8_t shadow[64];
+    uint32_t shadow_size;
+    uint32_t shadow_components; /* 1-4 for vec, 4/9/16 for mat */
+    GLenum shadow_type;         /* GL_FLOAT or GL_INT */
 } sgl_uniform_binding_t;
+
+/* Attribute binding (from glBindAttribLocation or built-in defaults) */
+typedef struct sgl_attrib_binding {
+    char name[SGL_ATTRIB_NAME_MAX];
+    GLuint index;
+    bool used;
+} sgl_attrib_binding_t;
+
+/* Active uniform info (populated when glGetUniformLocation succeeds) */
+typedef struct sgl_active_uniform_info {
+    char name[SGL_ATTRIB_NAME_MAX];
+    GLint location;
+    GLenum type;        /* GL_FLOAT, GL_FLOAT_VEC2, ..., GL_FLOAT_MAT4, GL_INT, etc. */
+    GLint size;         /* 1 for non-arrays */
+    bool active;
+} sgl_active_uniform_info_t;
 
 /* Program object */
 typedef struct sgl_program {
@@ -92,6 +114,12 @@ typedef struct sgl_program {
     /* Packed UBO shadow buffers (per-stage, per-binding) */
     sgl_packed_ubo_t packed_vertex[SGL_MAX_PACKED_UBOS];
     sgl_packed_ubo_t packed_fragment[SGL_MAX_PACKED_UBOS];
+    /* Attribute bindings (from glBindAttribLocation) */
+    sgl_attrib_binding_t attrib_bindings[SGL_MAX_ATTRIBS];
+    int num_attrib_bindings;
+    /* Active uniform tracking (populated by glGetUniformLocation) */
+    sgl_active_uniform_info_t active_uniforms[SGL_MAX_UNIFORMS * 2]; /* VS + FS */
+    int num_active_uniforms;
 } sgl_program_t;
 
 /* Texture object */

@@ -206,7 +206,7 @@ GL_APICALL void GL_APIENTRY glDepthFunc(GLenum func) {
 
 GL_APICALL void GL_APIENTRY glDepthMask(GLboolean flag) {
     GET_CTX();
-    if (sgl_state_depth_set_write_enabled(&ctx->depth_state, flag == GL_TRUE)) {
+    if (sgl_state_depth_set_write_enabled(&ctx->depth_state, flag != 0)) {
         apply_depth(ctx);
     }
     SGL_TRACE_STATE("glDepthMask(%d)", flag);
@@ -278,8 +278,8 @@ GL_APICALL void GL_APIENTRY glFrontFace(GLenum mode) {
 
 GL_APICALL void GL_APIENTRY glColorMask(GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha) {
     GET_CTX();
-    if (sgl_state_color_set_mask(&ctx->color_state, red == GL_TRUE, green == GL_TRUE,
-                                  blue == GL_TRUE, alpha == GL_TRUE)) {
+    if (sgl_state_color_set_mask(&ctx->color_state, red != 0, green != 0,
+                                  blue != 0, alpha != 0)) {
         apply_color_mask(ctx);
     }
     SGL_TRACE_STATE("glColorMask(%d, %d, %d, %d)", red, green, blue, alpha);

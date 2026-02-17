@@ -355,9 +355,10 @@ GL_APICALL void GL_APIENTRY glGetBooleanv(GLenum pname, GLboolean *params) {
             params[3] = ctx->color_state.mask[3] ? GL_TRUE : GL_FALSE;
             break;
         default: {
-            GLint temp;
-            glGetIntegerv(pname, &temp);
-            *params = temp ? GL_TRUE : GL_FALSE;
+            /* Use array large enough for multi-value queries (GL_VIEWPORT, GL_SCISSOR_BOX, etc.) */
+            GLint temp[4] = {0};
+            glGetIntegerv(pname, temp);
+            *params = temp[0] ? GL_TRUE : GL_FALSE;
             break;
         }
     }

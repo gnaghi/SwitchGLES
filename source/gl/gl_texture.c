@@ -29,7 +29,7 @@ GL_APICALL void GL_APIENTRY glGenTextures(GLsizei n, GLuint *textures) {
 GL_APICALL void GL_APIENTRY glDeleteTextures(GLsizei n, const GLuint *textures) {
     GET_CTX();
 
-    if (n < 0) return;
+    if (n < 0 || !textures) return;
 
     for (GLsizei i = 0; i < n; i++) {
         GLuint id = textures[i];

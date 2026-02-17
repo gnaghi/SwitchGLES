@@ -428,11 +428,33 @@ GL_APICALL void GL_APIENTRY glGetProgramiv(GLuint program, GLenum pname, GLint *
             *params = (prog->vertex_shader ? 1 : 0) + (prog->fragment_shader ? 1 : 0);
             break;
         case GL_ACTIVE_UNIFORMS:
-            *params = SGL_MAX_UNIFORMS;
+            *params = prog->num_active_uniforms;
             break;
         case GL_ACTIVE_ATTRIBUTES:
-            *params = SGL_MAX_ATTRIBS;
+            *params = prog->num_attrib_bindings;
             break;
+        case GL_ACTIVE_ATTRIBUTE_MAX_LENGTH: {
+            GLint maxlen = 0;
+            for (int i = 0; i < prog->num_attrib_bindings; i++) {
+                if (prog->attrib_bindings[i].used) {
+                    GLint len = (GLint)strlen(prog->attrib_bindings[i].name) + 1;
+                    if (len > maxlen) maxlen = len;
+                }
+            }
+            *params = maxlen;
+            break;
+        }
+        case GL_ACTIVE_UNIFORM_MAX_LENGTH: {
+            GLint maxlen = 0;
+            for (int i = 0; i < prog->num_active_uniforms; i++) {
+                if (prog->active_uniforms[i].active) {
+                    GLint len = (GLint)strlen(prog->active_uniforms[i].name) + 1;
+                    if (len > maxlen) maxlen = len;
+                }
+            }
+            *params = maxlen;
+            break;
+        }
         default:
             sgl_set_error(ctx, GL_INVALID_ENUM);
             break;

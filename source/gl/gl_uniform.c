@@ -180,6 +180,36 @@ static GLint lookup_registered_uniform(const GLchar *name) {
     return -1;
 }
 
+/*
+ * Track a uniform as "active" in the program when glGetUniformLocation returns a valid location.
+ * This is used by glGetActiveUniform and glGetProgramiv(GL_ACTIVE_UNIFORMS).
+ */
+static void sgl_track_active_uniform(sgl_program_t *prog, const GLchar *name,
+                                      GLint location, GLenum type, GLint size) {
+    if (!prog || !name) return;
+
+    /* Check if already tracked */
+    for (int i = 0; i < prog->num_active_uniforms; i++) {
+        if (prog->active_uniforms[i].active &&
+            strcmp(prog->active_uniforms[i].name, name) == 0) {
+            return; /* Already tracked */
+        }
+    }
+
+    /* Add new entry */
+    if (prog->num_active_uniforms < SGL_MAX_UNIFORMS * 2) {
+        int slot = prog->num_active_uniforms++;
+        size_t len = strlen(name);
+        if (len >= SGL_ATTRIB_NAME_MAX) len = SGL_ATTRIB_NAME_MAX - 1;
+        memcpy(prog->active_uniforms[slot].name, name, len);
+        prog->active_uniforms[slot].name[len] = '\0';
+        prog->active_uniforms[slot].location = location;
+        prog->active_uniforms[slot].type = type;
+        prog->active_uniforms[slot].size = size;
+        prog->active_uniforms[slot].active = true;
+    }
+}
+
 GL_APICALL GLint GL_APIENTRY glGetUniformLocation(GLuint program, const GLchar *name) {
     GET_CTX_RET(-1);
 
@@ -214,6 +244,8 @@ GL_APICALL GLint GL_APIENTRY glGetUniformLocation(GLuint program, const GLchar *
                 }
             }
         }
+        /* Track as active uniform */
+        sgl_track_active_uniform(prog, name, registered, GL_FLOAT_VEC4, 1);
         return registered;
     }
 
@@ -228,7 +260,9 @@ GL_APICALL GLint GL_APIENTRY glGetUniformLocation(GLuint program, const GLchar *
         strcmp(name, "u_projection") == 0 ||   /* SDL_Renderer */
         strcmp(name, "u_testScale") == 0 ||
         strcmp(name, "ModelViewProjectionMatrix") == 0) {  /* es2gears */
-        return (0 << 16) | 0;
+        GLint loc = (0 << 16) | 0;
+        sgl_track_active_uniform(prog, name, loc, GL_FLOAT_MAT4, 1);
+        return loc;
     }
 
     /* Vertex binding 1: offset vec2/vec4 or NormalMatrix or Model matrix */
@@ -239,24 +273,32 @@ GL_APICALL GLint GL_APIENTRY glGetUniformLocation(GLuint program, const GLchar *
         strcmp(name, "Model") == 0 ||          /* UBO block name */
         strcmp(name, "ModelMatrix") == 0 ||    /* blinn_phong block name */
         strcmp(name, "NormalMatrix") == 0) {   /* es2gears */
-        return (0 << 16) | 1;
+        GLint loc = (0 << 16) | 1;
+        sgl_track_active_uniform(prog, name, loc, GL_FLOAT_MAT4, 1);
+        return loc;
     }
 
     /* Vertex binding 2: offset3 vec3 or LightSourcePosition */
     if (strcmp(name, "u_testOffset3") == 0 ||
         strcmp(name, "LightSourcePosition") == 0) {  /* es2gears */
-        return (0 << 16) | 2;
+        GLint loc = (0 << 16) | 2;
+        sgl_track_active_uniform(prog, name, loc, GL_FLOAT_VEC4, 1);
+        return loc;
     }
 
     /* Vertex binding 3: mat2 or MaterialColor */
     if (strcmp(name, "u_testMat2") == 0 ||
         strcmp(name, "MaterialColor") == 0) {  /* es2gears */
-        return (0 << 16) | 3;
+        GLint loc = (0 << 16) | 3;
+        sgl_track_active_uniform(prog, name, loc, GL_FLOAT_VEC4, 1);
+        return loc;
     }
 
     /* Vertex binding 4: mat3 */
     if (strcmp(name, "u_testMat3") == 0) {
-        return (0 << 16) | 4;
+        GLint loc = (0 << 16) | 4;
+        sgl_track_active_uniform(prog, name, loc, GL_FLOAT_MAT3, 1);
+        return loc;
     }
 
     /* ========== BUILT-IN FRAGMENT STAGE UNIFORMS ========== */
@@ -267,7 +309,9 @@ GL_APICALL GLint GL_APIENTRY glGetUniformLocation(GLuint program, const GLchar *
         strcmp(name, "u_baseColor") == 0 ||
         strcmp(name, "u_testAlpha") == 0 ||
         strcmp(name, "u_blend") == 0) {
-        return (1 << 16) | 0;
+        GLint loc = (1 << 16) | 0;
+        sgl_track_active_uniform(prog, name, loc, GL_FLOAT_VEC4, 1);
+        return loc;
     }
 
     /* Fragment binding 1: vec2/vec4 or time or Material block (skybox) */
@@ -275,7 +319,9 @@ GL_APICALL GLint GL_APIENTRY glGetUniformLocation(GLuint program, const GLchar *
         strcmp(name, "u_alpha") == 0 ||
         strcmp(name, "u_time") == 0 ||
         strcmp(name, "Material") == 0) {       /* UBO block name for skybox */
-        return (1 << 16) | 1;
+        GLint loc = (1 << 16) | 1;
+        sgl_track_active_uniform(prog, name, loc, GL_FLOAT_VEC4, 1);
+        return loc;
     }
 
     /* Fragment binding 2: vec3/vec4 or mode or material params (PBR) */
@@ -284,64 +330,325 @@ GL_APICALL GLint GL_APIENTRY glGetUniformLocation(GLuint program, const GLchar *
         strcmp(name, "u_material") == 0 ||     /* PBR material params */
         strcmp(name, "u_light") == 0 ||        /* Blinn-Phong light uniform */
         strcmp(name, "LightParams") == 0) {    /* Blinn-Phong light UBO block */
-        return (1 << 16) | 2;
+        GLint loc = (1 << 16) | 2;
+        sgl_track_active_uniform(prog, name, loc, GL_FLOAT_VEC4, 1);
+        return loc;
     }
 
     /* Fragment binding 3: vec4 */
     if (strcmp(name, "u_testVec4") == 0) {
-        return (1 << 16) | 3;
+        GLint loc = (1 << 16) | 3;
+        sgl_track_active_uniform(prog, name, loc, GL_FLOAT_VEC4, 1);
+        return loc;
     }
 
     /* Fragment binding 4: int mode (for alluniform shader) */
     if (strcmp(name, "u_testMode") == 0) {
-        return (1 << 16) | 4;
+        GLint loc = (1 << 16) | 4;
+        sgl_track_active_uniform(prog, name, loc, GL_INT, 1);
+        return loc;
     }
 
     /* Fragment binding 5: ivec2 */
     if (strcmp(name, "u_testIvec2") == 0) {
-        return (1 << 16) | 5;
+        GLint loc = (1 << 16) | 5;
+        sgl_track_active_uniform(prog, name, loc, GL_INT_VEC2, 1);
+        return loc;
     }
 
     /* Fragment binding 6: ivec3 */
     if (strcmp(name, "u_testIvec3") == 0) {
-        return (1 << 16) | 6;
+        GLint loc = (1 << 16) | 6;
+        sgl_track_active_uniform(prog, name, loc, GL_INT_VEC3, 1);
+        return loc;
     }
 
     /* Fragment binding 7: ivec4 */
     if (strcmp(name, "u_testIvec4") == 0) {
-        return (1 << 16) | 7;
+        GLint loc = (1 << 16) | 7;
+        sgl_track_active_uniform(prog, name, loc, GL_INT_VEC4, 1);
+        return loc;
     }
+
+    return -1;
+}
+
+/*
+ * Built-in attribute name → location mapping (for precompiled shaders).
+ * Shaders use layout(location = N) which must match these defaults.
+ */
+static GLint lookup_builtin_attrib(const GLchar *name) {
+    /* Location 0: position */
+    if (strcmp(name, "position") == 0 || strcmp(name, "a_position") == 0 ||
+        strcmp(name, "vPosition") == 0 || strcmp(name, "aPosition") == 0 ||
+        strcmp(name, "in_position") == 0 || strcmp(name, "inPosition") == 0)
+        return 0;
+
+    /* Location 1: texcoord */
+    if (strcmp(name, "texcoord") == 0 || strcmp(name, "a_texcoord") == 0 ||
+        strcmp(name, "vTexCoord") == 0 || strcmp(name, "aTexCoord") == 0 ||
+        strcmp(name, "in_texcoord") == 0 || strcmp(name, "inTexCoord") == 0 ||
+        strcmp(name, "a_texCoord") == 0)
+        return 1;
+
+    /* Location 2: normal */
+    if (strcmp(name, "normal") == 0 || strcmp(name, "a_normal") == 0 ||
+        strcmp(name, "vNormal") == 0 || strcmp(name, "aNormal") == 0 ||
+        strcmp(name, "in_normal") == 0 || strcmp(name, "inNormal") == 0)
+        return 2;
+
+    /* Location 3: color */
+    if (strcmp(name, "color") == 0 || strcmp(name, "a_color") == 0 ||
+        strcmp(name, "vColor") == 0 || strcmp(name, "aColor") == 0 ||
+        strcmp(name, "in_color") == 0 || strcmp(name, "inColor") == 0)
+        return 3;
+
+    /* Location 4: tangent */
+    if (strcmp(name, "tangent") == 0 || strcmp(name, "a_tangent") == 0 ||
+        strcmp(name, "vTangent") == 0 || strcmp(name, "aTangent") == 0)
+        return 4;
 
     return -1;
 }
 
 GL_APICALL GLint GL_APIENTRY glGetAttribLocation(GLuint program, const GLchar *name) {
-    (void)program; (void)name;
-    return -1;
+    GET_CTX_RET(-1);
+
+    if (program == 0 || !name) return -1;
+
+    sgl_program_t *prog = GET_PROGRAM(program);
+    if (!prog || !prog->linked) return -1;
+
+    /* Check program-specific bindings first (from glBindAttribLocation) */
+    for (int i = 0; i < prog->num_attrib_bindings; i++) {
+        if (prog->attrib_bindings[i].used &&
+            strcmp(prog->attrib_bindings[i].name, name) == 0) {
+            return (GLint)prog->attrib_bindings[i].index;
+        }
+    }
+
+    /* Fall back to built-in attribute name table */
+    return lookup_builtin_attrib(name);
 }
 
 GL_APICALL void GL_APIENTRY glBindAttribLocation(GLuint program, GLuint index, const GLchar *name) {
-    (void)program; (void)index; (void)name;
+    GET_CTX();
+
+    if (program == 0 || !name || index >= (GLuint)SGL_MAX_ATTRIBS) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    sgl_program_t *prog = GET_PROGRAM(program);
+    if (!prog) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    size_t len = strlen(name);
+    if (len == 0 || len >= SGL_ATTRIB_NAME_MAX) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    /* Check if already bound - update if so */
+    for (int i = 0; i < prog->num_attrib_bindings; i++) {
+        if (prog->attrib_bindings[i].used &&
+            strcmp(prog->attrib_bindings[i].name, name) == 0) {
+            prog->attrib_bindings[i].index = index;
+            SGL_TRACE_SHADER("glBindAttribLocation(%u, %u, \"%s\") - updated", program, index, name);
+            return;
+        }
+    }
+
+    /* Add new binding */
+    if (prog->num_attrib_bindings < SGL_MAX_ATTRIBS) {
+        int slot = prog->num_attrib_bindings++;
+        strcpy(prog->attrib_bindings[slot].name, name);
+        prog->attrib_bindings[slot].index = index;
+        prog->attrib_bindings[slot].used = true;
+    }
+
+    SGL_TRACE_SHADER("glBindAttribLocation(%u, %u, \"%s\")", program, index, name);
 }
 
 GL_APICALL void GL_APIENTRY glGetActiveAttrib(GLuint program, GLuint index, GLsizei bufSize,
                                                GLsizei *length, GLint *size, GLenum *type, GLchar *name) {
-    (void)program; (void)index; (void)bufSize;
-    (void)length; (void)size; (void)type; (void)name;
+    GET_CTX();
+
+    sgl_program_t *prog = GET_PROGRAM(program);
+    if (!prog || !prog->linked) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    /* Count active attributes = bound attributes */
+    if (index >= (GLuint)prog->num_attrib_bindings) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    /* Find the Nth active attribute */
+    int count = 0;
+    for (int i = 0; i < prog->num_attrib_bindings; i++) {
+        if (!prog->attrib_bindings[i].used) continue;
+        if (count == (int)index) {
+            if (name && bufSize > 0) {
+                GLsizei namelen = (GLsizei)strlen(prog->attrib_bindings[i].name);
+                GLsizei copylen = (bufSize - 1 < namelen) ? bufSize - 1 : namelen;
+                memcpy(name, prog->attrib_bindings[i].name, copylen);
+                name[copylen] = '\0';
+                if (length) *length = copylen;
+            } else if (length) {
+                *length = 0;
+            }
+            if (size) *size = 1;
+            if (type) *type = GL_FLOAT_VEC4; /* Default: we don't know actual type */
+            return;
+        }
+        count++;
+    }
+
+    sgl_set_error(ctx, GL_INVALID_VALUE);
 }
 
 GL_APICALL void GL_APIENTRY glGetActiveUniform(GLuint program, GLuint index, GLsizei bufSize,
                                                 GLsizei *length, GLint *size, GLenum *type, GLchar *name) {
-    (void)program; (void)index; (void)bufSize;
-    (void)length; (void)size; (void)type; (void)name;
+    GET_CTX();
+
+    sgl_program_t *prog = GET_PROGRAM(program);
+    if (!prog || !prog->linked) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    if (index >= (GLuint)prog->num_active_uniforms) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    /* Find the Nth active uniform */
+    int count = 0;
+    for (int i = 0; i < prog->num_active_uniforms; i++) {
+        if (!prog->active_uniforms[i].active) continue;
+        if (count == (int)index) {
+            if (name && bufSize > 0) {
+                GLsizei namelen = (GLsizei)strlen(prog->active_uniforms[i].name);
+                GLsizei copylen = (bufSize - 1 < namelen) ? bufSize - 1 : namelen;
+                memcpy(name, prog->active_uniforms[i].name, copylen);
+                name[copylen] = '\0';
+                if (length) *length = copylen;
+            } else if (length) {
+                *length = 0;
+            }
+            if (size) *size = prog->active_uniforms[i].size;
+            if (type) *type = prog->active_uniforms[i].type;
+            return;
+        }
+        count++;
+    }
+
+    sgl_set_error(ctx, GL_INVALID_VALUE);
 }
 
 GL_APICALL void GL_APIENTRY glGetUniformfv(GLuint program, GLint location, GLfloat *params) {
-    (void)program; (void)location; (void)params;
+    GET_CTX();
+
+    if (!params || location == -1) return;
+
+    sgl_program_t *prog = GET_PROGRAM(program);
+    if (!prog || !prog->linked) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    /* Packed mode readback */
+    if (location & (1 << 31)) {
+        int stage = (location >> 24) & 0x7F;
+        int binding = (location >> 16) & 0xFF;
+        int offset = location & 0xFFFF;
+        if (binding >= SGL_MAX_PACKED_UBOS) return;
+        sgl_packed_ubo_t *packed = (stage == 0)
+            ? &prog->packed_vertex[binding]
+            : &prog->packed_fragment[binding];
+        if (packed->valid && (uint32_t)offset + 4 <= packed->size) {
+            memcpy(params, packed->data + offset, 4); /* At least 1 float */
+        }
+        return;
+    }
+
+    /* Legacy mode readback from shadow buffer */
+    int stage = (location >> 16) & 0xFFFF;
+    int binding = location & 0xFFFF;
+    if (binding >= SGL_MAX_UNIFORMS) return;
+
+    sgl_uniform_binding_t *uniforms = (stage == 0) ? prog->vertex_uniforms : prog->fragment_uniforms;
+    sgl_uniform_binding_t *ub = &uniforms[binding];
+
+    if (ub->valid && ub->shadow_size > 0) {
+        uint32_t copy_size = ub->shadow_size;
+        if (copy_size > 64) copy_size = 64;
+        if (ub->shadow_type == GL_FLOAT || ub->shadow_type == 0) {
+            memcpy(params, ub->shadow, copy_size);
+        } else {
+            /* Convert int shadow to float */
+            uint32_t count = copy_size / sizeof(int32_t);
+            const int32_t *idata = (const int32_t *)ub->shadow;
+            for (uint32_t i = 0; i < count; i++) {
+                params[i] = (GLfloat)idata[i];
+            }
+        }
+    }
 }
 
 GL_APICALL void GL_APIENTRY glGetUniformiv(GLuint program, GLint location, GLint *params) {
-    (void)program; (void)location; (void)params;
+    GET_CTX();
+
+    if (!params || location == -1) return;
+
+    sgl_program_t *prog = GET_PROGRAM(program);
+    if (!prog || !prog->linked) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    /* Packed mode readback */
+    if (location & (1 << 31)) {
+        int stage = (location >> 24) & 0x7F;
+        int binding = (location >> 16) & 0xFF;
+        int offset = location & 0xFFFF;
+        if (binding >= SGL_MAX_PACKED_UBOS) return;
+        sgl_packed_ubo_t *packed = (stage == 0)
+            ? &prog->packed_vertex[binding]
+            : &prog->packed_fragment[binding];
+        if (packed->valid && (uint32_t)offset + 4 <= packed->size) {
+            memcpy(params, packed->data + offset, 4);
+        }
+        return;
+    }
+
+    /* Legacy mode readback from shadow buffer */
+    int stage = (location >> 16) & 0xFFFF;
+    int binding = location & 0xFFFF;
+    if (binding >= SGL_MAX_UNIFORMS) return;
+
+    sgl_uniform_binding_t *uniforms = (stage == 0) ? prog->vertex_uniforms : prog->fragment_uniforms;
+    sgl_uniform_binding_t *ub = &uniforms[binding];
+
+    if (ub->valid && ub->shadow_size > 0) {
+        uint32_t copy_size = ub->shadow_size;
+        if (copy_size > 64) copy_size = 64;
+        if (ub->shadow_type == GL_INT) {
+            memcpy(params, ub->shadow, copy_size);
+        } else {
+            /* Convert float shadow to int */
+            uint32_t count = copy_size / sizeof(float);
+            const float *fdata = (const float *)ub->shadow;
+            for (uint32_t i = 0; i < count; i++) {
+                params[i] = (GLint)fdata[i];
+            }
+        }
+    }
 }
 
 /*
@@ -430,6 +737,14 @@ static void set_float_uniform(GLint location, int num_components, GLsizei count,
             }
         }
         ctx->backend->ops->write_uniform(ctx->backend, ub->offset, array_data, clampedCount * 16);
+
+        /* Save shadow copy for glGetUniformfv readback (first element only) */
+        uint32_t shadow_bytes = (uint32_t)num_components * sizeof(float);
+        if (shadow_bytes > 64) shadow_bytes = 64;
+        memcpy(ub->shadow, values, shadow_bytes);
+        ub->shadow_size = shadow_bytes;
+        ub->shadow_components = num_components;
+        ub->shadow_type = GL_FLOAT;
     }
 
     ub->dirty = true;
@@ -541,6 +856,14 @@ static void set_int_uniform(GLint location, int num_components, GLsizei count, c
             }
         }
         ctx->backend->ops->write_uniform(ctx->backend, ub->offset, array_data, clampedCount * 16);
+
+        /* Save shadow copy for glGetUniformiv readback (first element only) */
+        uint32_t shadow_bytes = (uint32_t)num_components * sizeof(int32_t);
+        if (shadow_bytes > 64) shadow_bytes = 64;
+        memcpy(ub->shadow, values, shadow_bytes);
+        ub->shadow_size = shadow_bytes;
+        ub->shadow_components = num_components;
+        ub->shadow_type = GL_INT;
     }
 
     ub->dirty = true;
@@ -699,6 +1022,12 @@ GL_APICALL void GL_APIENTRY glUniformMatrix2fv(GLint location, GLsizei count, GL
             }
         }
         ctx->backend->ops->write_uniform(ctx->backend, ub->offset, std140_data, dataSize);
+
+        /* Save shadow copy (first matrix = 32 bytes std140) */
+        memcpy(ub->shadow, std140_data, 32);
+        ub->shadow_size = 32;
+        ub->shadow_components = 4;
+        ub->shadow_type = GL_FLOAT;
     }
 
     ub->dirty = true;
@@ -785,6 +1114,12 @@ GL_APICALL void GL_APIENTRY glUniformMatrix3fv(GLint location, GLsizei count, GL
             }
         }
         ctx->backend->ops->write_uniform(ctx->backend, ub->offset, std140_data, dataSize);
+
+        /* Save shadow copy (first matrix = 48 bytes std140) */
+        memcpy(ub->shadow, std140_data, 48);
+        ub->shadow_size = 48;
+        ub->shadow_components = 9;
+        ub->shadow_type = GL_FLOAT;
     }
 
     ub->dirty = true;
@@ -850,6 +1185,8 @@ GL_APICALL void GL_APIENTRY glUniformMatrix4fv(GLint location, GLsizei count, GL
     if (ub->valid && ctx->backend->ops->write_uniform) {
         if (transpose == GL_FALSE) {
             ctx->backend->ops->write_uniform(ctx->backend, ub->offset, value, data_size);
+            /* Save shadow copy (first matrix = 64 bytes) */
+            memcpy(ub->shadow, value, 64);
         } else {
             /* Transpose the matrix before writing */
             float transposed[16 * 4]; /* Support up to 4 matrices */
@@ -865,7 +1202,11 @@ GL_APICALL void GL_APIENTRY glUniformMatrix4fv(GLint location, GLsizei count, GL
                 }
             }
             ctx->backend->ops->write_uniform(ctx->backend, ub->offset, transposed, data_size);
+            memcpy(ub->shadow, transposed, 64);
         }
+        ub->shadow_size = 64;
+        ub->shadow_components = 16;
+        ub->shadow_type = GL_FLOAT;
     }
 
     ub->dirty = true;

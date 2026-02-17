@@ -39,7 +39,7 @@ GL_APICALL void GL_APIENTRY glGenFramebuffers(GLsizei n, GLuint *framebuffers) {
 GL_APICALL void GL_APIENTRY glDeleteFramebuffers(GLsizei n, const GLuint *framebuffers) {
     GET_CTX();
 
-    if (n < 0) return;
+    if (n < 0 || !framebuffers) return;
 
     for (GLsizei i = 0; i < n; i++) {
         GLuint id = framebuffers[i];
@@ -176,10 +176,48 @@ GL_APICALL GLenum GL_APIENTRY glCheckFramebufferStatus(GLenum target) {
         return GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT;
     }
 
-    /* Verify the attachment is a valid texture */
+    /* Verify the color attachment is a valid texture with dimensions */
     sgl_texture_t *tex = GET_TEXTURE(fbo->color_attachment);
     if (!tex || !tex->used) {
         return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
+    }
+    if (tex->width == 0 || tex->height == 0) {
+        return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
+    }
+
+    /* Verify depth attachment if present */
+    if (fbo->depth_attachment != 0) {
+        if (fbo->depth_is_renderbuffer) {
+            sgl_renderbuffer_t *rb = GET_RENDERBUFFER(fbo->depth_attachment);
+            if (!rb || !rb->used) {
+                return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
+            }
+            /* Check dimension match */
+            if (rb->width != tex->width || rb->height != tex->height) {
+                return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
+            }
+        } else {
+            sgl_texture_t *depth_tex = GET_TEXTURE(fbo->depth_attachment);
+            if (!depth_tex || !depth_tex->used) {
+                return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
+            }
+            if (depth_tex->width != tex->width || depth_tex->height != tex->height) {
+                return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
+            }
+        }
+    }
+
+    /* Verify stencil attachment if present */
+    if (fbo->stencil_attachment != 0) {
+        if (fbo->stencil_is_renderbuffer) {
+            sgl_renderbuffer_t *rb = GET_RENDERBUFFER(fbo->stencil_attachment);
+            if (!rb || !rb->used) {
+                return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
+            }
+            if (rb->width != tex->width || rb->height != tex->height) {
+                return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
+            }
+        }
     }
 
     fbo->is_complete = true;
@@ -331,7 +369,7 @@ GL_APICALL void GL_APIENTRY glGenRenderbuffers(GLsizei n, GLuint *renderbuffers)
 GL_APICALL void GL_APIENTRY glDeleteRenderbuffers(GLsizei n, const GLuint *renderbuffers) {
     GET_CTX();
 
-    if (n < 0) return;
+    if (n < 0 || !renderbuffers) return;
 
     for (GLsizei i = 0; i < n; i++) {
         GLuint id = renderbuffers[i];

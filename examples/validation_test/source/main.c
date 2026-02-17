@@ -2041,6 +2041,210 @@ static void testQueries(void) {
 }
 
 /*==========================================================================
+ * TEST: Shader/Program Queries (glGetAttribLocation, glGetActiveUniform, etc.)
+ *==========================================================================*/
+
+static void testShaderQueries(void) {
+    printf("\n--- Test: Shader/Program Queries ---\n");
+
+    GLuint prog = getSimpleProgram();
+    if (!prog) {
+        recordResult("ShaderQuery: program load", false, "failed");
+        return;
+    }
+    glUseProgram(prog);
+
+    /* === glBindAttribLocation / glGetAttribLocation === */
+
+    /* Test built-in attribute lookup */
+    GLint posLoc = glGetAttribLocation(prog, "position");
+    recordResult("glGetAttribLocation(\"position\") == 0",
+                 posLoc == 0, NULL);
+
+    GLint texLoc = glGetAttribLocation(prog, "texcoord");
+    recordResult("glGetAttribLocation(\"texcoord\") == 1",
+                 texLoc == 1, NULL);
+
+    GLint normLoc = glGetAttribLocation(prog, "normal");
+    recordResult("glGetAttribLocation(\"normal\") == 2",
+                 normLoc == 2, NULL);
+
+    GLint colorLoc = glGetAttribLocation(prog, "color");
+    recordResult("glGetAttribLocation(\"color\") == 3",
+                 colorLoc == 3, NULL);
+
+    /* Unknown name should return -1 */
+    GLint unknownLoc = glGetAttribLocation(prog, "nonexistent_attrib");
+    recordResult("glGetAttribLocation(unknown) == -1",
+                 unknownLoc == -1, NULL);
+
+    /* Test glBindAttribLocation */
+    glBindAttribLocation(prog, 5, "myCustomAttrib");
+    GLenum err = glGetError();
+    recordResult("glBindAttribLocation(5, \"myCustomAttrib\")",
+                 err == GL_NO_ERROR, NULL);
+
+    /* Re-link to apply binding (per spec, takes effect after link) */
+    glLinkProgram(prog);
+
+    GLint customLoc = glGetAttribLocation(prog, "myCustomAttrib");
+    recordResult("glGetAttribLocation(\"myCustomAttrib\") == 5",
+                 customLoc == 5, NULL);
+
+    /* === glGetActiveAttrib === */
+    GLint numAttribs = 0;
+    glGetProgramiv(prog, GL_ACTIVE_ATTRIBUTES, &numAttribs);
+    recordResult("GL_ACTIVE_ATTRIBUTES >= 1",
+                 numAttribs >= 1, NULL);
+    printf("  [INFO] GL_ACTIVE_ATTRIBUTES = %d\n", numAttribs);
+
+    if (numAttribs > 0) {
+        char attribName[64] = {0};
+        GLint attribSize = 0;
+        GLenum attribType = 0;
+        GLsizei attribLen = 0;
+        glGetActiveAttrib(prog, 0, sizeof(attribName), &attribLen,
+                          &attribSize, &attribType, attribName);
+        recordResult("glGetActiveAttrib(0) returns name",
+                     attribLen > 0 && attribName[0] != '\0', NULL);
+        printf("  [INFO] attrib[0]: name=\"%s\" size=%d type=0x%X\n",
+               attribName, attribSize, attribType);
+    }
+
+    /* === glGetActiveUniform === */
+
+    /* First, query a uniform to populate active tracking */
+    GLuint uprog = getUniformProgram();
+    if (uprog) {
+        glUseProgram(uprog);
+        GLint matLoc = glGetUniformLocation(uprog, "u_matrix");
+        GLint colorULoc = glGetUniformLocation(uprog, "u_color");
+        (void)matLoc; (void)colorULoc;
+
+        GLint numUniforms = 0;
+        glGetProgramiv(uprog, GL_ACTIVE_UNIFORMS, &numUniforms);
+        recordResult("GL_ACTIVE_UNIFORMS >= 2 (after query)",
+                     numUniforms >= 2, NULL);
+        printf("  [INFO] GL_ACTIVE_UNIFORMS = %d\n", numUniforms);
+
+        if (numUniforms > 0) {
+            char uniformName[64] = {0};
+            GLint uniformSize = 0;
+            GLenum uniformType = 0;
+            GLsizei uniformLen = 0;
+            glGetActiveUniform(uprog, 0, sizeof(uniformName), &uniformLen,
+                              &uniformSize, &uniformType, uniformName);
+            recordResult("glGetActiveUniform(0) returns name",
+                         uniformLen > 0 && uniformName[0] != '\0', NULL);
+            printf("  [INFO] uniform[0]: name=\"%s\" size=%d type=0x%X\n",
+                   uniformName, uniformSize, uniformType);
+        }
+
+        /* === glGetUniformfv / glGetUniformiv readback === */
+
+        /* Set a vec4 uniform and read it back */
+        if (colorULoc != -1) {
+            glUniform4f(colorULoc, 0.25f, 0.5f, 0.75f, 1.0f);
+
+            GLfloat readback[4] = {0};
+            glGetUniformfv(uprog, colorULoc, readback);
+            bool colorMatch = (readback[0] > 0.24f && readback[0] < 0.26f) &&
+                              (readback[1] > 0.49f && readback[1] < 0.51f) &&
+                              (readback[2] > 0.74f && readback[2] < 0.76f) &&
+                              (readback[3] > 0.99f && readback[3] < 1.01f);
+            recordResult("glGetUniformfv readback vec4",
+                         colorMatch, NULL);
+            printf("  [INFO] readback: %.3f, %.3f, %.3f, %.3f\n",
+                   readback[0], readback[1], readback[2], readback[3]);
+        }
+
+        /* Set a mat4 and read it back (identity) */
+        if (matLoc != -1) {
+            float identity[16] = {
+                1,0,0,0,
+                0,1,0,0,
+                0,0,1,0,
+                0,0,0,1
+            };
+            glUniformMatrix4fv(matLoc, 1, GL_FALSE, identity);
+
+            GLfloat matRead[16] = {0};
+            glGetUniformfv(uprog, matLoc, matRead);
+            bool matMatch = (matRead[0] > 0.99f && matRead[0] < 1.01f) &&
+                            (matRead[5] > 0.99f && matRead[5] < 1.01f) &&
+                            (matRead[10] > 0.99f && matRead[10] < 1.01f) &&
+                            (matRead[15] > 0.99f && matRead[15] < 1.01f);
+            recordResult("glGetUniformfv readback mat4",
+                         matMatch, NULL);
+        }
+    }
+
+    /* === glCheckFramebufferStatus === */
+
+    /* Default framebuffer should be complete */
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    GLenum fbStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    recordResult("glCheckFramebufferStatus(default FB) == COMPLETE",
+                 fbStatus == GL_FRAMEBUFFER_COMPLETE, NULL);
+
+    /* Create a valid FBO and check status */
+    GLuint fbo = 0, fboTex = 0;
+    glGenFramebuffers(1, &fbo);
+    glGenTextures(1, &fboTex);
+
+    glBindTexture(GL_TEXTURE_2D, fboTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 64, 64, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, fboTex, 0);
+
+    fbStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    recordResult("glCheckFramebufferStatus(valid FBO) == COMPLETE",
+                 fbStatus == GL_FRAMEBUFFER_COMPLETE, NULL);
+
+    /* FBO without color attachment should be incomplete */
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+    fbStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    recordResult("glCheckFramebufferStatus(no color) == INCOMPLETE",
+                 fbStatus != GL_FRAMEBUFFER_COMPLETE, NULL);
+
+    /* Cleanup */
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glDeleteFramebuffers(1, &fbo);
+    glDeleteTextures(1, &fboTex);
+
+    /* === NULL safety tests (formerly crashing) === */
+    glDeleteBuffers(1, NULL);
+    recordResult("glDeleteBuffers(NULL) - no crash", true, NULL);
+
+    glDeleteTextures(1, NULL);
+    recordResult("glDeleteTextures(NULL) - no crash", true, NULL);
+
+    glDeleteFramebuffers(1, NULL);
+    recordResult("glDeleteFramebuffers(NULL) - no crash", true, NULL);
+
+    /* === glDepthMask / glColorMask boolean spec compliance === */
+    /* Any nonzero value should be treated as true */
+    glDepthMask(42);  /* Non-standard true value */
+    GLboolean depthWriteMask = GL_FALSE;
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &depthWriteMask);
+    recordResult("glDepthMask(42) treated as true",
+                 depthWriteMask == GL_TRUE, NULL);
+
+    glDepthMask(GL_TRUE);  /* Restore */
+
+    glColorMask(2, 2, 2, 2);  /* Non-standard true values */
+    GLboolean colorWriteMask[4] = {GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE};
+    glGetBooleanv(GL_COLOR_WRITEMASK, colorWriteMask);
+    recordResult("glColorMask(2,2,2,2) all treated as true",
+                 colorWriteMask[0] == GL_TRUE && colorWriteMask[1] == GL_TRUE &&
+                 colorWriteMask[2] == GL_TRUE && colorWriteMask[3] == GL_TRUE, NULL);
+
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);  /* Restore */
+
+    printf("--- Shader/Program Queries tests complete ---\n");
+}
+
+/*==========================================================================
  * TEST: Packed UBO
  *==========================================================================*/
 
@@ -2849,6 +3053,12 @@ int main(int argc, char* argv[]) {
         "No visual output\n"
         "Tests GL_EXTENSIONS, compressed formats,\n"
         "shader binary formats, glPixelStorei");
+
+    RUN_TEST(testShaderQueries, "Shader/Program Queries",
+        "No visual output\n"
+        "Tests glGetAttribLocation, glBindAttribLocation,\n"
+        "glGetActiveAttrib/Uniform, glGetUniformfv,\n"
+        "glCheckFramebufferStatus, NULL safety, boolean spec");
 
     RUN_TEST(testPackedUBO, "Packed UBO",
         "Black background\n"
