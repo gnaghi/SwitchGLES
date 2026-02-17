@@ -132,7 +132,13 @@ static void deinitEgl(void) {
 
 static PadState s_pad;
 static bool s_padInitialized = false;
+static bool s_exitRequested = false;  /* Global flag for clean exit */
 
+/* Forward declarations - defined below */
+static void recordResult(const char *name, bool passed, const char *details);
+static void printSummary(void);
+
+/* Wait for visual confirmation: A = looks correct, B = doesn't look correct, + = exit */
 static void waitForA(const char *testName, const char *expectedVisual) {
     if (!s_padInitialized) {
         padConfigureInput(1, HidNpadStyleSet_NpadStandard);
@@ -145,32 +151,34 @@ static void waitForA(const char *testName, const char *expectedVisual) {
     printf("----------------------------------------\n");
     printf("EXPECTED: %s\n", expectedVisual);
     printf("----------------------------------------\n");
-    printf("Press A to continue...\n");
+    printf("Press A = OK (visual matches)  |  B = FAIL (visual wrong)  |  + = exit\n");
     printf("========================================\n");
     fflush(stdout);
 
-    /* Show the frame */
+    /* Show the frame - swap ONCE to present, then just poll */
+    fflush(stdout);
     eglSwapBuffers(s_display, s_surface);
 
-    /* Wait for A button */
+    /* Wait for user input - NO more swaps, frame stays on screen */
     while (appletMainLoop()) {
         padUpdate(&s_pad);
         u64 kDown = padGetButtonsDown(&s_pad);
 
         if (kDown & HidNpadButton_A) {
+            recordResult(testName, true, "visual OK");
+            break;
+        }
+        if (kDown & HidNpadButton_B) {
+            recordResult(testName, false, "visual MISMATCH (user)");
             break;
         }
         if (kDown & HidNpadButton_Plus) {
-            /* Allow early exit */
-            printf("User requested exit.\n");
-            deinitEgl();
-            deinitNxLink();
-            romfsExit();
-            exit(0);
+            printf("User requested early exit.\n");
+            s_exitRequested = true;
+            break;
         }
 
-        /* Keep frame visible */
-        eglSwapBuffers(s_display, s_surface);
+        svcSleepThread(16000000ULL); /* ~16ms polling, no swap needed */
     }
 }
 
@@ -181,17 +189,6 @@ static void waitForA(const char *testName, const char *expectedVisual) {
 static GLuint createProgramFromFiles(const char *vsPath, const char *fsPath) {
     GLuint vs = glCreateShader(GL_VERTEX_SHADER);
     GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
-
-    /* Debug: check if file exists */
-    FILE *test = fopen(vsPath, "rb");
-    if (test) {
-        fseek(test, 0, SEEK_END);
-        long sz = ftell(test);
-        fclose(test);
-        printf("[DEBUG] File %s exists, size=%ld\n", vsPath, sz);
-    } else {
-        printf("[DEBUG] File %s NOT FOUND (errno may help)\n", vsPath);
-    }
 
     if (!sgl_load_shader_from_file(vs, vsPath)) {
         printf("Failed to load vertex shader: %s (shader id=%d)\n", vsPath, vs);
@@ -274,7 +271,7 @@ typedef struct {
     const char *details;
 } TestResult;
 
-#define MAX_TESTS 130
+#define MAX_TESTS 200
 static TestResult s_results[MAX_TESTS];
 static int s_numResults = 0;
 
@@ -1022,11 +1019,15 @@ static void testCopyTexImage(void) {
     }
     glUseProgram(program);
 
+    /* Set u_color to GREEN (the simple shader uses uniform color, not vertex color) */
+    GLint colorLoc = glGetUniformLocation(program, "u_color");
+    glUniform4f(colorLoc, 0.0f, 1.0f, 0.0f, 1.0f);
+
     /* Draw a green triangle */
     static const float vertices[] = {
-         0.0f,  0.5f,   0.0f, 1.0f, 0.0f, 1.0f,  /* top - green */
-        -0.5f, -0.5f,   0.0f, 1.0f, 0.0f, 1.0f,  /* bottom-left - green */
-         0.5f, -0.5f,   0.0f, 1.0f, 0.0f, 1.0f   /* bottom-right - green */
+         0.0f,  0.5f,
+        -0.5f, -0.5f,
+         0.5f, -0.5f
     };
 
     GLuint vbo;
@@ -1034,10 +1035,8 @@ static void testCopyTexImage(void) {
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, (void*)0);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(2 * sizeof(float)));
-    glEnableVertexAttribArray(1);
 
     glDrawArrays(GL_TRIANGLES, 0, 3);
 
@@ -1081,6 +1080,12 @@ static void testCopyTexImage(void) {
         glEnableVertexAttribArray(1);
 
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+        /* Diagnostic: read center pixel to see what was actually displayed */
+        GLubyte copyPixel[4];
+        glReadPixels(640, 360, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, copyPixel);
+        printf("[DEBUG] CopyTexImage display center: R=%d G=%d B=%d A=%d\n",
+               copyPixel[0], copyPixel[1], copyPixel[2], copyPixel[3]);
 
         glDeleteBuffers(1, &quadVbo);
     }
@@ -1131,13 +1136,16 @@ static void testCopyTexSubImage(void) {
     }
     glUseProgram(program);
 
+    /* Set u_color to GREEN (the simple shader uses uniform color, not vertex color) */
+    GLint colorLoc = glGetUniformLocation(program, "u_color");
+    glUniform4f(colorLoc, 0.0f, 1.0f, 0.0f, 1.0f);
+
     /* Draw a green quad in center of screen */
     static const float vertices[] = {
-        /* position      color (green) */
-        -0.3f,  0.3f,   0.0f, 1.0f, 0.0f, 1.0f,
-        -0.3f, -0.3f,   0.0f, 1.0f, 0.0f, 1.0f,
-         0.3f,  0.3f,   0.0f, 1.0f, 0.0f, 1.0f,
-         0.3f, -0.3f,   0.0f, 1.0f, 0.0f, 1.0f
+        -0.3f,  0.3f,
+        -0.3f, -0.3f,
+         0.3f,  0.3f,
+         0.3f, -0.3f
     };
 
     GLuint vbo;
@@ -1145,10 +1153,8 @@ static void testCopyTexSubImage(void) {
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, (void*)0);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(2 * sizeof(float)));
-    glEnableVertexAttribArray(1);
 
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
@@ -1188,6 +1194,12 @@ static void testCopyTexSubImage(void) {
         glEnableVertexAttribArray(1);
 
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+        /* Diagnostic: read center pixel to see what was actually displayed */
+        GLubyte copyPixel[4];
+        glReadPixels(640, 360, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, copyPixel);
+        printf("[DEBUG] CopyTexSubImage display center: R=%d G=%d B=%d A=%d\n",
+               copyPixel[0], copyPixel[1], copyPixel[2], copyPixel[3]);
 
         glDeleteBuffers(1, &quadVbo);
     }
@@ -1626,6 +1638,9 @@ static GLuint getCubemapProgram(void) {
 static void testCubemap(void) {
     printf("\n--- Test: Cubemap Textures ---\n");
 
+    /* Ensure we're on texture unit 0 (previous test may have left it elsewhere) */
+    glActiveTexture(GL_TEXTURE0);
+
     /* Create cubemap texture */
     GLuint cubemap;
     glGenTextures(1, &cubemap);
@@ -1655,15 +1670,17 @@ static void testCubemap(void) {
         GL_TEXTURE_CUBE_MAP_NEGATIVE_Z
     };
 
-    GLubyte pixels[4 * 4 * 4];  /* 4x4 RGBA */
+    /* Upload 4x4 solid-color faces */
+    GLubyte facePixels[4 * 4 * 4];
     for (int face = 0; face < 6; face++) {
         for (int i = 0; i < 4 * 4; i++) {
-            pixels[i * 4 + 0] = faceColors[face][0];
-            pixels[i * 4 + 1] = faceColors[face][1];
-            pixels[i * 4 + 2] = faceColors[face][2];
-            pixels[i * 4 + 3] = 255;
+            facePixels[i * 4 + 0] = faceColors[face][0];
+            facePixels[i * 4 + 1] = faceColors[face][1];
+            facePixels[i * 4 + 2] = faceColors[face][2];
+            facePixels[i * 4 + 3] = 255;
         }
-        glTexImage2D(faces[face], 0, GL_RGBA, 4, 4, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+        glTexImage2D(faces[face], 0, GL_RGBA, 4, 4, 0,
+                     GL_RGBA, GL_UNSIGNED_BYTE, facePixels);
     }
     recordResult("glTexImage2D (6 faces)", glGetError() == GL_NO_ERROR, NULL);
 
@@ -1673,7 +1690,7 @@ static void testCubemap(void) {
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     recordResult("glTexParameteri (cubemap)", glGetError() == GL_NO_ERROR, NULL);
 
-    /* Get cubemap shader */
+    /* Get cubemap shader - uses separate position (loc 0) and direction (loc 1) */
     GLuint program = getCubemapProgram();
     if (!program) {
         recordResult("Cubemap shader", false, "failed to load");
@@ -1682,150 +1699,86 @@ static void testCubemap(void) {
     }
     glUseProgram(program);
 
-    glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
+
+    glClearColor(0.5f, 0.5f, 0.5f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    /* Draw 6 small quads, each sampling a different face direction */
-    /* Quad positions in a 3x2 grid */
-    static const float quadSize = 0.25f;
-    static const float spacing = 0.35f;
+    /* Draw 6 small quads in a 3x2 grid, each sampling a different cubemap face.
+     * Shader uses: attribute 0 = vec2 position, attribute 1 = vec3 direction */
+    static const float quadSize = 0.2f;
+    static const float spacingX = 0.5f;
+    static const float spacingY = 0.45f;
 
-    /* Each quad uses a direction pointing to its face */
-    /* Format: x, y (position), dx, dy, dz (direction) */
     struct {
-        float px, py;      /* Screen position */
-        float dx, dy, dz;  /* Cubemap direction */
-        int expectedR, expectedG, expectedB;
+        float px, py;
+        float dx, dy, dz;
+        const char *label;
     } faceQuads[6] = {
-        { -spacing,  spacing/2,   1.0f,  0.0f,  0.0f, 255, 0, 0 },     /* +X: Red */
-        {  0.0f,     spacing/2,  -1.0f,  0.0f,  0.0f, 0, 255, 255 },   /* -X: Cyan */
-        {  spacing,  spacing/2,   0.0f,  1.0f,  0.0f, 0, 255, 0 },     /* +Y: Green */
-        { -spacing, -spacing/2,   0.0f, -1.0f,  0.0f, 255, 0, 255 },   /* -Y: Magenta */
-        {  0.0f,    -spacing/2,   0.0f,  0.0f,  1.0f, 0, 0, 255 },     /* +Z: Blue */
-        {  spacing, -spacing/2,   0.0f,  0.0f, -1.0f, 255, 255, 0 }    /* -Z: Yellow */
+        { -spacingX,  spacingY,   1.0f,  0.0f,  0.0f, "+X Red"     },
+        {  0.0f,      spacingY,  -1.0f,  0.0f,  0.0f, "-X Cyan"    },
+        {  spacingX,  spacingY,   0.0f,  1.0f,  0.0f, "+Y Green"   },
+        { -spacingX, -spacingY,   0.0f, -1.0f,  0.0f, "-Y Magenta" },
+        {  0.0f,     -spacingY,   0.0f,  0.0f,  1.0f, "+Z Blue"    },
+        {  spacingX, -spacingY,   0.0f,  0.0f, -1.0f, "-Z Yellow"  },
     };
 
     int passCount = 0;
     for (int i = 0; i < 6; i++) {
-        /* Build a small quad with direction as the 3D position (used for cubemap lookup) */
-        float verts[4 * 3];  /* 4 vertices, 3 components each */
         float cx = faceQuads[i].px;
         float cy = faceQuads[i].py;
 
-        /* All 4 corners use the same direction for this simple test */
-        for (int v = 0; v < 4; v++) {
-            verts[v * 3 + 0] = faceQuads[i].dx;
-            verts[v * 3 + 1] = faceQuads[i].dy;
-            verts[v * 3 + 2] = faceQuads[i].dz;
-        }
-
-        /* Modify position for each corner */
-        float posVerts[] = {
-            cx - quadSize, cy - quadSize, faceQuads[i].dx, faceQuads[i].dy, faceQuads[i].dz,
-            cx + quadSize, cy - quadSize, faceQuads[i].dx, faceQuads[i].dy, faceQuads[i].dz,
-            cx + quadSize, cy + quadSize, faceQuads[i].dx, faceQuads[i].dy, faceQuads[i].dz,
-            cx - quadSize, cy + quadSize, faceQuads[i].dx, faceQuads[i].dy, faceQuads[i].dz
+        /* Position attribute (vec2) - 4 corners of a small quad */
+        float pos[] = {
+            cx - quadSize, cy - quadSize,
+            cx + quadSize, cy - quadSize,
+            cx + quadSize, cy + quadSize,
+            cx - quadSize, cy + quadSize,
         };
 
-        /* Simple approach: draw each quad separately with just position as direction */
-        float simpleQuad[] = {
-            cx - quadSize, cy - quadSize, faceQuads[i].dz,
-            cx + quadSize, cy - quadSize, faceQuads[i].dz,
-            cx + quadSize, cy + quadSize, faceQuads[i].dz,
-            cx - quadSize, cy + quadSize, faceQuads[i].dz
+        /* Direction attribute (vec3) - same direction for all 4 corners */
+        float dir[] = {
+            faceQuads[i].dx, faceQuads[i].dy, faceQuads[i].dz,
+            faceQuads[i].dx, faceQuads[i].dy, faceQuads[i].dz,
+            faceQuads[i].dx, faceQuads[i].dy, faceQuads[i].dz,
+            faceQuads[i].dx, faceQuads[i].dy, faceQuads[i].dz,
         };
 
-        /* Actually, use a fullscreen approach: direction IS the vertex attribute */
-        float dirQuad[] = {
-            faceQuads[i].dx, faceQuads[i].dy, faceQuads[i].dz
-        };
-
-        /* Draw a single triangle for this face test */
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, dirQuad);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, pos);
         glEnableVertexAttribArray(0);
-        glDrawArrays(GL_POINTS, 0, 1);  /* Just set up state */
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, dir);
+        glEnableVertexAttribArray(1);
+
+        static const GLushort idx[] = { 0, 1, 2, 0, 2, 3 };
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+
+        passCount++;
     }
 
-    /* Simpler approach: draw 6 fullscreen triangles, each with a different direction */
-    /* Actually let's just sample the cubemap with 6 different triangles */
+    recordResult("Cubemap rendering", glGetError() == GL_NO_ERROR && passCount == 6, NULL);
 
-    glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
+    /* Read pixel at +X quad position to verify red.
+     * Note: deko3d flips Y, so negate NDC Y for glReadPixels coordinate. */
+    GLubyte pixel[4];
+    int pxX = (int)(( faceQuads[0].px * 0.5f + 0.5f) * SCREEN_WIDTH);
+    int pxY = (int)((-faceQuads[0].py * 0.5f + 0.5f) * SCREEN_HEIGHT);
+    glReadPixels(pxX, pxY, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+    printf("[DEBUG] Cubemap +X pixel at (%d,%d): R=%d G=%d B=%d A=%d\n",
+           pxX, pxY, pixel[0], pixel[1], pixel[2], pixel[3]);
 
-    /* Draw one fullscreen quad sampling +X direction (should be red) */
-    float testDir[] = {
-        1.0f, 0.0f, 0.0f,
-        1.0f, 0.0f, 0.0f,
-        1.0f, 0.0f, 0.0f,
-        1.0f, 0.0f, 0.0f
-    };
-    float testPos[] = {
-        -0.5f, -0.5f,
-         0.5f, -0.5f,
-         0.5f,  0.5f,
-        -0.5f,  0.5f
-    };
+    bool colorOk = (pixel[0] > 200 && pixel[1] < 50 && pixel[2] < 50);
+    recordResult("Cubemap +X face (red)", colorOk, NULL);
 
-    /* Use position as direction directly */
-    float fullQuad[] = {
-        /* x, y, z (position AND direction) */
-        1.0f, 0.01f, 0.01f,   /* Pointing +X */
-        1.0f, 0.01f, 0.01f,
-        1.0f, 0.01f, 0.01f,
-        1.0f, 0.01f, 0.01f
-    };
-
-    /* Actually the shader uses a_position for both gl_Position.xy and v_texcoord
-     * So we need vertices where xy is screen position and xyz is direction.
-     * Let's modify: use xy for position, and make direction constant via a uniform instead.
-     * Or simpler: change the shader to accept separate position and direction.
-     *
-     * For now, let's use a simple test: draw a quad covering center of screen,
-     * with direction = (1, 0, 0) to sample +X face (red).
-     */
-
-    /* Simplified test: position = direction for cubemap sampling
-     * We'll draw at screen position based on direction.xy, and use direction for lookup */
-    float redDirQuad[] = {
-        /* xyz = position AND direction */
-        0.8f, -0.4f, 0.1f,
-        0.8f,  0.4f, 0.1f,
-        0.8f,  0.4f, -0.1f,
-        0.8f, -0.4f, -0.1f
-    };
-
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, redDirQuad);
-    glEnableVertexAttribArray(0);
-    glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
-
-    /* Read center pixel - should be influenced by the quad */
-    /* For simplicity, let's just verify the texture was created and bound successfully */
-    GLenum err = glGetError();
-    recordResult("Cubemap rendering", err == GL_NO_ERROR, NULL);
-
-    /* More targeted test: render to specific position and check color */
-    /* Draw +X face (red) quad */
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    /* Position vertices to center, direction to +X */
-    float centerQuad[] = {
-        /* We need screen position AND cubemap direction
-         * The shader uses a_position for both - this won't work well.
-         * Let's just verify the basic API works for now */
-        1.0f, -0.5f, 0.0f,
-        1.0f,  0.5f, 0.0f,
-        1.0f,  0.5f, 0.01f,
-        1.0f, -0.5f, 0.01f
-    };
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, centerQuad);
-    glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
-
-    /* For a proper visual test, we'd need a different shader approach.
-     * For now, test that cubemap API functions work without error */
-    recordResult("Cubemap API test", glGetError() == GL_NO_ERROR, NULL);
+    /* Diagnostic: check if clear color is visible at corner (should be 128,128,128,255) */
+    GLubyte bgCheck[4];
+    glReadPixels(5, 5, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, bgCheck);
+    printf("[DIAG] Cubemap BG at (5,5): R=%d G=%d B=%d A=%d\n",
+           bgCheck[0], bgCheck[1], bgCheck[2], bgCheck[3]);
 
     glDisableVertexAttribArray(0);
+    glDisableVertexAttribArray(1);
     glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
     glDeleteTextures(1, &cubemap);
 }
@@ -1892,7 +1845,6 @@ static void testFBODepthRenderbuffer(void) {
         GLint colorLoc = glGetUniformLocation(program, "u_color");
 
         /* Draw RED quad at z=0.7 (farther) */
-        printf("[FBO_TEST] Setting RED color uniform\n");
         glUniform4f(colorLoc, 1.0f, 0.0f, 0.0f, 1.0f);
         static const float quad1[] = {
             -0.8f, -0.8f, 0.7f,
@@ -1902,11 +1854,9 @@ static void testFBODepthRenderbuffer(void) {
         };
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, quad1);
         glEnableVertexAttribArray(0);
-        printf("[FBO_TEST] Drawing RED quad\n");
         glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
         /* Draw GREEN quad at z=0.3 (closer - should win) */
-        printf("[FBO_TEST] Setting GREEN color uniform\n");
         glUniform4f(colorLoc, 0.0f, 1.0f, 0.0f, 1.0f);
         static const float quad2[] = {
             -0.4f, -0.4f, 0.3f,
@@ -1915,7 +1865,6 @@ static void testFBODepthRenderbuffer(void) {
             -0.4f,  0.4f, 0.3f
         };
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, quad2);
-        printf("[FBO_TEST] Drawing GREEN quad\n");
         glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
         glDisable(GL_DEPTH_TEST);
@@ -2193,9 +2142,7 @@ static void testPackedUBO(void) {
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     glDisableVertexAttribArray(0);
 
-    eglSwapBuffers(s_display, s_surface);
-
-    /* Read pixel from center */
+    /* Read pixel WITHOUT swap (avoids stale slot readback) */
     GLubyte pixel[4];
     glReadPixels(640, 360, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
     printf("[DEBUG] Packed UBO pixel: R=%d G=%d B=%d A=%d\n",
@@ -2211,6 +2158,7 @@ static void testPackedUBO(void) {
      * Test 2: Change only the color via packed UBO (verify shadow buffer update)
      * Change to YELLOW (1, 1, 0, 1) with alpha multiplier = 0.5
      */
+    eglSwapBuffers(s_display, s_surface); /* Need new frame for new uniforms */
     glClear(GL_COLOR_BUFFER_BIT);
 
     /* Re-set ALL uniforms (SwitchGLES resets each frame) */
@@ -2228,8 +2176,7 @@ static void testPackedUBO(void) {
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     glDisableVertexAttribArray(0);
 
-    eglSwapBuffers(s_display, s_surface);
-
+    /* Read pixel WITHOUT swap */
     glReadPixels(640, 360, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
     printf("[DEBUG] Packed UBO pixel2: R=%d G=%d B=%d A=%d\n",
            pixel[0], pixel[1], pixel[2], pixel[3]);
@@ -2243,6 +2190,232 @@ static void testPackedUBO(void) {
 
     /* Clean up: restore built-in mappings */
     sglClearUniformRegistry();
+}
+
+/*==========================================================================
+ * TEST: Runtime Shader Compilation (libuam)
+ *==========================================================================*/
+
+static GLuint s_runtimeProgram = 0;
+
+static void testRuntimeShaderCompilation(void) {
+    printf("\n--- Test: Runtime Shader Compilation ---\n");
+
+    /* ---- Test 1: glShaderSource stores source ---- */
+    GLuint vs = glCreateShader(GL_VERTEX_SHADER);
+    recordResult("Runtime: glCreateShader(VERTEX)", vs > 0, NULL);
+
+    const char *vsSrc =
+        "#version 460\n"
+        "layout(location = 0) in vec2 a_position;\n"
+        "void main() {\n"
+        "    gl_Position = vec4(a_position, 0.0, 1.0);\n"
+        "}\n";
+
+    glShaderSource(vs, 1, &vsSrc, NULL);
+    recordResult("Runtime: glShaderSource", glGetError() == GL_NO_ERROR, NULL);
+
+    /* ---- Test 2: glGetShaderSource returns stored source ---- */
+    GLint srcLen = 0;
+    glGetShaderiv(vs, GL_SHADER_SOURCE_LENGTH, &srcLen);
+    recordResult("Runtime: GL_SHADER_SOURCE_LENGTH > 0", srcLen > 0, NULL);
+
+    char srcBuf[512];
+    GLsizei actualLen = 0;
+    glGetShaderSource(vs, sizeof(srcBuf), &actualLen, srcBuf);
+    bool srcMatch = (actualLen > 0 && strstr(srcBuf, "a_position") != NULL);
+    recordResult("Runtime: glGetShaderSource content", srcMatch, NULL);
+
+    /* ---- Test 3: glCompileShader vertex ---- */
+    glCompileShader(vs);
+    GLint vsOk = GL_FALSE;
+    glGetShaderiv(vs, GL_COMPILE_STATUS, &vsOk);
+    recordResult("Runtime: compile vertex shader", vsOk == GL_TRUE, NULL);
+
+    if (vsOk != GL_TRUE) {
+        char log[1024];
+        glGetShaderInfoLog(vs, sizeof(log), NULL, log);
+        printf("[DEBUG] Vertex compile log: %.200s\n", log);
+    }
+
+    /* ---- Test 4: glCompileShader fragment (with UBO uniform) ---- */
+    GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
+    const char *fsSrc =
+        "#version 460\n"
+        "layout(std140, binding = 0) uniform ColorBlock {\n"
+        "    vec4 u_color;\n"
+        "};\n"
+        "layout(location = 0) out vec4 fragColor;\n"
+        "void main() {\n"
+        "    fragColor = u_color;\n"
+        "}\n";
+
+    glShaderSource(fs, 1, &fsSrc, NULL);
+    glCompileShader(fs);
+    GLint fsOk = GL_FALSE;
+    glGetShaderiv(fs, GL_COMPILE_STATUS, &fsOk);
+    recordResult("Runtime: compile fragment shader", fsOk == GL_TRUE, NULL);
+
+    if (fsOk != GL_TRUE) {
+        char log[1024];
+        glGetShaderInfoLog(fs, sizeof(log), NULL, log);
+        printf("[DEBUG] Fragment compile log: %.200s\n", log);
+    }
+
+    /* ---- Test 5: Link + draw with runtime-compiled shaders ---- */
+    if (vsOk == GL_TRUE && fsOk == GL_TRUE) {
+        GLuint program = glCreateProgram();
+        glAttachShader(program, vs);
+        glAttachShader(program, fs);
+        glLinkProgram(program);
+
+        GLint linkOk = GL_FALSE;
+        glGetProgramiv(program, GL_LINK_STATUS, &linkOk);
+        recordResult("Runtime: glLinkProgram", linkOk == GL_TRUE, NULL);
+
+        if (linkOk == GL_TRUE) {
+            s_runtimeProgram = program;
+
+            glUseProgram(program);
+
+            /* u_color is a built-in mapping → fragment binding 0 */
+            GLint colorLoc = glGetUniformLocation(program, "u_color");
+            recordResult("Runtime: glGetUniformLocation", colorLoc >= 0, NULL);
+
+            /* Reset ALL GL state that may be dirty from previous tests */
+            glDisable(GL_BLEND);
+            glDisable(GL_DEPTH_TEST);
+            glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_CULL_FACE);
+            glDisable(GL_POLYGON_OFFSET_FILL);
+            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+            glDepthMask(GL_TRUE);
+            glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+            /* Unbind any VBOs from previous tests */
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+            /* Disable all vertex attrib arrays that might be enabled */
+            for (int a = 0; a < 8; a++) glDisableVertexAttribArray(a);
+
+            printf("[DEBUG] Runtime: colorLoc = %d (0x%X)\n", colorLoc, colorLoc);
+
+            /* CONTROL TEST: Draw CYAN with precompiled program first */
+            {
+                GLuint simProg = getSimpleProgram();
+                glUseProgram(simProg);
+                GLint simColorLoc = glGetUniformLocation(simProg, "u_color");
+                printf("[DEBUG] Precompiled: colorLoc = %d (0x%X)\n", simColorLoc, simColorLoc);
+
+                glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+                glUniform4f(simColorLoc, 0.0f, 1.0f, 1.0f, 1.0f);
+
+                static const float ctrlQuad[] = {
+                    -0.5f, -0.5f, 0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f,
+                };
+                glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, ctrlQuad);
+                glEnableVertexAttribArray(0);
+                static const GLushort ctrlIdx[] = { 0, 1, 2, 0, 2, 3 };
+                glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, ctrlIdx);
+
+                GLubyte ctrlPixel[4];
+                glReadPixels(640, 360, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, ctrlPixel);
+                printf("[DEBUG] CONTROL (precompiled) pixel: R=%d G=%d B=%d A=%d\n",
+                       ctrlPixel[0], ctrlPixel[1], ctrlPixel[2], ctrlPixel[3]);
+                glDisableVertexAttribArray(0);
+            }
+
+            /* ACTUAL TEST: Draw CYAN with runtime-compiled shader + uniform */
+            glUseProgram(program);
+            glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+            /* Set CYAN color via uniform */
+            glUniform4f(colorLoc, 0.0f, 1.0f, 1.0f, 1.0f);
+
+            static const float quad[] = {
+                -0.5f, -0.5f,
+                 0.5f, -0.5f,
+                 0.5f,  0.5f,
+                -0.5f,  0.5f,
+            };
+
+            glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, quad);
+            glEnableVertexAttribArray(0);
+
+            static const GLushort indices[] = { 0, 1, 2, 0, 2, 3 };
+            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, indices);
+
+            /* Read pixel to verify runtime shader output */
+            GLubyte pixel[4];
+            glReadPixels(640, 360, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+            printf("[DEBUG] Runtime shader pixel: R=%d G=%d B=%d A=%d\n",
+                   pixel[0], pixel[1], pixel[2], pixel[3]);
+            bool colorOk = (pixel[0] < 10) && (pixel[1] > 245) && (pixel[2] > 245);
+            recordResult("Runtime: rendered CYAN quad", colorOk, NULL);
+
+            glDisableVertexAttribArray(0);
+            /* Don't delete here — s_runtimeProgram holds the handle for cleanup */
+        } else {
+            glDeleteProgram(program);
+            s_runtimeProgram = 0;
+            recordResult("Runtime: glGetUniformLocation", false, "link failed");
+            recordResult("Runtime: rendered CYAN quad", false, "link failed");
+        }
+    } else {
+        recordResult("Runtime: glLinkProgram", false, "compile failed");
+        recordResult("Runtime: glGetUniformLocation", false, "compile failed");
+        recordResult("Runtime: rendered CYAN quad", false, "compile failed");
+    }
+
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+
+    /* Switch back to a known-good precompiled program before continuing */
+    glUseProgram(getSimpleProgram());
+
+    /* ---- Test 6: Invalid GLSL should fail ---- */
+    {
+        GLuint badShader = glCreateShader(GL_FRAGMENT_SHADER);
+        const char *badSrc = "this is not valid GLSL at all";
+        glShaderSource(badShader, 1, &badSrc, NULL);
+        glCompileShader(badShader);
+        GLint compileOk = GL_FALSE;
+        glGetShaderiv(badShader, GL_COMPILE_STATUS, &compileOk);
+        recordResult("Runtime: invalid GLSL fails", compileOk == GL_FALSE, NULL);
+
+        GLint logLen = 0;
+        glGetShaderiv(badShader, GL_INFO_LOG_LENGTH, &logLen);
+        recordResult("Runtime: error info log available", logLen > 0, NULL);
+        glDeleteShader(badShader);
+    }
+
+    /* ---- Test 7: Multi-string glShaderSource ---- */
+    {
+        GLuint multiVs = glCreateShader(GL_VERTEX_SHADER);
+        const char *parts[] = {
+            "#version 460\n",
+            "layout(location = 0) in vec2 a_position;\n",
+            "void main() {\n",
+            "    gl_Position = vec4(a_position, 0.0, 1.0);\n",
+            "}\n"
+        };
+        glShaderSource(multiVs, 5, parts, NULL);
+        recordResult("Runtime: multi-string glShaderSource", glGetError() == GL_NO_ERROR, NULL);
+
+        glCompileShader(multiVs);
+        GLint multiOk = GL_FALSE;
+        glGetShaderiv(multiVs, GL_COMPILE_STATUS, &multiOk);
+        recordResult("Runtime: compile multi-string shader", multiOk == GL_TRUE, NULL);
+        if (multiOk != GL_TRUE) {
+            char log[512];
+            glGetShaderInfoLog(multiVs, sizeof(log), NULL, log);
+            printf("[DEBUG] Multi-string compile log: %.200s\n", log);
+        }
+        glDeleteShader(multiVs);
+    }
 }
 
 /*==========================================================================
@@ -2305,148 +2478,146 @@ int main(int argc, char* argv[]) {
     printf("    Press + to exit at any time\n");
     printf("========================================\n");
 
-    /* Run all tests with visual validation */
-    testClear();
-    waitForA("Clear Operations",
+    /* Run all tests with visual validation - check s_exitRequested after each */
+#define RUN_TEST(testFunc, name, expected) \
+    do { \
+        if (!s_exitRequested) { testFunc(); } \
+        if (!s_exitRequested) { waitForA(name, expected); } \
+    } while(0)
+
+    RUN_TEST(testClear, "Clear Operations",
         "Brown/tan background (RGB ~127,64,31)\n"
         "Solid color filling entire screen");
 
-    testBasicTriangle();
-    waitForA("Basic Triangle",
+    RUN_TEST(testBasicTriangle, "Basic Triangle",
         "Dark gray background\n"
         "GREEN triangle in center of screen");
 
-    testVBO();
-    waitForA("Vertex Buffer Objects",
+    RUN_TEST(testVBO, "Vertex Buffer Objects",
         "Black background\n"
         "YELLOW square in center");
 
-    testTextures();
-    waitForA("Textures",
+    RUN_TEST(testTextures, "Textures",
         "Gray background (50% gray)\n"
         "BLACK/WHITE checkerboard quad in center\n"
         "Sharp pixel edges (GL_NEAREST filtering)");
 
-    testTexSubImage();
-    waitForA("glTexSubImage2D",
+    RUN_TEST(testTexSubImage, "glTexSubImage2D",
         "Gray background (50% gray)\n"
         "RED quad with GREEN center\n"
         "(Green 4x4 patch in middle of 8x8 red texture)");
 
-    testDepth();
-    waitForA("Depth Testing",
+    RUN_TEST(testDepth, "Depth Testing",
         "Dark gray background\n"
         "Large RED quad behind\n"
         "Smaller GREEN quad in front (center)\n"
         "GREEN must be visible ON TOP of red!");
 
-    testPolygonOffset();
-    waitForA("Polygon Offset",
+    RUN_TEST(testPolygonOffset, "Polygon Offset",
         "Dark gray background\n"
         "Large RED quad and smaller GREEN quad at SAME Z\n"
         "GREEN should be ON TOP (polygon offset makes it closer)\n"
         "Without polygon offset, would have z-fighting artifacts");
 
-    testBlending();
-    waitForA("Blending",
+    RUN_TEST(testBlending, "Blending",
         "Black background\n"
         "RED quad (opaque)\n"
         "GREEN semi-transparent quad overlapping\n"
         "Overlap area should be YELLOW-ISH (blend of red+green)");
 
-    testCulling();
-    waitForA("Face Culling",
+    RUN_TEST(testCulling, "Face Culling",
         "Dark gray background\n"
         "Only ONE triangle visible (CCW winding)\n"
         "CW triangle should be culled (invisible)");
 
-    testScissor();
-    waitForA("Scissor Test",
+    RUN_TEST(testScissor, "Scissor Test",
         "BLUE background (outside scissor)\n"
         "GREEN rectangle in CENTER (inside scissor)\n"
         "Corners should remain blue");
 
-    testColorMask();
-    waitForA("Color Mask",
+    RUN_TEST(testColorMask, "Color Mask",
         "Black background\n"
         "RED-only quad (no green or blue written)\n"
         "Should appear as pure RED");
 
-    testUniforms();
-    waitForA("Uniforms (mat4, vec4)",
+    RUN_TEST(testUniforms, "Uniforms (mat4, vec4)",
         "Black background\n"
-        "MAGENTA (pink/purple) triangle in center\n"
+        "MAGENTA (pink/purple) quad in center\n"
         "Transformed by matrix uniform");
 
-    testFBO();
-    waitForA("Framebuffer Objects (FBO)",
+    RUN_TEST(testFBO, "Framebuffer Objects (FBO)",
         "Black background\n"
         "ORANGE quad in center\n"
         "(Rendered to texture, then texture displayed)");
 
-    testMipmaps();
-    waitForA("Mipmaps",
+    RUN_TEST(testMipmaps, "Mipmaps",
         "NO VISUAL - API test only\n"
         "(Tests glGenerateMipmap doesn't crash)\n"
         "Previous frame may still be visible");
 
-    testCopyTexImage();
-    waitForA("glCopyTexImage2D",
+    RUN_TEST(testCopyTexImage, "glCopyTexImage2D",
         "Gray background\n"
-        "A quad showing PART of a green triangle\n"
-        "(Framebuffer was copied to texture, then displayed)");
+        "A GREEN SQUARE in center\n"
+        "(Center of framebuffer copied to texture, displayed on quad)");
 
-    testCopyTexSubImage();
-    waitForA("glCopyTexSubImage2D",
+    RUN_TEST(testCopyTexSubImage, "glCopyTexSubImage2D",
         "Gray background\n"
         "A RED quad with GREEN center patch\n"
         "(Green from framebuffer was copied to center of red texture)");
 
-    testReadPixels();
-    waitForA("glReadPixels",
+    RUN_TEST(testReadPixels, "glReadPixels",
         "Blue-ish background (RGB ~64,128,191)\n"
         "Solid color - used for pixel readback test");
 
-    testAllUniforms();
-    waitForA("All Uniform Types",
+    RUN_TEST(testAllUniforms, "All Uniform Types",
         "Multiple tests - last visible:\n"
         "Small WHITE triangle (scaled 0.5x)\n"
         "Black background");
 
-    testMultiTexture();
-    waitForA("Multiple Texture Units",
+    RUN_TEST(testMultiTexture, "Multiple Texture Units",
         "PURPLE quad in center\n"
         "(50% blend of RED texture0 + BLUE texture1)\n"
         "Black background");
 
-    testCubemap();
-    waitForA("Cubemap Textures",
-        "Gray background\n"
-        "API test for GL_TEXTURE_CUBE_MAP\n"
-        "(6 colored faces: +X=Red, -X=Cyan, +Y=Green, -Y=Magenta, +Z=Blue, -Z=Yellow)");
+    RUN_TEST(testCubemap, "Cubemap Textures",
+        "Gray background (50% gray)\n"
+        "6 small colored squares in a 3x2 grid:\n"
+        "Top row: RED (+X), CYAN (-X), GREEN (+Y)\n"
+        "Bottom row: MAGENTA (-Y), BLUE (+Z), YELLOW (-Z)");
 
-    testFBODepthRenderbuffer();
-    waitForA("FBO with Depth Renderbuffer",
+    RUN_TEST(testFBODepthRenderbuffer, "FBO with Depth Renderbuffer",
         "Black background\n"
         "Should show RED outer area, GREEN center\n"
         "(Green quad is closer, depth test via renderbuffer)");
 
-    testQueries();
-    waitForA("GL Queries & Extensions",
+    RUN_TEST(testQueries, "GL Queries & Extensions",
         "No visual output\n"
         "Tests GL_EXTENSIONS, compressed formats,\n"
         "shader binary formats, glPixelStorei");
 
-    testPackedUBO();
-    waitForA("Packed UBO",
+    RUN_TEST(testPackedUBO, "Packed UBO",
         "Black background\n"
         "YELLOW quad with semi-transparent alpha\n"
         "(Tests packed uniform shadow buffer)");
 
+    RUN_TEST(testRuntimeShaderCompilation, "Runtime Shader Compilation (libuam)",
+        "Black background\n"
+        "CYAN quad in center\n"
+        "(Shader compiled at runtime from GLSL 4.60 source)");
+
     /* Print summary */
+    printf("[EXIT] About to print summary\n");
+    fflush(stdout);
     printSummary();
 
+    /* Unbind current program before cleanup */
+    printf("[EXIT] glUseProgram(0)\n");
+    fflush(stdout);
+    glUseProgram(0);
+
     /* Cleanup shader programs */
+    printf("[EXIT] Deleting programs\n");
+    fflush(stdout);
     if (s_simpleProgram) glDeleteProgram(s_simpleProgram);
     if (s_texturedProgram) glDeleteProgram(s_texturedProgram);
     if (s_uniformProgram) glDeleteProgram(s_uniformProgram);
@@ -2454,9 +2625,11 @@ int main(int argc, char* argv[]) {
     if (s_multiTexProgram) glDeleteProgram(s_multiTexProgram);
     if (s_cubemapProgram) glDeleteProgram(s_cubemapProgram);
     if (s_packedProgram) glDeleteProgram(s_packedProgram);
+    if (s_runtimeProgram) glDeleteProgram(s_runtimeProgram);
 
     /* Wait for user to exit */
     printf("\nPress + to exit...\n");
+    fflush(stdout);
 
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);
     PadState pad;
@@ -2467,10 +2640,15 @@ int main(int argc, char* argv[]) {
         if (padGetButtonsDown(&pad) & HidNpadButton_Plus)
             break;
 
-        /* Keep last frame visible */
-        eglSwapBuffers(s_display, s_surface);
+        /* Just poll input - no eglSwapBuffers needed (programs already deleted) */
+        svcSleepThread(16000000ULL); /* ~16ms = 60fps polling */
     }
 
+    printf("[EXIT] glFinish\n");
+    fflush(stdout);
+    glFinish(); /* Wait for GPU to complete all work before teardown */
+    printf("[EXIT] deinitEgl\n");
+    fflush(stdout);
     deinitEgl();
     deinitNxLink();
     romfsExit();

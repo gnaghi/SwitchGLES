@@ -40,8 +40,10 @@ LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*
 
 # SwitchGLES library - use absolute path
 SWITCHGL_LIB	:=	$(CURDIR)/../../lib
+# libuam library - for runtime shader compilation
+LIBUAM_LIB	:=	$(CURDIR)/../../../../libuam/builddir
 
-LIBS	:= -lSwitchGLES -ldeko3d -lnx -lm
+LIBS	:= -lSwitchGLES -luam -ldeko3d -lnx -lstdc++ -lm
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries
@@ -55,6 +57,7 @@ ifneq ($(BUILD),$(notdir $(CURDIR)))
 export OUTPUT	:=	$(CURDIR)/$(TARGET)
 export TOPDIR	:=	$(CURDIR)
 export SWITCHGL_LIB
+export LIBUAM_LIB
 
 export VPATH	:=	$(foreach dir,$(SOURCES),$(CURDIR)/$(dir))
 export DEPSDIR	:=	$(CURDIR)/$(BUILD)
@@ -70,7 +73,7 @@ export INCLUDE	:=	$(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
 			$(foreach dir,$(LIBDIRS),-I$(dir)/include) \
 			-I$(CURDIR)/$(BUILD)
 
-export LIBPATHS	:=	$(foreach dir,$(LIBDIRS),-L$(dir)/lib) -L$(SWITCHGL_LIB)
+export LIBPATHS	:=	$(foreach dir,$(LIBDIRS),-L$(dir)/lib) -L$(SWITCHGL_LIB) -L$(LIBUAM_LIB)
 
 # ROMFS flags for elf2nro - must use relative path for Windows compatibility
 ifneq ($(ROMFS),)
