@@ -368,6 +368,8 @@ static void set_float_uniform(GLint location, int num_components, GLsizei count,
         int binding = (location >> 16) & 0xFF;
         int offset = location & 0xFFFF;
 
+        if (binding >= SGL_MAX_PACKED_UBOS) return;  /* Bounds check */
+
         sgl_packed_ubo_t *packed = (stage == 0)
             ? &prog->packed_vertex[binding]
             : &prog->packed_fragment[binding];
@@ -401,8 +403,11 @@ static void set_float_uniform(GLint location, int num_components, GLsizei count,
     sgl_uniform_binding_t *uniforms = (stage == 0) ? prog->vertex_uniforms : prog->fragment_uniforms;
     sgl_uniform_binding_t *ub = &uniforms[binding];
 
+    /* Clamp count to stack buffer limit */
+    GLsizei clampedCount = count > 64 ? 64 : count;
+
     /* std140: each array element padded to 16 bytes (vec4) */
-    uint32_t dataSize = count * 16;
+    uint32_t dataSize = clampedCount * 16;
     uint32_t alignedSize = (dataSize + SGL_UNIFORM_ALIGNMENT - 1) & ~(SGL_UNIFORM_ALIGNMENT - 1);
 
     /* ALWAYS allocate a new offset for each uniform write.
@@ -418,7 +423,6 @@ static void set_float_uniform(GLint location, int num_components, GLsizei count,
     /* Write data via backend - pad each element to vec4 */
     if (ub->valid && ctx->backend->ops->write_uniform) {
         float array_data[4 * 64]; /* support up to 64 elements on stack */
-        GLsizei clampedCount = count > 64 ? 64 : count;
         memset(array_data, 0, clampedCount * 16);
         for (GLsizei e = 0; e < clampedCount; e++) {
             for (int j = 0; j < num_components && j < 4; j++) {
@@ -477,6 +481,8 @@ static void set_int_uniform(GLint location, int num_components, GLsizei count, c
         int binding = (location >> 16) & 0xFF;
         int offset = location & 0xFFFF;
 
+        if (binding >= SGL_MAX_PACKED_UBOS) return;  /* Bounds check */
+
         sgl_packed_ubo_t *packed = (stage == 0)
             ? &prog->packed_vertex[binding]
             : &prog->packed_fragment[binding];
@@ -510,8 +516,11 @@ static void set_int_uniform(GLint location, int num_components, GLsizei count, c
     sgl_uniform_binding_t *uniforms = (stage == 0) ? prog->vertex_uniforms : prog->fragment_uniforms;
     sgl_uniform_binding_t *ub = &uniforms[binding];
 
+    /* Clamp count to stack buffer limit */
+    GLsizei clampedCount = count > 64 ? 64 : count;
+
     /* std140: each array element padded to 16 bytes (ivec4) */
-    uint32_t dataSize = count * 16;
+    uint32_t dataSize = clampedCount * 16;
     uint32_t alignedSize = (dataSize + SGL_UNIFORM_ALIGNMENT - 1) & ~(SGL_UNIFORM_ALIGNMENT - 1);
 
     /* ALWAYS allocate new offset to avoid data races between draws */
@@ -525,7 +534,6 @@ static void set_int_uniform(GLint location, int num_components, GLsizei count, c
     /* Write data via backend - pad each element to ivec4 */
     if (ub->valid && ctx->backend->ops->write_uniform) {
         int32_t array_data[4 * 64]; /* support up to 64 elements on stack */
-        GLsizei clampedCount = count > 64 ? 64 : count;
         memset(array_data, 0, clampedCount * 16);
         for (GLsizei e = 0; e < clampedCount; e++) {
             for (int j = 0; j < num_components && j < 4; j++) {
@@ -673,6 +681,7 @@ GL_APICALL void GL_APIENTRY glUniformMatrix2fv(GLint location, GLsizei count, GL
         /* Convert mat2 (4 floats) to std140 layout (2 vec4 = 8 floats) */
         float std140_data[8 * 4]; /* Support up to 4 matrices */
         if (count > 4) count = 4;
+        dataSize = 32 * count;  /* Recompute after clamping to avoid buffer over-read */
 
         for (GLsizei m = 0; m < count; m++) {
             const float *src = value + m * 4;
@@ -755,6 +764,7 @@ GL_APICALL void GL_APIENTRY glUniformMatrix3fv(GLint location, GLsizei count, GL
         /* Convert mat3 (9 floats) to std140 layout (3 vec4 = 12 floats) */
         float std140_data[12 * 4]; /* Support up to 4 matrices */
         if (count > 4) count = 4;
+        dataSize = 48 * count;  /* Recompute after clamping to avoid buffer over-read */
 
         for (GLsizei m = 0; m < count; m++) {
             const float *src = value + m * 9;
@@ -844,6 +854,7 @@ GL_APICALL void GL_APIENTRY glUniformMatrix4fv(GLint location, GLsizei count, GL
             /* Transpose the matrix before writing */
             float transposed[16 * 4]; /* Support up to 4 matrices */
             if (count > 4) count = 4; /* Clamp to avoid overflow */
+            data_size = 64 * count;  /* Recompute after clamping to avoid buffer over-read */
             for (GLsizei m = 0; m < count; m++) {
                 const float *src = value + m * 16;
                 float *d = transposed + m * 16;
