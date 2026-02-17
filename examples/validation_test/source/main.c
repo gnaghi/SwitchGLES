@@ -2627,6 +2627,9 @@ int main(int argc, char* argv[]) {
     if (s_packedProgram) glDeleteProgram(s_packedProgram);
     if (s_runtimeProgram) glDeleteProgram(s_runtimeProgram);
 
+    printf("\n[LIFECYCLE] All tests complete. Programs deleted.\n");
+    fflush(stdout);
+
     /* Wait for user to exit */
     printf("\nPress + to exit...\n");
     fflush(stdout);
@@ -2644,14 +2647,28 @@ int main(int argc, char* argv[]) {
         svcSleepThread(16000000ULL); /* ~16ms = 60fps polling */
     }
 
-    printf("[EXIT] glFinish\n");
+    printf("[LIFECYCLE] + pressed, beginning cleanup...\n");
+    fflush(stdout);
+
+    printf("[LIFECYCLE] glFinish...\n");
     fflush(stdout);
     glFinish(); /* Wait for GPU to complete all work before teardown */
-    printf("[EXIT] deinitEgl\n");
+    printf("[LIFECYCLE] glFinish OK\n");
+    fflush(stdout);
+
+    printf("[LIFECYCLE] deinitEgl...\n");
     fflush(stdout);
     deinitEgl();
-    deinitNxLink();
-    romfsExit();
+    printf("[LIFECYCLE] deinitEgl OK\n");
+    fflush(stdout);
 
+    printf("[LIFECYCLE] deinitNxLink...\n");
+    fflush(stdout);
+    deinitNxLink();
+
+    printf("[LIFECYCLE] Clean exit.\n");
+    fflush(stdout);
+
+    romfsExit();
     return 0;
 }
