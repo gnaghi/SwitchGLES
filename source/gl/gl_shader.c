@@ -5,7 +5,12 @@
 
 #include "gl_common.h"
 #include <string.h>
+#include <stdlib.h>
 #include <stdio.h>
+
+#ifdef SGL_ENABLE_RUNTIME_COMPILER
+#include <libuam.h>
+#endif
 
 /* Shader Objects */
 
@@ -40,16 +45,166 @@ GL_APICALL GLboolean GL_APIENTRY glIsShader(GLuint shader) {
 }
 
 GL_APICALL void GL_APIENTRY glShaderSource(GLuint shader, GLsizei count, const GLchar *const*string, const GLint *length) {
-    (void)shader; (void)count; (void)string; (void)length;
-    /* Runtime compilation not supported - use pre-compiled dksh shaders */
+    GET_CTX();
+
+    if (count < 0 || !string) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    sgl_shader_t *sh = GET_SHADER(shader);
+    if (!sh) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    /* Free previous source */
+    if (sh->source) {
+        free(sh->source);
+        sh->source = NULL;
+    }
+
+    /* Calculate total length */
+    size_t total = 0;
+    for (GLsizei i = 0; i < count; i++) {
+        if (!string[i]) continue;
+        if (length && length[i] >= 0) {
+            total += (size_t)length[i];
+        } else {
+            total += strlen(string[i]);
+        }
+    }
+
+    /* Concatenate all strings */
+    sh->source = (char *)malloc(total + 1);
+    if (!sh->source) {
+        sgl_set_error(ctx, GL_OUT_OF_MEMORY);
+        return;
+    }
+
+    char *dst = sh->source;
+    for (GLsizei i = 0; i < count; i++) {
+        if (!string[i]) continue;
+        size_t len;
+        if (length && length[i] >= 0) {
+            len = (size_t)length[i];
+        } else {
+            len = strlen(string[i]);
+        }
+        memcpy(dst, string[i], len);
+        dst += len;
+    }
+    *dst = '\0';
+
+    /* Reset compilation state */
+    sh->compiled = false;
+
+    SGL_TRACE_SHADER("glShaderSource(%u, %d) - %zu bytes", shader, count, total);
 }
 
 GL_APICALL void GL_APIENTRY glCompileShader(GLuint shader) {
     GET_CTX();
     sgl_shader_t *sh = GET_SHADER(shader);
-    if (sh) {
-        sh->compiled = true;  /* Mark as compiled (actual compilation done offline) */
+    if (!sh) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
     }
+
+    /* Free previous info log */
+    if (sh->info_log) {
+        free(sh->info_log);
+        sh->info_log = NULL;
+    }
+
+    /* If no source set, mark as compiled for precompiled path (glShaderBinary) */
+    if (!sh->source) {
+        sh->compiled = true;
+        return;
+    }
+
+#ifdef SGL_ENABLE_RUNTIME_COMPILER
+    /* Map GL shader type to DkStage */
+    DkStage stage;
+    if (sh->type == GL_VERTEX_SHADER) {
+        stage = DkStage_Vertex;
+    } else if (sh->type == GL_FRAGMENT_SHADER) {
+        stage = DkStage_Fragment;
+    } else {
+        sh->info_log = strdup("ERROR: Unsupported shader type\n");
+        sh->compiled = false;
+        return;
+    }
+
+    /* Create compiler and compile GLSL to DKSH */
+    uam_compiler *compiler = uam_create_compiler(stage);
+    if (!compiler) {
+        sh->info_log = strdup("ERROR: Failed to create shader compiler\n");
+        sh->compiled = false;
+        return;
+    }
+
+    if (uam_compile_dksh(compiler, sh->source)) {
+        /* Get compiled DKSH binary */
+        size_t dksh_size = uam_get_code_size(compiler);
+
+        printf("[SGL-RT] shader %u: DKSH size=%zu align256=%d GPRs=%d\n",
+               shader, dksh_size, (int)(dksh_size % 256), uam_get_num_gprs(compiler));
+        fflush(stdout);
+
+        /* Over-allocate to page boundary — protects against potential
+         * libuam OutputDkshToMemory padding writes near buffer end.
+         * The dksh_size passed to load_shader_binary is the exact size. */
+        size_t alloc_size = (dksh_size + 4095) & ~(size_t)4095;
+        void *dksh = calloc(1, alloc_size);
+        if (dksh) {
+            uam_write_code(compiler, dksh);
+
+            /* Diagnostic: dump DKSH header (first 32 bytes) for comparison */
+            {
+                const uint8_t *hdr = (const uint8_t *)dksh;
+                printf("[SGL-RT] DKSH header:");
+                for (int ii = 0; ii < 32 && ii < (int)dksh_size; ii++)
+                    printf(" %02X", hdr[ii]);
+                printf("\n");
+                fflush(stdout);
+            }
+
+            /* Load DKSH into backend */
+            if (ctx->backend && ctx->backend->ops->load_shader_binary) {
+                sh->compiled = ctx->backend->ops->load_shader_binary(
+                    ctx->backend, shader, dksh, dksh_size);
+            } else {
+                sh->compiled = false;
+                sh->info_log = strdup("ERROR: Backend does not support shader loading\n");
+            }
+
+            free(dksh);
+        } else {
+            sh->compiled = false;
+            sh->info_log = strdup("ERROR: Out of memory for compiled shader\n");
+        }
+
+        /* Store any warnings from compilation */
+        const char *log = uam_get_error_log(compiler);
+        if (log && log[0] != '\0' && !sh->info_log) {
+            sh->info_log = strdup(log);
+        }
+    } else {
+        /* Compilation failed - store error log */
+        const char *log = uam_get_error_log(compiler);
+        sh->info_log = (log && log[0]) ? strdup(log) : strdup("ERROR: Compilation failed\n");
+        sh->compiled = false;
+    }
+
+    uam_free_compiler(compiler);
+    SGL_TRACE_SHADER("glCompileShader(%u) - %s", shader, sh->compiled ? "OK" : "FAILED");
+#else
+    /* No runtime compiler - source shaders cannot be compiled */
+    sh->info_log = strdup("ERROR: Runtime shader compilation not available. "
+                          "Use precompiled DKSH shaders via glShaderBinary().\n");
+    sh->compiled = false;
+    SGL_TRACE_SHADER("glCompileShader(%u) - no runtime compiler", shader);
+#endif
 }
 
 GL_APICALL void GL_APIENTRY glGetShaderiv(GLuint shader, GLenum pname, GLint *params) {
@@ -73,10 +228,10 @@ GL_APICALL void GL_APIENTRY glGetShaderiv(GLuint shader, GLenum pname, GLint *pa
             *params = GL_FALSE;
             break;
         case GL_INFO_LOG_LENGTH:
-            *params = 0;
+            *params = sh->info_log ? (GLint)(strlen(sh->info_log) + 1) : 0;
             break;
         case GL_SHADER_SOURCE_LENGTH:
-            *params = 0;
+            *params = sh->source ? (GLint)(strlen(sh->source) + 1) : 0;
             break;
         default:
             sgl_set_error(ctx, GL_INVALID_ENUM);
@@ -85,15 +240,53 @@ GL_APICALL void GL_APIENTRY glGetShaderiv(GLuint shader, GLenum pname, GLint *pa
 }
 
 GL_APICALL void GL_APIENTRY glGetShaderInfoLog(GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *infoLog) {
-    (void)shader;
-    if (length) *length = 0;
-    if (infoLog && bufSize > 0) infoLog[0] = '\0';
+    GET_CTX();
+    sgl_shader_t *sh = GET_SHADER(shader);
+    if (!sh) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        if (length) *length = 0;
+        if (infoLog && bufSize > 0) infoLog[0] = '\0';
+        return;
+    }
+
+    if (sh->info_log && sh->info_log[0]) {
+        GLsizei log_len = (GLsizei)strlen(sh->info_log);
+        GLsizei copy_len = (bufSize > 0) ? (bufSize - 1) : 0;
+        if (copy_len > log_len) copy_len = log_len;
+        if (infoLog && copy_len > 0) {
+            memcpy(infoLog, sh->info_log, copy_len);
+            infoLog[copy_len] = '\0';
+        }
+        if (length) *length = copy_len;
+    } else {
+        if (length) *length = 0;
+        if (infoLog && bufSize > 0) infoLog[0] = '\0';
+    }
 }
 
 GL_APICALL void GL_APIENTRY glGetShaderSource(GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *source) {
-    (void)shader;
-    if (length) *length = 0;
-    if (source && bufSize > 0) source[0] = '\0';
+    GET_CTX();
+    sgl_shader_t *sh = GET_SHADER(shader);
+    if (!sh) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        if (length) *length = 0;
+        if (source && bufSize > 0) source[0] = '\0';
+        return;
+    }
+
+    if (sh->source && sh->source[0]) {
+        GLsizei src_len = (GLsizei)strlen(sh->source);
+        GLsizei copy_len = (bufSize > 0) ? (bufSize - 1) : 0;
+        if (copy_len > src_len) copy_len = src_len;
+        if (source && copy_len > 0) {
+            memcpy(source, sh->source, copy_len);
+            source[copy_len] = '\0';
+        }
+        if (length) *length = copy_len;
+    } else {
+        if (length) *length = 0;
+        if (source && bufSize > 0) source[0] = '\0';
+    }
 }
 
 /* Program Objects */
@@ -174,12 +367,13 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
 
     /* CRITICAL: Call backend to copy shader data to per-program storage.
      * This prevents issues when shader IDs are reused after glDeleteShader. */
+    bool link_ok = true;
     if (ctx->backend && ctx->backend->ops->link_program) {
-        ctx->backend->ops->link_program(ctx->backend, program,
+        link_ok = ctx->backend->ops->link_program(ctx->backend, program,
                                         prog->vertex_shader, prog->fragment_shader);
     }
 
-    prog->linked = true;
+    prog->linked = link_ok;
     SGL_TRACE_SHADER("glLinkProgram(%u)", program);
 }
 

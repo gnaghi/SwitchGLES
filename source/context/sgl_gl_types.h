@@ -66,6 +66,8 @@ typedef struct sgl_shader {
     uint32_t backend_handle;
     uint32_t code_offset;
     uint32_t code_size;
+    char *source;       /* GLSL source (from glShaderSource), NULL if precompiled */
+    char *info_log;     /* Compilation info/error log */
 } sgl_shader_t;
 
 /* Uniform binding info */

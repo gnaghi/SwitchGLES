@@ -527,7 +527,7 @@ GL_APICALL void GL_APIENTRY glGetBufferParameteriv(GLenum target, GLenum pname, 
 /* Shader Compiler (stubs) */
 
 GL_APICALL void GL_APIENTRY glReleaseShaderCompiler(void) {
-    /* No-op - we don't have a runtime shader compiler */
+    /* No-op - libuam manages its own resources per-compiler instance */
 }
 
 GL_APICALL void GL_APIENTRY glShaderBinary(GLsizei count, const GLuint *shaders,

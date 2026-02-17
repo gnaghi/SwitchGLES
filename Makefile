@@ -35,7 +35,7 @@ CFLAGS	:=	-g -Wall -Wextra -O0 \
 			-fdata-sections \
 			$(ARCH)
 
-CFLAGS	+=	$(INCLUDE) -D__SWITCH__ -DSGL_DEBUG
+CFLAGS	+=	$(INCLUDE) -D__SWITCH__ -DSGL_DEBUG -DSGL_ENABLE_RUNTIME_COMPILER
 
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++17
 
@@ -63,6 +63,7 @@ export OFILES 		:=	$(OFILES_SRC)
 
 export INCLUDE	:=	$(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
 			$(foreach dir,$(LIBDIRS),-I$(dir)/include) \
+			-I$(CURDIR)/../../libuam/source \
 			-I.
 
 .PHONY: clean all library shaders examples install uninstall

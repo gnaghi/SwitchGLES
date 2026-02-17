@@ -5,6 +5,7 @@
 
 #include "sgl_resource_manager.h"
 #include <string.h>
+#include <stdlib.h>
 
 void sgl_res_mgr_init(sgl_resource_manager_t *mgr) {
     memset(mgr, 0, sizeof(sgl_resource_manager_t));
@@ -56,6 +57,14 @@ GLuint sgl_res_mgr_alloc_shader(sgl_resource_manager_t *mgr, GLenum type) {
 
 void sgl_res_mgr_free_shader(sgl_resource_manager_t *mgr, GLuint id) {
     if (id > 0 && id < SGL_MAX_SHADERS && mgr->shaders[id].used) {
+        if (mgr->shaders[id].source) {
+            free(mgr->shaders[id].source);
+            mgr->shaders[id].source = NULL;
+        }
+        if (mgr->shaders[id].info_log) {
+            free(mgr->shaders[id].info_log);
+            mgr->shaders[id].info_log = NULL;
+        }
         mgr->shaders[id].used = false;
     }
 }
