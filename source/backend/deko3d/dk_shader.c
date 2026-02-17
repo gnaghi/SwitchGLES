@@ -69,10 +69,18 @@ bool dk_load_shader_file(sgl_backend_t *be, sgl_handle_t handle, const char *pat
     DkShaderMaker shaderMaker;
     dkShaderMakerDefaults(&shaderMaker, dk->code_memblock, aligned_offset);
     dkShaderInitialize(&dk->dk_shaders[handle], &shaderMaker);
+
+    /* Validate shader — prevents GPU crash from invalid DKSH data */
+    if (!dkShaderIsValid(&dk->dk_shaders[handle])) {
+        SGL_ERROR_BACKEND("load_shader_file: shader %u INVALID (path=%s)", handle, path);
+        dk->shader_loaded[handle] = false;
+        return false;
+    }
+
     dk->shader_loaded[handle] = true;
     dk->code_offset = aligned_offset + ((size + 255) & ~255);
 
-    SGL_TRACE_SHADER("load_shader_file: handle=%u path=%s at 0x%lx",
+    SGL_TRACE_SHADER("load_shader_file: handle=%u path=%s at 0x%lx (valid)",
                      handle, path, (unsigned long)code_addr);
     return true;
 }
@@ -104,20 +112,36 @@ bool dk_load_shader_binary(sgl_backend_t *be, sgl_handle_t handle,
         return false;
     }
 
-    /* Align code offset to 256 bytes */
+    /* Align code offset to 256 bytes (DK_SHADER_CODE_ALIGNMENT) */
     uint32_t aligned_offset = (dk->code_offset + 255) & ~255;
+    uint32_t aligned_size = (uint32_t)((size + 255) & ~(size_t)255);
     uint8_t *code_ptr = (uint8_t*)dkMemBlockGetCpuAddr(dk->code_memblock) + aligned_offset;
 
+    /* Zero the aligned region first, then copy DKSH data.
+     * This matches the pure deko3d libuam test pattern (memset before write).
+     * Critical: dkShaderInitialize may read up to the aligned boundary,
+     * and libuam doesn't zero DKSH internal padding. */
+    memset(code_ptr, 0, aligned_size);
     memcpy(code_ptr, data, size);
 
     /* Initialize shader at the handle index */
     DkShaderMaker shaderMaker;
     dkShaderMakerDefaults(&shaderMaker, dk->code_memblock, aligned_offset);
     dkShaderInitialize(&dk->dk_shaders[handle], &shaderMaker);
-    dk->shader_loaded[handle] = true;
-    dk->code_offset = aligned_offset + ((size + 255) & ~255);
 
-    SGL_TRACE_SHADER("load_shader_binary: handle=%u size=%zu at offset=%u",
+    /* Validate shader — prevents GPU crash from invalid DKSH data */
+    if (!dkShaderIsValid(&dk->dk_shaders[handle])) {
+        SGL_ERROR_BACKEND("load_shader_binary: shader %u INVALID after init (size=%zu at offset=%u)",
+                          handle, size, aligned_offset);
+        dk->shader_loaded[handle] = false;
+        /* Don't advance code_offset — reclaim the space */
+        return false;
+    }
+
+    dk->shader_loaded[handle] = true;
+    dk->code_offset = aligned_offset + aligned_size;
+
+    SGL_TRACE_SHADER("load_shader_binary: handle=%u size=%zu at offset=%u (valid)",
                      handle, size, aligned_offset);
     return true;
 }
@@ -157,7 +181,18 @@ bool dk_link_program(sgl_backend_t *be, sgl_handle_t program,
         dk->program_shader_valid[program][1] = true;
     }
 
-    SGL_TRACE_SHADER("link_program prog=%u vs=%u fs=%u", program, vertex_shader, fragment_shader);
+    SGL_TRACE_SHADER("link_program prog=%u vs=%u(%s) fs=%u(%s)", program,
+                     vertex_shader, dk->program_shader_valid[program][0] ? "ok" : "MISSING",
+                     fragment_shader, dk->program_shader_valid[program][1] ? "ok" : "MISSING");
+
+    /* Both VS and FS required for a valid graphics program */
+    if (!dk->program_shader_valid[program][0] || !dk->program_shader_valid[program][1]) {
+        SGL_ERROR_BACKEND("link_program: prog %u missing shaders (vs=%d fs=%d)",
+                          program,
+                          dk->program_shader_valid[program][0],
+                          dk->program_shader_valid[program][1]);
+        return false;
+    }
     return true;
 }
 
