@@ -40,8 +40,10 @@ void dk_apply_scissor(sgl_backend_t *be, const sgl_scissor_state_t *state) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
     DkScissor scissor = {
-        (uint32_t)state->x, (uint32_t)state->y,
-        (uint32_t)state->width, (uint32_t)state->height
+        (uint32_t)(state->x < 0 ? 0 : state->x),
+        (uint32_t)(state->y < 0 ? 0 : state->y),
+        (uint32_t)(state->width < 0 ? 0 : state->width),
+        (uint32_t)(state->height < 0 ? 0 : state->height)
     };
     dkCmdBufSetScissors(dk->cmdbuf, 0, &scissor, 1);
 
