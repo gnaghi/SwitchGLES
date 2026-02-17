@@ -78,7 +78,8 @@ GL_APICALL const GLubyte *GL_APIENTRY glGetString(GLenum name) {
                 "GL_OES_compressed_ETC1_RGB8_texture "
                 "GL_EXT_blend_minmax "
                 "GL_EXT_texture_compression_s3tc "
-                "GL_KHR_texture_compression_astc_ldr";
+                "GL_KHR_texture_compression_astc_ldr "
+                "GL_OES_standard_derivatives";
         default:
             return NULL;
     }
@@ -313,6 +314,20 @@ GL_APICALL void GL_APIENTRY glGetIntegerv(GLenum pname, GLint *params) {
             break;
         case GL_UNPACK_ALIGNMENT:
             *params = ctx->unpack_alignment;
+            break;
+
+        /* Spearmint queries */
+        case 0x8B4A: /* GL_MAX_VERTEX_UNIFORM_COMPONENTS */
+            *params = 1024;  /* 256 vec4 * 4 components */
+            break;
+        case 0x8D57: /* GL_MAX_SAMPLES */
+            *params = 0;     /* No MSAA */
+            break;
+        case 0x8CDF: /* GL_MAX_COLOR_ATTACHMENTS */
+            *params = 1;
+            break;
+        case 0x821D: /* GL_NUM_EXTENSIONS */
+            *params = 0;     /* Use glGetString(GL_EXTENSIONS) instead */
             break;
 
         default:
@@ -593,6 +608,23 @@ GL_APICALL void GL_APIENTRY glSampleCoverage(GLfloat value, GLboolean invert) {
     /* Store values for glGetFloatv/glGetBooleanv query (MSAA not supported on hardware) */
     ctx->sample_coverage_value = value < 0.0f ? 0.0f : (value > 1.0f ? 1.0f : value);
     ctx->sample_coverage_invert = invert != 0;
+}
+
+/* GL 3.0 stub (needed by Spearmint, not used in GLES2 path) */
+
+GL_APICALL const GLubyte *GL_APIENTRY glGetStringi(GLenum name, GLuint index) {
+    (void)name; (void)index;
+    return (const GLubyte *)"";
+}
+
+/* Fixed-function stubs (loaded by Spearmint QGL_1_1_PROCS but never called by renderergl2) */
+
+GL_APICALL void GL_APIENTRY glFogf(GLenum pname, GLfloat param) {
+    (void)pname; (void)param;
+}
+
+GL_APICALL void GL_APIENTRY glFogfv(GLenum pname, const GLfloat *params) {
+    (void)pname; (void)params;
 }
 
 /* glDepthRangef is implemented in gl_clear.c */

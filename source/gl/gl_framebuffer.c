@@ -14,6 +14,12 @@
 #ifndef GL_DEPTH_STENCIL_ATTACHMENT
 #define GL_DEPTH_STENCIL_ATTACHMENT 0x821A
 #endif
+#ifndef GL_READ_FRAMEBUFFER
+#define GL_READ_FRAMEBUFFER 0x8CA8
+#endif
+#ifndef GL_DRAW_FRAMEBUFFER
+#define GL_DRAW_FRAMEBUFFER 0x8CA9
+#endif
 
 /* Framebuffer Objects */
 
@@ -68,7 +74,7 @@ GL_APICALL void GL_APIENTRY glBindFramebuffer(GLenum target, GLuint framebuffer)
     GET_CTX();
     CHECK_BACKEND();
 
-    if (target != GL_FRAMEBUFFER) {
+    if (target != GL_FRAMEBUFFER && target != GL_READ_FRAMEBUFFER && target != GL_DRAW_FRAMEBUFFER) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
     }
@@ -108,7 +114,7 @@ GL_APICALL void GL_APIENTRY glFramebufferTexture2D(GLenum target, GLenum attachm
     (void)textarget;
     (void)level;
 
-    if (target != GL_FRAMEBUFFER) {
+    if (target != GL_FRAMEBUFFER && target != GL_READ_FRAMEBUFFER && target != GL_DRAW_FRAMEBUFFER) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
     }
@@ -157,7 +163,7 @@ GL_APICALL void GL_APIENTRY glFramebufferTexture2D(GLenum target, GLenum attachm
 GL_APICALL GLenum GL_APIENTRY glCheckFramebufferStatus(GLenum target) {
     GET_CTX_RET(0);
 
-    if (target != GL_FRAMEBUFFER) {
+    if (target != GL_FRAMEBUFFER && target != GL_READ_FRAMEBUFFER && target != GL_DRAW_FRAMEBUFFER) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return 0;
     }
@@ -229,7 +235,7 @@ GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer(GLenum target, GLenum atta
     GET_CTX();
     (void)renderbuffertarget;
 
-    if (target != GL_FRAMEBUFFER) {
+    if (target != GL_FRAMEBUFFER && target != GL_READ_FRAMEBUFFER && target != GL_DRAW_FRAMEBUFFER) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
     }
@@ -282,7 +288,7 @@ GL_APICALL void GL_APIENTRY glGetFramebufferAttachmentParameteriv(GLenum target,
                                                                     GLenum pname, GLint *params) {
     GET_CTX();
 
-    if (target != GL_FRAMEBUFFER || !params) {
+    if ((target != GL_FRAMEBUFFER && target != GL_READ_FRAMEBUFFER && target != GL_DRAW_FRAMEBUFFER) || !params) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
     }
@@ -525,4 +531,27 @@ GL_APICALL void GL_APIENTRY glReadPixels(GLint x, GLint y, GLsizei width, GLsize
     }
 
     SGL_TRACE_FBO("glReadPixels(%d,%d %dx%d)", x, y, width, height);
+}
+
+/* Blit framebuffer stub (needed by Spearmint for MSAA resolve, no-op without MSAA) */
+
+GL_APICALL void GL_APIENTRY glBlitFramebuffer(
+    GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1,
+    GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1,
+    GLbitfield mask, GLenum filter)
+{
+    (void)srcX0; (void)srcY0; (void)srcX1; (void)srcY1;
+    (void)dstX0; (void)dstY0; (void)dstX1; (void)dstY1;
+    (void)mask; (void)filter;
+    /* No MSAA support - no-op */
+}
+
+/* Multisample renderbuffer stub (falls back to non-multisampled storage) */
+
+GL_APICALL void GL_APIENTRY glRenderbufferStorageMultisample(
+    GLenum target, GLsizei samples, GLenum internalformat,
+    GLsizei width, GLsizei height)
+{
+    (void)samples;
+    glRenderbufferStorage(target, internalformat, width, height);
 }

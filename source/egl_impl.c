@@ -1024,8 +1024,200 @@ EGLAPI EGLBoolean EGLAPIENTRY eglReleaseTexImage(EGLDisplay dpy, EGLSurface surf
     return EGL_FALSE;
 }
 
+/* ============================================================================
+ * eglGetProcAddress - GL function pointer dispatch table
+ *
+ * Spearmint (and other engines) load all GL functions through this.
+ * ============================================================================ */
+
+/* Forward-declare stubs for functions not in GLES2 headers */
+GL_APICALL void GL_APIENTRY glFogf(GLenum pname, GLfloat param);
+GL_APICALL void GL_APIENTRY glFogfv(GLenum pname, const GLfloat *params);
+GL_APICALL void GL_APIENTRY glBlitFramebuffer(GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum);
+GL_APICALL void GL_APIENTRY glRenderbufferStorageMultisample(GLenum, GLsizei, GLenum, GLsizei, GLsizei);
+GL_APICALL const GLubyte *GL_APIENTRY glGetStringi(GLenum name, GLuint index);
+
+typedef struct {
+    const char *name;
+    void (*func)(void);
+} sgl_proc_entry_t;
+
+#define PROC_ENTRY(fn) { #fn, (void(*)(void))fn }
+
+static const sgl_proc_entry_t s_proc_table[] = {
+    /* QGL_1_1_PROCS */
+    PROC_ENTRY(glBindTexture),
+    PROC_ENTRY(glBlendFunc),
+    PROC_ENTRY(glClearColor),
+    PROC_ENTRY(glClear),
+    PROC_ENTRY(glClearStencil),
+    PROC_ENTRY(glColorMask),
+    PROC_ENTRY(glCopyTexSubImage2D),
+    PROC_ENTRY(glCullFace),
+    PROC_ENTRY(glDeleteTextures),
+    PROC_ENTRY(glDepthFunc),
+    PROC_ENTRY(glDepthMask),
+    PROC_ENTRY(glDisable),
+    PROC_ENTRY(glDrawArrays),
+    PROC_ENTRY(glDrawElements),
+    PROC_ENTRY(glEnable),
+    PROC_ENTRY(glFinish),
+    PROC_ENTRY(glFlush),
+    PROC_ENTRY(glGenTextures),
+    PROC_ENTRY(glGetBooleanv),
+    PROC_ENTRY(glGetError),
+    PROC_ENTRY(glGetIntegerv),
+    PROC_ENTRY(glGetString),
+    PROC_ENTRY(glHint),
+    PROC_ENTRY(glLineWidth),
+    PROC_ENTRY(glPolygonOffset),
+    PROC_ENTRY(glReadPixels),
+    PROC_ENTRY(glScissor),
+    PROC_ENTRY(glStencilFunc),
+    PROC_ENTRY(glStencilMask),
+    PROC_ENTRY(glStencilOp),
+    PROC_ENTRY(glTexImage2D),
+    PROC_ENTRY(glTexParameterf),
+    PROC_ENTRY(glTexParameteri),
+    PROC_ENTRY(glTexSubImage2D),
+    PROC_ENTRY(glViewport),
+    /* Fixed-function stubs */
+    PROC_ENTRY(glFogf),
+    PROC_ENTRY(glFogfv),
+
+    /* QGL_ES_1_1_PROCS */
+    PROC_ENTRY(glClearDepthf),
+    PROC_ENTRY(glDepthRangef),
+
+    /* QGL_1_3_PROCS */
+    PROC_ENTRY(glActiveTexture),
+    PROC_ENTRY(glCompressedTexImage2D),
+    PROC_ENTRY(glCompressedTexSubImage2D),
+
+    /* QGL_1_5_PROCS */
+    PROC_ENTRY(glBindBuffer),
+    PROC_ENTRY(glDeleteBuffers),
+    PROC_ENTRY(glGenBuffers),
+    PROC_ENTRY(glBufferData),
+    PROC_ENTRY(glBufferSubData),
+
+    /* QGL_2_0_PROCS */
+    PROC_ENTRY(glAttachShader),
+    PROC_ENTRY(glBindAttribLocation),
+    PROC_ENTRY(glCompileShader),
+    PROC_ENTRY(glCreateProgram),
+    PROC_ENTRY(glCreateShader),
+    PROC_ENTRY(glDeleteProgram),
+    PROC_ENTRY(glDeleteShader),
+    PROC_ENTRY(glDetachShader),
+    PROC_ENTRY(glDisableVertexAttribArray),
+    PROC_ENTRY(glEnableVertexAttribArray),
+    PROC_ENTRY(glGetActiveUniform),
+    PROC_ENTRY(glGetProgramiv),
+    PROC_ENTRY(glGetProgramInfoLog),
+    PROC_ENTRY(glGetShaderiv),
+    PROC_ENTRY(glGetShaderInfoLog),
+    PROC_ENTRY(glGetShaderSource),
+    PROC_ENTRY(glGetUniformLocation),
+    PROC_ENTRY(glLinkProgram),
+    PROC_ENTRY(glShaderSource),
+    PROC_ENTRY(glUseProgram),
+    PROC_ENTRY(glUniform1f),
+    PROC_ENTRY(glUniform2f),
+    PROC_ENTRY(glUniform3f),
+    PROC_ENTRY(glUniform4f),
+    PROC_ENTRY(glUniform1i),
+    PROC_ENTRY(glUniform1fv),
+    PROC_ENTRY(glUniformMatrix4fv),
+    PROC_ENTRY(glValidateProgram),
+    PROC_ENTRY(glVertexAttribPointer),
+
+    /* QGL_ARB_framebuffer_object_PROCS */
+    PROC_ENTRY(glBindRenderbuffer),
+    PROC_ENTRY(glDeleteRenderbuffers),
+    PROC_ENTRY(glGenRenderbuffers),
+    PROC_ENTRY(glRenderbufferStorage),
+    PROC_ENTRY(glBindFramebuffer),
+    PROC_ENTRY(glDeleteFramebuffers),
+    PROC_ENTRY(glGenFramebuffers),
+    PROC_ENTRY(glCheckFramebufferStatus),
+    PROC_ENTRY(glFramebufferTexture2D),
+    PROC_ENTRY(glFramebufferRenderbuffer),
+    PROC_ENTRY(glGenerateMipmap),
+    PROC_ENTRY(glBlitFramebuffer),
+    PROC_ENTRY(glRenderbufferStorageMultisample),
+
+    /* QGL_3_0_PROCS */
+    PROC_ENTRY(glGetStringi),
+
+    /* Additional GLES2 functions that engines may query */
+    PROC_ENTRY(glGetFloatv),
+    PROC_ENTRY(glIsEnabled),
+    PROC_ENTRY(glBlendFuncSeparate),
+    PROC_ENTRY(glBlendEquation),
+    PROC_ENTRY(glBlendEquationSeparate),
+    PROC_ENTRY(glBlendColor),
+    PROC_ENTRY(glStencilFuncSeparate),
+    PROC_ENTRY(glStencilOpSeparate),
+    PROC_ENTRY(glStencilMaskSeparate),
+    PROC_ENTRY(glPixelStorei),
+    PROC_ENTRY(glTexParameterfv),
+    PROC_ENTRY(glTexParameteriv),
+    PROC_ENTRY(glGetTexParameterfv),
+    PROC_ENTRY(glGetTexParameteriv),
+    PROC_ENTRY(glCopyTexImage2D),
+    PROC_ENTRY(glGetAttribLocation),
+    PROC_ENTRY(glGetActiveAttrib),
+    PROC_ENTRY(glGetUniformfv),
+    PROC_ENTRY(glGetUniformiv),
+    PROC_ENTRY(glGetVertexAttribfv),
+    PROC_ENTRY(glGetVertexAttribiv),
+    PROC_ENTRY(glGetVertexAttribPointerv),
+    PROC_ENTRY(glVertexAttrib1f),
+    PROC_ENTRY(glVertexAttrib2f),
+    PROC_ENTRY(glVertexAttrib3f),
+    PROC_ENTRY(glVertexAttrib4f),
+    PROC_ENTRY(glVertexAttrib1fv),
+    PROC_ENTRY(glVertexAttrib2fv),
+    PROC_ENTRY(glVertexAttrib3fv),
+    PROC_ENTRY(glVertexAttrib4fv),
+    PROC_ENTRY(glUniform2i),
+    PROC_ENTRY(glUniform3i),
+    PROC_ENTRY(glUniform4i),
+    PROC_ENTRY(glUniform2fv),
+    PROC_ENTRY(glUniform3fv),
+    PROC_ENTRY(glUniform4fv),
+    PROC_ENTRY(glUniform2iv),
+    PROC_ENTRY(glUniform3iv),
+    PROC_ENTRY(glUniform4iv),
+    PROC_ENTRY(glUniformMatrix2fv),
+    PROC_ENTRY(glUniformMatrix3fv),
+    PROC_ENTRY(glIsBuffer),
+    PROC_ENTRY(glIsTexture),
+    PROC_ENTRY(glIsFramebuffer),
+    PROC_ENTRY(glIsRenderbuffer),
+    PROC_ENTRY(glIsProgram),
+    PROC_ENTRY(glIsShader),
+    PROC_ENTRY(glSampleCoverage),
+    PROC_ENTRY(glGetShaderPrecisionFormat),
+    PROC_ENTRY(glShaderBinary),
+    PROC_ENTRY(glReleaseShaderCompiler),
+    PROC_ENTRY(glGetBufferParameteriv),
+    PROC_ENTRY(glGetFramebufferAttachmentParameteriv),
+    PROC_ENTRY(glGetRenderbufferParameteriv),
+    PROC_ENTRY(glGetAttachedShaders),
+
+    { NULL, NULL }
+};
+
+#undef PROC_ENTRY
+
 EGLAPI __eglMustCastToProperFunctionPointerType EGLAPIENTRY eglGetProcAddress(const char *procname) {
-    (void)procname;
+    if (!procname) return NULL;
+    for (const sgl_proc_entry_t *e = s_proc_table; e->name; e++) {
+        if (strcmp(e->name, procname) == 0)
+            return (__eglMustCastToProperFunctionPointerType)e->func;
+    }
     return NULL;
 }
 
