@@ -493,7 +493,7 @@ EGLAPI EGLSurface EGLAPIENTRY eglCreateWindowSurface(EGLDisplay dpy, EGLConfig c
     /* Create framebuffer layout */
     DkImageLayoutMaker imageLayoutMaker;
     dkImageLayoutMakerDefaults(&imageLayoutMaker, display->device);
-    imageLayoutMaker.flags = DkImageFlags_UsageRender | DkImageFlags_UsagePresent | DkImageFlags_HwCompression;
+    imageLayoutMaker.flags = DkImageFlags_UsageRender | DkImageFlags_UsagePresent | DkImageFlags_Usage2DEngine | DkImageFlags_HwCompression;
     imageLayoutMaker.format = DkImageFormat_RGBA8_Unorm;
     imageLayoutMaker.dimensions[0] = surf->width;
     imageLayoutMaker.dimensions[1] = surf->height;
