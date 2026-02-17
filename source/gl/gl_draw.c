@@ -261,10 +261,37 @@ GL_APICALL void GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum ty
         }
     }
 
+    /* Compute actual vertex count needed for client-side array allocation.
+     * For glDrawElements, 'count' is the number of INDICES, not vertices.
+     * When using client-side vertex arrays, we need max_vertex_index + 1
+     * to avoid reading past the end of the vertex arrays. */
+    GLsizei vertex_count = count;  /* Default: use index count (safe for VBOs) */
+    if (ctx->bound_element_buffer == 0 && indices != NULL) {
+        /* Client-side indices: scan for max vertex index */
+        GLuint max_idx = 0;
+        if (type == GL_UNSIGNED_BYTE) {
+            const GLubyte *idx8 = (const GLubyte *)indices;
+            for (GLsizei i = 0; i < count; i++) {
+                if (idx8[i] > max_idx) max_idx = idx8[i];
+            }
+        } else if (type == GL_UNSIGNED_SHORT) {
+            const GLushort *idx16 = (const GLushort *)indices;
+            for (GLsizei i = 0; i < count; i++) {
+                if (idx16[i] > max_idx) max_idx = idx16[i];
+            }
+        } else if (type == GL_UNSIGNED_INT) {
+            const GLuint *idx32 = (const GLuint *)indices;
+            for (GLsizei i = 0; i < count; i++) {
+                if (idx32[i] > max_idx) max_idx = idx32[i];
+            }
+        }
+        vertex_count = (GLsizei)(max_idx + 1);
+    }
+
     /* Bind vertex attributes via backend */
     if (ctx->backend->ops->bind_vertex_attribs) {
         ctx->backend->ops->bind_vertex_attribs(ctx->backend, prepared_attribs,
-                                               SGL_MAX_ATTRIBS, 0, count);
+                                               SGL_MAX_ATTRIBS, 0, vertex_count);
     }
 
     /* Compute index buffer offset if EBO is bound */

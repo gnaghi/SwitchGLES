@@ -44,7 +44,11 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
     }
 
     if (maxAttribIdx < 0) {
-        return;  /* No enabled attributes */
+        /* No enabled attributes — don't bind any vertex state.
+         * Shaders using gl_VertexID work without vertex bindings
+         * (confirmed in pure deko3d libuam test).
+         * Binding dummy state here actually causes GPU errors. */
+        return;
     }
 
     numAttribs = maxAttribIdx + 1;
@@ -379,6 +383,11 @@ void dk_draw_elements(sgl_backend_t *be, GLenum mode, GLsizei count,
     /* Bind index buffer and draw */
     dkCmdBufBindIdxBuffer(dk->cmdbuf, idxFormat, idxAddr);
     dkCmdBufDrawIndexed(dk->cmdbuf, prim, count, 1, 0, 0, 0);
+
+    /* Insert barrier after FBO draws to ensure proper synchronization */
+    if (dk->current_fbo != 0) {
+        dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, 0);
+    }
 
     DK_VERBOSE_PRINT("[DK] draw_elements: mode=0x%X count=%d type=0x%X ebo=%u\n",
                      mode, count, type, ebo);
