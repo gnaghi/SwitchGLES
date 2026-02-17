@@ -56,6 +56,10 @@ void sgl_context_init(sgl_context_t *ctx) {
     ctx->pack_alignment = 4;
     ctx->unpack_alignment = 4;
 
+    /* Sample coverage defaults */
+    ctx->sample_coverage_value = 1.0f;
+    ctx->sample_coverage_invert = false;
+
     ctx->error = GL_NO_ERROR;
     ctx->initialized = true;
 

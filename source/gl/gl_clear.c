@@ -71,6 +71,11 @@ GL_APICALL void GL_APIENTRY glViewport(GLint x, GLint y, GLsizei width, GLsizei 
     GET_CTX();
     CHECK_BACKEND();
 
+    if (width < 0 || height < 0) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
     if (sgl_state_viewport_set(&ctx->viewport_state, x, y, width, height)) {
         /* Apply via backend */
         if (ctx->backend->ops->apply_viewport) {
@@ -89,6 +94,11 @@ GL_APICALL void GL_APIENTRY glViewport(GLint x, GLint y, GLsizei width, GLsizei 
 GL_APICALL void GL_APIENTRY glScissor(GLint x, GLint y, GLsizei width, GLsizei height) {
     GET_CTX();
     CHECK_BACKEND();
+
+    if (width < 0 || height < 0) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
 
     if (sgl_state_scissor_set(&ctx->viewport_state, x, y, width, height)) {
         /* Apply via backend */

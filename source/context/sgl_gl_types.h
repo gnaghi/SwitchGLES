@@ -32,7 +32,7 @@
 #define SGL_MAX_TEXTURES        256
 #define SGL_MAX_FRAMEBUFFERS    8
 #define SGL_MAX_RENDERBUFFERS   8
-#define SGL_MAX_ATTRIBS         17
+#define SGL_MAX_ATTRIBS         16
 #define SGL_MAX_UNIFORMS        16
 #define SGL_MAX_TEXTURE_UNITS   8
 
@@ -105,6 +105,7 @@ typedef struct sgl_active_uniform_info {
 typedef struct sgl_program {
     bool used;
     bool linked;
+    bool validated;
     bool shaders_initialized;
     GLuint vertex_shader;
     GLuint fragment_shader;

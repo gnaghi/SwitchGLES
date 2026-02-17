@@ -53,6 +53,10 @@ typedef struct sgl_context {
     GLint                   pack_alignment;    /* GL_PACK_ALIGNMENT (default 4) */
     GLint                   unpack_alignment;  /* GL_UNPACK_ALIGNMENT (default 4) */
 
+    /* Sample coverage (MSAA not supported but values stored for query) */
+    float                   sample_coverage_value;    /* default 1.0 */
+    bool                    sample_coverage_invert;   /* default false */
+
     /* Error */
     GLenum                  error;
 

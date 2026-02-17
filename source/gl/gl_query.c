@@ -348,6 +348,9 @@ GL_APICALL void GL_APIENTRY glGetBooleanv(GLenum pname, GLboolean *params) {
         case GL_DITHER:
             *params = GL_TRUE;
             break;
+        case GL_SAMPLE_COVERAGE_INVERT:
+            *params = ctx->sample_coverage_invert ? GL_TRUE : GL_FALSE;
+            break;
         case GL_COLOR_WRITEMASK:
             params[0] = ctx->color_state.mask[0] ? GL_TRUE : GL_FALSE;
             params[1] = ctx->color_state.mask[1] ? GL_TRUE : GL_FALSE;
@@ -384,10 +387,10 @@ GL_APICALL void GL_APIENTRY glGetFloatv(GLenum pname, GLfloat *params) {
             params[3] = ctx->color_state.clear_color[3];
             break;
         case GL_BLEND_COLOR:
-            params[0] = 0.0f;
-            params[1] = 0.0f;
-            params[2] = 0.0f;
-            params[3] = 0.0f;
+            params[0] = ctx->blend_state.color[0];
+            params[1] = ctx->blend_state.color[1];
+            params[2] = ctx->blend_state.color[2];
+            params[3] = ctx->blend_state.color[3];
             break;
         case GL_LINE_WIDTH:
             *params = ctx->raster_state.line_width;
@@ -398,10 +401,13 @@ GL_APICALL void GL_APIENTRY glGetFloatv(GLenum pname, GLfloat *params) {
         case GL_POLYGON_OFFSET_UNITS:
             *params = ctx->raster_state.polygon_offset_units;
             break;
+        case GL_SAMPLE_COVERAGE_VALUE:
+            *params = ctx->sample_coverage_value;
+            break;
         default: {
-            GLint temp;
-            glGetIntegerv(pname, &temp);
-            *params = (GLfloat)temp;
+            GLint temp[4] = {0};
+            glGetIntegerv(pname, temp);
+            *params = (GLfloat)temp[0];
             break;
         }
     }
@@ -556,18 +562,37 @@ GL_APICALL void GL_APIENTRY glShaderBinary(GLsizei count, const GLuint *shaders,
 
 GL_APICALL void GL_APIENTRY glGetShaderPrecisionFormat(GLenum shadertype, GLenum precisiontype,
                                                         GLint *range, GLint *precision) {
-    (void)shadertype;
-    (void)precisiontype;
-    if (range) { range[0] = 127; range[1] = 127; }
-    if (precision) *precision = 23;
+    (void)shadertype; /* Maxwell GPU uses same precision for VS and FS */
+
+    /* Tegra X1 Maxwell GPU: all precisions map to full IEEE 754 */
+    switch (precisiontype) {
+        case GL_LOW_FLOAT:
+        case GL_MEDIUM_FLOAT:
+        case GL_HIGH_FLOAT:
+            if (range) { range[0] = 127; range[1] = 127; }
+            if (precision) *precision = 23;
+            break;
+        case GL_LOW_INT:
+        case GL_MEDIUM_INT:
+        case GL_HIGH_INT:
+            if (range) { range[0] = 31; range[1] = 30; }
+            if (precision) *precision = 0;
+            break;
+        default: {
+            GET_CTX();
+            sgl_set_error(ctx, GL_INVALID_ENUM);
+            break;
+        }
+    }
 }
 
 /* Sample Coverage (stubs) */
 
 GL_APICALL void GL_APIENTRY glSampleCoverage(GLfloat value, GLboolean invert) {
-    (void)value;
-    (void)invert;
-    /* MSAA not supported */
+    GET_CTX();
+    /* Store values for glGetFloatv/glGetBooleanv query (MSAA not supported on hardware) */
+    ctx->sample_coverage_value = value < 0.0f ? 0.0f : (value > 1.0f ? 1.0f : value);
+    ctx->sample_coverage_invert = invert != 0;
 }
 
 /* glDepthRangef is implemented in gl_clear.c */

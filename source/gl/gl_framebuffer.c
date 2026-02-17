@@ -418,6 +418,16 @@ GL_APICALL void GL_APIENTRY glRenderbufferStorage(GLenum target, GLenum internal
         return;
     }
 
+    if (width < 0 || height < 0) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    if (width > 8192 || height > 8192) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
     if (ctx->bound_renderbuffer == 0) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
         return;

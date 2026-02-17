@@ -98,6 +98,36 @@ GL_APICALL void GL_APIENTRY glTexImage2D(GLenum target, GLint level, GLint inter
         return;
     }
 
+    /* GLES2: border must be 0 */
+    if (border != 0) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    /* Validate level */
+    if (level < 0) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    /* Validate dimensions */
+    if (width < 0 || height < 0) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    /* Check max texture size (8192 for Tegra X1) */
+    if (width > 8192 || height > 8192) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    /* Cubemaps must be square */
+    if (sgl_is_cubemap_face(target) && width != height) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
     /* Empty texture - silently return */
     if (width == 0 || height == 0) {
         return;
@@ -143,7 +173,7 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint xo
     GET_CTX();
     CHECK_BACKEND();
 
-    if (target != GL_TEXTURE_2D) {
+    if (target != GL_TEXTURE_2D && !sgl_is_cubemap_face(target)) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
     }
@@ -151,11 +181,24 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint xo
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
+    if (width < 0 || height < 0) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+    if (width == 0 || height == 0) return;
 
     GLuint tex_id = ctx->bound_textures[ctx->active_texture_unit];
     sgl_texture_t *tex = GET_TEXTURE(tex_id);
     if (!tex || tex_id == 0) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
+        return;
+    }
+
+    /* Bounds checking: offsets + size must fit within texture */
+    if (xoffset < 0 || yoffset < 0 ||
+        xoffset + width > (GLsizei)tex->width ||
+        yoffset + height > (GLsizei)tex->height) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
 
@@ -176,7 +219,12 @@ GL_APICALL void GL_APIENTRY glTexParameterf(GLenum target, GLenum pname, GLfloat
 }
 
 GL_APICALL void GL_APIENTRY glTexParameterfv(GLenum target, GLenum pname, const GLfloat *params) {
-    if (params) glTexParameteri(target, pname, (GLint)params[0]);
+    if (!params) {
+        GET_CTX();
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+    glTexParameteri(target, pname, (GLint)params[0]);
 }
 
 GL_APICALL void GL_APIENTRY glTexParameteri(GLenum target, GLenum pname, GLint param) {
@@ -213,7 +261,12 @@ GL_APICALL void GL_APIENTRY glTexParameteri(GLenum target, GLenum pname, GLint p
 }
 
 GL_APICALL void GL_APIENTRY glTexParameteriv(GLenum target, GLenum pname, const GLint *params) {
-    if (params) glTexParameteri(target, pname, params[0]);
+    if (!params) {
+        GET_CTX();
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+    glTexParameteri(target, pname, params[0]);
 }
 
 GL_APICALL void GL_APIENTRY glGetTexParameterfv(GLenum target, GLenum pname, GLfloat *params) {
@@ -401,8 +454,22 @@ GL_APICALL void GL_APIENTRY glCompressedTexImage2D(GLenum target, GLint level, G
         return;
     }
 
-    /* Only level 0 supported for now */
-    if (level != 0) {
+    if (level < 0) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    if (width < 0 || height < 0) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    if (imageSize < 0) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    if (width > 8192 || height > 8192) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
@@ -456,6 +523,15 @@ GL_APICALL void GL_APIENTRY glCompressedTexSubImage2D(GLenum target, GLint level
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
+    if (width < 0 || height < 0 || imageSize < 0) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+    if (xoffset < 0 || yoffset < 0) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+    if (width == 0 || height == 0) return;
 
     GLuint tex_id = ctx->bound_textures[ctx->active_texture_unit];
     sgl_texture_t *tex = GET_TEXTURE(tex_id);

@@ -2245,6 +2245,163 @@ static void testShaderQueries(void) {
 }
 
 /*==========================================================================
+ * TEST: GLES2 Spec Compliance (parameter validation)
+ *==========================================================================*/
+
+static void testSpecCompliance(void) {
+    printf("\n--- Test: GLES2 Spec Compliance ---\n");
+
+    /* === Buffer validations === */
+
+    /* glBufferData with invalid target */
+    glBufferData(0x9999, 16, NULL, GL_STATIC_DRAW);
+    recordResult("glBufferData(invalid target) -> GL_INVALID_ENUM",
+                 glGetError() == GL_INVALID_ENUM, NULL);
+
+    /* glBufferData with invalid usage */
+    GLuint testBuf = 0;
+    glGenBuffers(1, &testBuf);
+    glBindBuffer(GL_ARRAY_BUFFER, testBuf);
+    glBufferData(GL_ARRAY_BUFFER, 16, NULL, 0x9999);
+    recordResult("glBufferData(invalid usage) -> GL_INVALID_ENUM",
+                 glGetError() == GL_INVALID_ENUM, NULL);
+
+    /* glBufferData with negative size */
+    glBufferData(GL_ARRAY_BUFFER, -1, NULL, GL_STATIC_DRAW);
+    recordResult("glBufferData(size=-1) -> GL_INVALID_VALUE",
+                 glGetError() == GL_INVALID_VALUE, NULL);
+
+    /* Valid buffer data to continue */
+    glBufferData(GL_ARRAY_BUFFER, 16, NULL, GL_STATIC_DRAW);
+    recordResult("glBufferData(valid) -> no error",
+                 glGetError() == GL_NO_ERROR, NULL);
+
+    glDeleteBuffers(1, &testBuf);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    /* === Texture validations === */
+
+    GLuint testTex = 0;
+    glGenTextures(1, &testTex);
+    glBindTexture(GL_TEXTURE_2D, testTex);
+
+    /* glTexImage2D with border != 0 */
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 4, 4, 1, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    recordResult("glTexImage2D(border=1) -> GL_INVALID_VALUE",
+                 glGetError() == GL_INVALID_VALUE, NULL);
+
+    /* glTexImage2D with negative level */
+    glTexImage2D(GL_TEXTURE_2D, -1, GL_RGBA, 4, 4, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    recordResult("glTexImage2D(level=-1) -> GL_INVALID_VALUE",
+                 glGetError() == GL_INVALID_VALUE, NULL);
+
+    /* glTexImage2D with negative dimensions */
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, -4, 4, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    recordResult("glTexImage2D(width=-4) -> GL_INVALID_VALUE",
+                 glGetError() == GL_INVALID_VALUE, NULL);
+
+    /* glTexParameterfv with NULL params */
+    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, NULL);
+    recordResult("glTexParameterfv(NULL) -> GL_INVALID_VALUE",
+                 glGetError() == GL_INVALID_VALUE, NULL);
+
+    /* glTexParameteriv with NULL params */
+    glTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, NULL);
+    recordResult("glTexParameteriv(NULL) -> GL_INVALID_VALUE",
+                 glGetError() == GL_INVALID_VALUE, NULL);
+
+    glDeleteTextures(1, &testTex);
+
+    /* === Viewport/Scissor validations === */
+
+    /* glViewport with negative width */
+    glViewport(0, 0, -1, 720);
+    recordResult("glViewport(w=-1) -> GL_INVALID_VALUE",
+                 glGetError() == GL_INVALID_VALUE, NULL);
+
+    /* glScissor with negative height */
+    glScissor(0, 0, 100, -1);
+    recordResult("glScissor(h=-1) -> GL_INVALID_VALUE",
+                 glGetError() == GL_INVALID_VALUE, NULL);
+
+    /* Restore valid viewport/scissor */
+    glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    glScissor(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+    /* === Draw validations === */
+
+    /* glDrawArrays with first < 0 */
+    glDrawArrays(GL_TRIANGLES, -1, 3);
+    recordResult("glDrawArrays(first=-1) -> GL_INVALID_VALUE",
+                 glGetError() == GL_INVALID_VALUE, NULL);
+
+    /* === Renderbuffer validation === */
+    GLuint testRb = 0;
+    glGenRenderbuffers(1, &testRb);
+    glBindRenderbuffer(GL_RENDERBUFFER, testRb);
+
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, -1, 64);
+    recordResult("glRenderbufferStorage(w=-1) -> GL_INVALID_VALUE",
+                 glGetError() == GL_INVALID_VALUE, NULL);
+
+    glDeleteRenderbuffers(1, &testRb);
+    glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+    /* === glGetShaderPrecisionFormat === */
+    GLint precRange[2] = {0, 0};
+    GLint precPrecision = 0;
+    glGetShaderPrecisionFormat(GL_FRAGMENT_SHADER, GL_HIGH_FLOAT, precRange, &precPrecision);
+    recordResult("glGetShaderPrecisionFormat(HIGH_FLOAT) range=[127,127] prec=23",
+                 precRange[0] == 127 && precRange[1] == 127 && precPrecision == 23, NULL);
+
+    glGetShaderPrecisionFormat(GL_VERTEX_SHADER, GL_HIGH_INT, precRange, &precPrecision);
+    recordResult("glGetShaderPrecisionFormat(HIGH_INT) range=[31,30] prec=0",
+                 precRange[0] == 31 && precRange[1] == 30 && precPrecision == 0, NULL);
+
+    /* === glValidateProgram === */
+    {
+        GLuint prog = getSimpleProgram();
+        glUseProgram(prog);
+        glValidateProgram(prog);
+        GLint validateStatus = GL_FALSE;
+        glGetProgramiv(prog, GL_VALIDATE_STATUS, &validateStatus);
+        recordResult("glValidateProgram -> VALIDATE_STATUS = TRUE",
+                     validateStatus == GL_TRUE, NULL);
+        glDeleteProgram(prog);
+        glUseProgram(0);
+    }
+
+    /* === glBlendColor query === */
+    glBlendColor(0.25f, 0.5f, 0.75f, 1.0f);
+    GLfloat blendColor[4] = {0};
+    glGetFloatv(GL_BLEND_COLOR, blendColor);
+    recordResult("glGetFloatv(GL_BLEND_COLOR) readback",
+                 blendColor[0] > 0.24f && blendColor[0] < 0.26f &&
+                 blendColor[1] > 0.49f && blendColor[1] < 0.51f &&
+                 blendColor[2] > 0.74f && blendColor[2] < 0.76f &&
+                 blendColor[3] > 0.99f, NULL);
+    glBlendColor(0.0f, 0.0f, 0.0f, 0.0f); /* restore */
+
+    /* === glSampleCoverage query === */
+    glSampleCoverage(0.5f, GL_TRUE);
+    GLfloat sampleCovVal = 0.0f;
+    glGetFloatv(GL_SAMPLE_COVERAGE_VALUE, &sampleCovVal);
+    GLboolean sampleCovInvert = GL_FALSE;
+    glGetBooleanv(GL_SAMPLE_COVERAGE_INVERT, &sampleCovInvert);
+    recordResult("glSampleCoverage(0.5, TRUE) stored correctly",
+                 sampleCovVal > 0.49f && sampleCovVal < 0.51f && sampleCovInvert == GL_TRUE, NULL);
+    glSampleCoverage(1.0f, GL_FALSE); /* restore */
+
+    /* === GL_MAX_VERTEX_ATTRIBS == 16 (deko3d limit) === */
+    GLint maxAttribs = 0;
+    glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &maxAttribs);
+    recordResult("GL_MAX_VERTEX_ATTRIBS == 16",
+                 maxAttribs == 16, NULL);
+
+    printf("--- GLES2 Spec Compliance tests complete ---\n");
+}
+
+/*==========================================================================
  * TEST: Packed UBO
  *==========================================================================*/
 
@@ -3059,6 +3216,12 @@ int main(int argc, char* argv[]) {
         "Tests glGetAttribLocation, glBindAttribLocation,\n"
         "glGetActiveAttrib/Uniform, glGetUniformfv,\n"
         "glCheckFramebufferStatus, NULL safety, boolean spec");
+
+    RUN_TEST(testSpecCompliance, "GLES2 Spec Compliance",
+        "No visual output\n"
+        "Tests parameter validation: buffer, texture,\n"
+        "viewport, scissor, draw, renderbuffer limits,\n"
+        "shader precision, blend color, sample coverage");
 
     RUN_TEST(testPackedUBO, "Packed UBO",
         "Black background\n"

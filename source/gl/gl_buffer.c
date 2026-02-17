@@ -83,6 +83,24 @@ GL_APICALL void GL_APIENTRY glBufferData(GLenum target, GLsizeiptr size, const v
     GET_CTX();
     CHECK_BACKEND();
 
+    /* Validate target */
+    if (target != GL_ARRAY_BUFFER && target != GL_ELEMENT_ARRAY_BUFFER) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
+
+    /* Validate size */
+    if (size < 0) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    /* Validate usage */
+    if (usage != GL_STATIC_DRAW && usage != GL_DYNAMIC_DRAW && usage != GL_STREAM_DRAW) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
+
     GLuint buffer_id = (target == GL_ARRAY_BUFFER) ? ctx->bound_array_buffer : ctx->bound_element_buffer;
     sgl_buffer_t *buf = GET_BUFFER(buffer_id);
     if (!buf) {
@@ -111,6 +129,12 @@ GL_APICALL void GL_APIENTRY glBufferSubData(GLenum target, GLintptr offset, GLsi
     CHECK_BACKEND();
 
     if (!data) return;
+
+    /* Validate target */
+    if (target != GL_ARRAY_BUFFER && target != GL_ELEMENT_ARRAY_BUFFER) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
 
     GLuint buffer_id = (target == GL_ARRAY_BUFFER) ? ctx->bound_array_buffer : ctx->bound_element_buffer;
     sgl_buffer_t *buf = GET_BUFFER(buffer_id);

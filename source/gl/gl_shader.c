@@ -419,7 +419,7 @@ GL_APICALL void GL_APIENTRY glGetProgramiv(GLuint program, GLenum pname, GLint *
             *params = GL_FALSE;
             break;
         case GL_VALIDATE_STATUS:
-            *params = GL_TRUE;
+            *params = prog->validated ? GL_TRUE : GL_FALSE;
             break;
         case GL_INFO_LOG_LENGTH:
             *params = 0;
@@ -462,25 +462,52 @@ GL_APICALL void GL_APIENTRY glGetProgramiv(GLuint program, GLenum pname, GLint *
 }
 
 GL_APICALL void GL_APIENTRY glGetProgramInfoLog(GLuint program, GLsizei bufSize, GLsizei *length, GLchar *infoLog) {
-    (void)program;
+    GET_CTX();
+
+    sgl_program_t *prog = GET_PROGRAM(program);
+    if (!prog) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        if (length) *length = 0;
+        if (infoLog && bufSize > 0) infoLog[0] = '\0';
+        return;
+    }
+
+    /* Precompiled DKSH shaders: link always succeeds, no error log */
     if (length) *length = 0;
     if (infoLog && bufSize > 0) infoLog[0] = '\0';
 }
 
 GL_APICALL void GL_APIENTRY glValidateProgram(GLuint program) {
-    (void)program;
-    /* Always valid */
+    GET_CTX();
+    sgl_program_t *prog = GET_PROGRAM(program);
+    if (!prog) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+    /* Validation status is queried via glGetProgramiv(GL_VALIDATE_STATUS)
+     * For precompiled DKSH shaders, linked programs are always valid. */
+    prog->validated = prog->linked;
 }
 
 GL_APICALL void GL_APIENTRY glGetAttachedShaders(GLuint program, GLsizei maxCount, GLsizei *count, GLuint *shaders) {
     GET_CTX();
 
+    if (maxCount < 0) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
     sgl_program_t *prog = GET_PROGRAM(program);
-    if (!prog) return;
+    if (!prog) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
 
     int n = 0;
-    if (prog->vertex_shader && n < maxCount) shaders[n++] = prog->vertex_shader;
-    if (prog->fragment_shader && n < maxCount) shaders[n++] = prog->fragment_shader;
+    if (shaders) {
+        if (prog->vertex_shader && n < maxCount) shaders[n++] = prog->vertex_shader;
+        if (prog->fragment_shader && n < maxCount) shaders[n++] = prog->fragment_shader;
+    }
     if (count) *count = n;
 }
 

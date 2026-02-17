@@ -152,12 +152,18 @@ GL_APICALL void GL_APIENTRY glDrawArrays(GLenum mode, GLint first, GLsizei count
     GET_CTX();
     CHECK_BACKEND();
 
-    if (count < 0) {
+    if (count < 0 || first < 0) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
 
     if (count == 0) return;
+
+    /* No program bound */
+    if (ctx->current_program == 0) {
+        sgl_set_error(ctx, GL_INVALID_OPERATION);
+        return;
+    }
 
     /* Validate mode */
     switch (mode) {
@@ -216,6 +222,12 @@ GL_APICALL void GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum ty
     }
 
     if (count == 0) return;
+
+    /* No program bound */
+    if (ctx->current_program == 0) {
+        sgl_set_error(ctx, GL_INVALID_OPERATION);
+        return;
+    }
 
     /* Validate mode */
     switch (mode) {
