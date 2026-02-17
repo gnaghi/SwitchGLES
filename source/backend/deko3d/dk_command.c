@@ -60,6 +60,7 @@ void dk_end_frame(sgl_backend_t *be, int slot) {
     /* Finish and submit command list */
     DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbufs[slot]);
     dkQueueSubmitCommands(dk->queue, cmdlist);
+    dk->cmdbuf_submitted = true;
 
     SGL_TRACE_BACKEND("end_frame slot=%d", slot);
 }
@@ -95,6 +96,7 @@ void dk_wait_fence(sgl_backend_t *be, int slot) {
 
     /* Reset descriptors_bound flag since command buffer was cleared */
     dk->descriptors_bound = false;
+    dk->cmdbuf_submitted = false;
 
     /* Reset uniform allocator for new frame.
      * This is safe because pushConstants copied uniform data into the command buffer
@@ -111,9 +113,18 @@ void dk_wait_fence(sgl_backend_t *be, int slot) {
 void dk_flush(sgl_backend_t *be) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
-    /* Submit current commands without waiting */
+    if (dk->cmdbuf_submitted) {
+        /* Already submitted by dk_end_frame — just wait idle */
+        dkQueueWaitIdle(dk->queue);
+        dk->cmdbuf_submitted = false;
+        SGL_TRACE_BACKEND("flush (already submitted, waited idle)");
+        return;
+    }
+
+    /* Submit and wait for GPU to complete */
     DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
     dkQueueSubmitCommands(dk->queue, cmdlist);
+    dkQueueWaitIdle(dk->queue);
 
     /* Reset command buffer for continued use */
     dkCmdBufClear(dk->cmdbuf);
@@ -139,7 +150,16 @@ void dk_flush(sgl_backend_t *be) {
 void dk_finish(sgl_backend_t *be) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
-    /* Submit current commands and wait for completion */
+    if (dk->cmdbuf_submitted) {
+        /* Cmdbuf was already finished and submitted by dk_end_frame (eglSwapBuffers).
+         * Just wait for the queue to become idle — do NOT call dkCmdBufFinishList again. */
+        dkQueueWaitIdle(dk->queue);
+        dk->cmdbuf_submitted = false;
+        SGL_TRACE_BACKEND("finish (already submitted, waited idle)");
+        return;
+    }
+
+    /* Submit and wait for GPU to complete */
     DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
     dkQueueSubmitCommands(dk->queue, cmdlist);
     dkQueueWaitIdle(dk->queue);

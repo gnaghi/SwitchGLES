@@ -54,6 +54,7 @@ typedef struct dk_backend_data {
     DkGpuAddr image_descriptor_addr;
     DkGpuAddr sampler_descriptor_addr;
     bool descriptors_bound;
+    bool cmdbuf_submitted;  /* true after dk_end_frame finishes the cmdbuf */
 
     /* Swapchain (from surface) */
     DkSwapchain swapchain;
