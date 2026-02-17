@@ -3238,6 +3238,24 @@ int main(int argc, char* argv[]) {
     fflush(stdout);
     printSummary();
 
+    /* Display final "tests terminés" screen */
+    {
+        int passed = 0, failed = 0;
+        for (int i = 0; i < s_numResults; i++) {
+            if (s_results[i].passed) passed++;
+            else failed++;
+        }
+        if (failed == 0) {
+            glClearColor(0.0f, 0.5f, 0.0f, 1.0f);  /* Green = all pass */
+        } else {
+            glClearColor(0.5f, 0.0f, 0.0f, 1.0f);  /* Red = failures */
+        }
+        glClear(GL_COLOR_BUFFER_BIT);
+        eglSwapBuffers(s_display, s_surface);
+        printf("\n[DONE] Tests termines - %d/%d PASS\n", passed, s_numResults);
+        fflush(stdout);
+    }
+
     /* Unbind current program before cleanup */
     printf("[EXIT] glUseProgram(0)\n");
     fflush(stdout);
