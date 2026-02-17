@@ -180,12 +180,27 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
              * reads through L2 cache. Without invalidation, the sampler may read
              * stale (zero) data from L2 instead of the freshly DMA'd face data. */
             dk->cubemap_needs_barrier[handle] = true;
+            dk->texture_used_as_rt[handle] = true;  /* Belt-and-suspenders: also set RT flag */
 
             SGL_TRACE_TEXTURE("cubemap COMPLETE handle=%u - descriptor created, barrier pending",
                               handle);
         }
 
-        if (dk->framebuffers) {
+        /* Re-bind render target - must check FBO state (same pattern as dk_copy_tex_image_2d) */
+        if (dk->current_fbo != 0 && dk->current_fbo_color > 0 &&
+            dk->current_fbo_color < SGL_MAX_TEXTURES &&
+            dk->texture_initialized[dk->current_fbo_color]) {
+            DkImageView colorView;
+            dkImageViewDefaults(&colorView, &dk->textures[dk->current_fbo_color]);
+            DkImageView *pDepthView = NULL;
+            DkImageView depthView;
+            if (dk->current_fbo_depth > 0 && dk->current_fbo_depth < SGL_MAX_RENDERBUFFERS &&
+                dk->renderbuffer_initialized[dk->current_fbo_depth]) {
+                dkImageViewDefaults(&depthView, &dk->renderbuffer_images[dk->current_fbo_depth]);
+                pDepthView = &depthView;
+            }
+            dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, pDepthView);
+        } else if (dk->framebuffers) {
             DkImageView colorView;
             dkImageViewDefaults(&colorView, &dk->framebuffers[dk->current_slot]);
             if (dk->depth_images[dk->current_slot]) {
@@ -349,8 +364,21 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
             /* Reset descriptors_bound since we cleared the command buffer */
             dk->descriptors_bound = false;
 
-            /* Re-bind render target if we have framebuffers */
-            if (dk->framebuffers) {
+            /* Re-bind render target - check FBO state */
+            if (dk->current_fbo != 0 && dk->current_fbo_color > 0 &&
+                dk->current_fbo_color < SGL_MAX_TEXTURES &&
+                dk->texture_initialized[dk->current_fbo_color]) {
+                DkImageView colorView;
+                dkImageViewDefaults(&colorView, &dk->textures[dk->current_fbo_color]);
+                DkImageView *pDepthView = NULL;
+                DkImageView depthView;
+                if (dk->current_fbo_depth > 0 && dk->current_fbo_depth < SGL_MAX_RENDERBUFFERS &&
+                    dk->renderbuffer_initialized[dk->current_fbo_depth]) {
+                    dkImageViewDefaults(&depthView, &dk->renderbuffer_images[dk->current_fbo_depth]);
+                    pDepthView = &depthView;
+                }
+                dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, pDepthView);
+            } else if (dk->framebuffers) {
                 DkImageView colorView;
                 dkImageViewDefaults(&colorView, &dk->framebuffers[dk->current_slot]);
                 if (dk->depth_images[dk->current_slot]) {
@@ -463,8 +491,21 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     /* Reset descriptors_bound since we cleared the command buffer */
     dk->descriptors_bound = false;
 
-    /* Re-bind render target if we have framebuffers */
-    if (dk->framebuffers) {
+    /* Re-bind render target - check FBO state */
+    if (dk->current_fbo != 0 && dk->current_fbo_color > 0 &&
+        dk->current_fbo_color < SGL_MAX_TEXTURES &&
+        dk->texture_initialized[dk->current_fbo_color]) {
+        DkImageView colorView;
+        dkImageViewDefaults(&colorView, &dk->textures[dk->current_fbo_color]);
+        DkImageView *pDepthView = NULL;
+        DkImageView depthView;
+        if (dk->current_fbo_depth > 0 && dk->current_fbo_depth < SGL_MAX_RENDERBUFFERS &&
+            dk->renderbuffer_initialized[dk->current_fbo_depth]) {
+            dkImageViewDefaults(&depthView, &dk->renderbuffer_images[dk->current_fbo_depth]);
+            pDepthView = &depthView;
+        }
+        dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, pDepthView);
+    } else if (dk->framebuffers) {
         DkImageView colorView;
         dkImageViewDefaults(&colorView, &dk->framebuffers[dk->current_slot]);
         if (dk->depth_images[dk->current_slot]) {
@@ -564,18 +605,32 @@ void dk_bind_texture(sgl_backend_t *be, GLuint unit, sgl_handle_t handle) {
     DkSampler sampler;
     dkSamplerDefaults(&sampler);
 
-    /* Convert GL min filter to deko3d */
+    /* Convert GL min filter to deko3d (minFilter + mipFilter) */
     switch (dk->texture_min_filter[handle]) {
         case GL_NEAREST:
-        case GL_NEAREST_MIPMAP_NEAREST:
-        case GL_NEAREST_MIPMAP_LINEAR:
             sampler.minFilter = DkFilter_Nearest;
+            sampler.mipFilter = DkMipFilter_None;
             break;
         case GL_LINEAR:
+            sampler.minFilter = DkFilter_Linear;
+            sampler.mipFilter = DkMipFilter_None;
+            break;
+        case GL_NEAREST_MIPMAP_NEAREST:
+            sampler.minFilter = DkFilter_Nearest;
+            sampler.mipFilter = DkMipFilter_Nearest;
+            break;
+        case GL_NEAREST_MIPMAP_LINEAR:
+            sampler.minFilter = DkFilter_Nearest;
+            sampler.mipFilter = DkMipFilter_Linear;
+            break;
         case GL_LINEAR_MIPMAP_NEAREST:
+            sampler.minFilter = DkFilter_Linear;
+            sampler.mipFilter = DkMipFilter_Nearest;
+            break;
         case GL_LINEAR_MIPMAP_LINEAR:
         default:
             sampler.minFilter = DkFilter_Linear;
+            sampler.mipFilter = DkMipFilter_Linear;
             break;
     }
 
@@ -815,10 +870,12 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     dk->texture_wrap_s[handle] = GL_REPEAT;
     dk->texture_wrap_t[handle] = GL_REPEAT;
 
+    /* NOTE: Descriptor creation is DEFERRED to after the pixel upload.
+     * This follows the proven pattern from the standalone deko3d test where
+     * the descriptor is created after CopyBufferToImage completes. */
+
     DkImageView texView;
     dkImageViewDefaults(&texView, texImage);
-    DkImageDescriptor *imgDesc = &dk->texture_descriptors[handle];
-    dkImageDescriptorInitialize(imgDesc, &texView, false, false);
 
     /* === Step 4: CPU reads readback data, Y-flips, writes to staging ===
      * Readback buffer has storage order (top of screen at row 0).
@@ -868,7 +925,20 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     dkQueueSubmitCommands(dk->queue, cmdlist);
     dkQueueWaitIdle(dk->queue);
 
-    /* === Step 6: Restore command buffer state === */
+    /* === Step 6: Create descriptor AFTER upload completes ===
+     * The standalone deko3d test creates the descriptor after CopyBufferToImage.
+     * This ensures the image metadata is fully consistent after the DMA copy. */
+    DkImageDescriptor *imgDesc = &dk->texture_descriptors[handle];
+    dkImageDescriptorInitialize(imgDesc, &texView, false, false);
+
+    /* CRITICAL: Mark texture as needing L2 cache barrier before first sampling.
+     * CopyBufferToImage uses the DMA/2D engine which writes directly to DRAM.
+     * The 3D engine's texture sampler reads through its own L2 cache.
+     * Without invalidation, the sampler may read stale (zero/white) data.
+     * The standalone deko3d test proves this barrier is required. */
+    dk->texture_used_as_rt[handle] = true;
+
+    /* === Step 7: Restore command buffer state === */
     dkCmdBufClear(dk->cmdbuf);
     dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
     dk->descriptors_bound = false;
@@ -1027,6 +1097,17 @@ void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     dkQueueSubmitCommands(dk->queue, cmdlist);
     dkQueueWaitIdle(dk->queue);
 
+    /* CRITICAL: Mark texture as needing L2 cache barrier before next sampling.
+     * Same reason as CopyTexImage2D: DMA writes bypass the 3D engine's L2 cache.
+     * Also recreate the descriptor to ensure consistency after the DMA copy. */
+    dk->texture_used_as_rt[handle] = true;
+
+    /* Refresh descriptor after sub-image update */
+    DkImageView updatedView;
+    dkImageViewDefaults(&updatedView, texImage);
+    DkImageDescriptor *imgDesc = &dk->texture_descriptors[handle];
+    dkImageDescriptorInitialize(imgDesc, &updatedView, false, false);
+
     /* === Step 5: Restore command buffer state === */
     dkCmdBufClear(dk->cmdbuf);
     dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
@@ -1132,28 +1213,31 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
     /* Upload compressed data if provided */
     if (data && imageSize > 0) {
-        /* Get staging memory */
-        void *staging = dkMemBlockGetCpuAddr(dk->data_memblock);
-        if (!staging) {
-            SGL_ERROR_TEXTURE("Failed to get CPU addr for compressed texture upload");
-            return;
+        /* Use client array region as staging (NOT offset 0 which overwrites VBOs!) */
+        uint32_t stagingOffset = (dk->client_array_offset + 31) & ~31;
+        if (stagingOffset + (uint32_t)imageSize <= dk->uniform_base - dk->client_array_base) {
+            uint8_t *staging = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock)
+                               + dk->client_array_base + stagingOffset;
+
+            /* Copy compressed data to staging */
+            memcpy(staging, data, imageSize);
+            dk->client_array_offset = stagingOffset + (uint32_t)imageSize;
+
+            /* Copy from staging to texture */
+            DkImageView dstView;
+            dkImageViewDefaults(&dstView, texImage);
+
+            DkCopyBuf srcBuf;
+            srcBuf.addr = dkMemBlockGetGpuAddr(dk->data_memblock)
+                          + dk->client_array_base + stagingOffset;
+            srcBuf.rowLength = 0;  /* Tightly packed */
+            srcBuf.imageHeight = 0;
+
+            dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &dstView, NULL, 0);
+            dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);
+        } else {
+            SGL_ERROR_TEXTURE("Compressed texture staging memory exhausted");
         }
-
-        /* Copy compressed data to staging */
-        memcpy(staging, data, imageSize);
-
-        /* Copy from staging to texture */
-        DkImageView srcView, dstView;
-        dkImageViewDefaults(&srcView, texImage);
-        dkImageViewDefaults(&dstView, texImage);
-
-        DkCopyBuf srcBuf;
-        srcBuf.addr = dkMemBlockGetGpuAddr(dk->data_memblock);
-        srcBuf.rowLength = 0;  /* Tightly packed */
-        srcBuf.imageHeight = 0;
-
-        dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &dstView, NULL, 0);
-        dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);
     }
 
     /* Create image descriptor */
@@ -1215,18 +1299,25 @@ void dk_compressed_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     /* Calculate destination region in blocks */
     DkImage *texImage = &dk->textures[handle];
 
-    /* Copy compressed data to staging */
-    void *staging = dkMemBlockGetCpuAddr(dk->data_memblock);
-    if (!staging) return;
+    /* Use client array region as staging (NOT offset 0 which overwrites VBOs!) */
+    uint32_t stagingOffset = (dk->client_array_offset + 31) & ~31;
+    if (stagingOffset + (uint32_t)imageSize > dk->uniform_base - dk->client_array_base) {
+        SGL_ERROR_TEXTURE("Compressed sub-image staging memory exhausted");
+        return;
+    }
 
+    uint8_t *staging = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock)
+                       + dk->client_array_base + stagingOffset;
     memcpy(staging, data, imageSize);
+    dk->client_array_offset = stagingOffset + (uint32_t)imageSize;
 
     /* Copy from staging to texture region */
     DkImageView dstView;
     dkImageViewDefaults(&dstView, texImage);
 
     DkCopyBuf srcBuf;
-    srcBuf.addr = dkMemBlockGetGpuAddr(dk->data_memblock);
+    srcBuf.addr = dkMemBlockGetGpuAddr(dk->data_memblock)
+                  + dk->client_array_base + stagingOffset;
     srcBuf.rowLength = 0;
     srcBuf.imageHeight = 0;
 
