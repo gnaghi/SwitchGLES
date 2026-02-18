@@ -278,7 +278,14 @@ static int parse_type_and_names(const char *p, parsed_decl_t *decl) {
     if (after_type == p) return 0;
 
     const type_info_t *ti = find_type_info(type_str);
-    if (!ti) return 0;
+    if (!ti) {
+        /* Unknown token before type — may be an unexpanded precision macro. Skip and retry. */
+        p = skip_ws(after_type);
+        after_type = read_word(p, type_str, sizeof(type_str));
+        if (after_type == p) return 0;
+        ti = find_type_info(type_str);
+        if (!ti) return 0;
+    }
 
     decl->type = ti->type;
     decl->is_sampler = ti->is_sampler;
@@ -337,6 +344,14 @@ static decl_kind_t parse_line(const char *raw_line, parsed_decl_t *decl) {
     if (strncmp(p, "#extension", 10) == 0) {
         decl->kind = DECL_EXTENSION;
         return DECL_EXTENSION;
+    }
+
+    /* Other preprocessor directives (#ifdef, #define, #else, #endif, etc.)
+     * Typically precision-related macros — strip them as precision is
+     * irrelevant in GLSL 460 core profile. */
+    if (*p == '#') {
+        decl->kind = DECL_PRECISION;
+        return DECL_PRECISION;
     }
 
     /* precision */

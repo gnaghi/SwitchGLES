@@ -429,6 +429,99 @@ static void test_comments(void) {
     glslt_result_free(&r);
 }
 
+/* ---- Test: preprocessor directives stripped ---- */
+
+static void test_preprocessor_directives(void) {
+    TEST("Preprocessor Directives (#ifdef/#define/#endif)");
+
+    /* Fragment shader with precision macros defined via #ifdef/#define */
+    const char *src =
+        "#version 100\n"
+        "#ifdef GL_FRAGMENT_PRECISION_HIGH\n"
+        "#define MY_PRECISION highp\n"
+        "#else\n"
+        "#define MY_PRECISION mediump\n"
+        "#endif\n"
+        "precision mediump float;\n"
+        "varying vec2 v_texCoord;\n"
+        "uniform sampler2D u_texture;\n"
+        "void main() {\n"
+        "    gl_FragColor = texture2D(u_texture, v_texCoord);\n"
+        "}\n";
+
+    glslt_options_t opts;
+    glslt_options_init(&opts);
+    glslt_set_varying_location(&opts, "v_texCoord", 0);
+
+    glslt_result_t r = glslt_transpile(src, GLSLT_FRAGMENT, &opts);
+
+    CHECK(r.success, "transpile succeeded");
+    if (r.output) {
+        CHECK(strstr(r.output, "#ifdef") == NULL, "no #ifdef in output");
+        CHECK(strstr(r.output, "#define") == NULL, "no #define in output");
+        CHECK(strstr(r.output, "#else") == NULL, "no #else in output");
+        CHECK(strstr(r.output, "#endif") == NULL, "no #endif in output");
+        CHECK(strstr(r.output, "precision") == NULL, "no precision in output");
+        CHECK(strstr(r.output, "#version 460") != NULL, "has #version 460");
+        CHECK(strstr(r.output, "sampler2D") != NULL, "sampler preserved");
+        CHECK(strstr(r.output, "texture(") != NULL, "texture2D -> texture()");
+        CHECK(r.num_varyings == 1, "found 1 varying");
+        CHECK(r.num_samplers == 1, "found 1 sampler");
+        printf("\n--- Output ---\n%s--- End ---\n", r.output);
+    }
+
+    glslt_result_free(&r);
+}
+
+/* ---- Test: unexpanded precision macro before type ---- */
+
+static void test_unexpanded_precision_macro(void) {
+    TEST("Unexpanded Precision Macro (MY_PRECISION vec2)");
+
+    /* The macro MY_PRECISION is not expanded by the transpiler.
+     * It appears as an unknown token before the type — should be skipped. */
+    const char *src =
+        "#version 100\n"
+        "#ifdef GL_FRAGMENT_PRECISION_HIGH\n"
+        "#define MY_PRECISION highp\n"
+        "#else\n"
+        "#define MY_PRECISION mediump\n"
+        "#endif\n"
+        "precision mediump float;\n"
+        "varying MY_PRECISION vec2 v_texCoord;\n"
+        "varying MY_PRECISION vec4 v_color;\n"
+        "uniform MY_PRECISION vec4 u_tint;\n"
+        "uniform sampler2D u_texture;\n"
+        "void main() {\n"
+        "    gl_FragColor = texture2D(u_texture, v_texCoord) * v_color * u_tint;\n"
+        "}\n";
+
+    glslt_options_t opts;
+    glslt_options_init(&opts);
+    glslt_set_varying_location(&opts, "v_texCoord", 0);
+    glslt_set_varying_location(&opts, "v_color", 1);
+
+    glslt_result_t r = glslt_transpile(src, GLSLT_FRAGMENT, &opts);
+
+    CHECK(r.success, "transpile succeeded");
+    if (r.output) {
+        CHECK(r.num_varyings == 2, "found 2 varyings");
+        CHECK(r.num_uniforms == 1, "found 1 uniform (u_tint)");
+        CHECK(r.num_samplers == 1, "found 1 sampler (u_texture)");
+        CHECK(strstr(r.output, "MY_PRECISION") == NULL, "no MY_PRECISION in output");
+        CHECK(strstr(r.output, "#ifdef") == NULL, "no #ifdef in output");
+        CHECK(strstr(r.output, "in vec2 v_texCoord") != NULL, "varying vec2 parsed correctly");
+        CHECK(strstr(r.output, "in vec4 v_color") != NULL, "varying vec4 parsed correctly");
+        CHECK(strstr(r.output, "u_tint") != NULL, "uniform u_tint in UBO");
+        printf("\n--- Output ---\n%s--- End ---\n", r.output);
+    } else {
+        CHECK(0, "output is NULL - transpile likely failed");
+        if (r.error) printf("  ERROR: %s\n", r.error);
+    }
+
+    glslt_result_free(&r);
+}
+
 /* ---- Main ---- */
 
 int main(void) {
@@ -444,6 +537,8 @@ int main(void) {
     test_varying_consistency();
     test_no_version();
     test_comments();
+    test_preprocessor_directives();
+    test_unexpanded_precision_macro();
 
     printf("\n==========================\n");
     printf("Results: %d passed, %d failed\n", s_pass, s_fail);
