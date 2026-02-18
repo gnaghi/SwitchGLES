@@ -58,6 +58,8 @@ GL_APICALL GLboolean GL_APIENTRY glIsFramebuffer(GLuint framebuffer) {
 }
 
 GL_APICALL void GL_APIENTRY glBindFramebuffer(GLenum target, GLuint framebuffer) {
+    sgl_ensure_frame_ready();
+
     GET_CTX();
     CHECK_BACKEND();
 
@@ -98,12 +100,26 @@ GL_APICALL void GL_APIENTRY glBindFramebuffer(GLenum target, GLuint framebuffer)
 GL_APICALL void GL_APIENTRY glFramebufferTexture2D(GLenum target, GLenum attachment,
                                                      GLenum textarget, GLuint texture, GLint level) {
     GET_CTX();
-    (void)textarget;
-    (void)level;
 
     if (target != GL_FRAMEBUFFER && target != GL_READ_FRAMEBUFFER && target != GL_DRAW_FRAMEBUFFER) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
+    }
+
+    /* GLES2: level must be 0 */
+    if (level != 0) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    /* Validate textarget */
+    if (texture != 0) {
+        if (textarget != GL_TEXTURE_2D &&
+            !(textarget >= GL_TEXTURE_CUBE_MAP_POSITIVE_X &&
+              textarget <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z)) {
+            sgl_set_error(ctx, GL_INVALID_ENUM);
+            return;
+        }
     }
 
     if (ctx->bound_framebuffer == 0) {
