@@ -57,6 +57,11 @@ typedef struct sgl_context {
     float                   sample_coverage_value;    /* default 1.0 */
     bool                    sample_coverage_invert;   /* default false */
 
+    /* Caps tracked for query but not affecting rendering on this hardware */
+    bool                    dither_enabled;            /* default true (GLES2 spec) */
+    bool                    sample_alpha_to_coverage;  /* default false */
+    bool                    sample_coverage_enabled;   /* default false */
+
     /* Error */
     GLenum                  error;
 

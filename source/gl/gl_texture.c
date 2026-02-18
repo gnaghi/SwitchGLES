@@ -459,6 +459,12 @@ GL_APICALL void GL_APIENTRY glGenerateMipmap(GLenum target) {
         return;
     }
 
+    sgl_texture_t *tex = GET_TEXTURE(tex_id);
+    if (!tex || tex->width == 0 || tex->height == 0) {
+        sgl_set_error(ctx, GL_INVALID_OPERATION);
+        return;
+    }
+
     /* Call backend to generate mipmaps */
     if (ctx->backend->ops->generate_mipmap) {
         ctx->backend->ops->generate_mipmap(ctx->backend, tex_id);

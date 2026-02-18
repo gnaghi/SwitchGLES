@@ -60,6 +60,11 @@ void sgl_context_init(sgl_context_t *ctx) {
     ctx->sample_coverage_value = 1.0f;
     ctx->sample_coverage_invert = false;
 
+    /* Capability defaults */
+    ctx->dither_enabled = true;              /* GLES2: enabled by default */
+    ctx->sample_alpha_to_coverage = false;
+    ctx->sample_coverage_enabled = false;
+
     ctx->error = GL_NO_ERROR;
     ctx->initialized = true;
 

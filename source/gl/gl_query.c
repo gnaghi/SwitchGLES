@@ -447,9 +447,22 @@ GL_APICALL void GL_APIENTRY glFinish(void) {
 /* Hints (ignored) */
 
 GL_APICALL void GL_APIENTRY glHint(GLenum target, GLenum mode) {
-    (void)target;
-    (void)mode;
-    /* All hints are ignored in this implementation */
+    GET_CTX();
+
+    /* Validate target */
+    if (target != GL_GENERATE_MIPMAP_HINT &&
+        target != GL_FRAGMENT_SHADER_DERIVATIVE_HINT_OES) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
+
+    /* Validate mode */
+    if (mode != GL_FASTEST && mode != GL_NICEST && mode != GL_DONT_CARE) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
+
+    /* Hints are accepted but ignored — hardware uses fixed behavior */
 }
 
 /* Line Width */

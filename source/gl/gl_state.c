@@ -128,6 +128,15 @@ GL_APICALL void GL_APIENTRY glEnable(GLenum cap) {
                     ctx->raster_state.polygon_offset_units);
             }
             break;
+        case GL_DITHER:
+            ctx->dither_enabled = true;
+            break;
+        case GL_SAMPLE_ALPHA_TO_COVERAGE:
+            ctx->sample_alpha_to_coverage = true;
+            break;
+        case GL_SAMPLE_COVERAGE:
+            ctx->sample_coverage_enabled = true;
+            break;
         default:
             sgl_set_error(ctx, GL_INVALID_ENUM);
             return;
@@ -170,6 +179,15 @@ GL_APICALL void GL_APIENTRY glDisable(GLenum cap) {
                 ctx->backend->ops->set_depth_bias(ctx->backend, 0.0f, 0.0f);
             }
             break;
+        case GL_DITHER:
+            ctx->dither_enabled = false;
+            break;
+        case GL_SAMPLE_ALPHA_TO_COVERAGE:
+            ctx->sample_alpha_to_coverage = false;
+            break;
+        case GL_SAMPLE_COVERAGE:
+            ctx->sample_coverage_enabled = false;
+            break;
         default:
             sgl_set_error(ctx, GL_INVALID_ENUM);
             return;
@@ -182,22 +200,64 @@ GL_APICALL GLboolean GL_APIENTRY glIsEnabled(GLenum cap) {
     GET_CTX_RET(GL_FALSE);
 
     switch (cap) {
-        case GL_DEPTH_TEST:   return ctx->depth_state.depth_test_enabled ? GL_TRUE : GL_FALSE;
-        case GL_STENCIL_TEST: return ctx->depth_state.stencil_test_enabled ? GL_TRUE : GL_FALSE;
-        case GL_BLEND:        return ctx->blend_state.enabled ? GL_TRUE : GL_FALSE;
-        case GL_CULL_FACE:    return ctx->raster_state.cull_enabled ? GL_TRUE : GL_FALSE;
-        case GL_SCISSOR_TEST: return ctx->viewport_state.scissor_enabled ? GL_TRUE : GL_FALSE;
-        case GL_POLYGON_OFFSET_FILL: return ctx->raster_state.polygon_offset_fill_enabled ? GL_TRUE : GL_FALSE;
+        case GL_DEPTH_TEST:              return ctx->depth_state.depth_test_enabled ? GL_TRUE : GL_FALSE;
+        case GL_STENCIL_TEST:            return ctx->depth_state.stencil_test_enabled ? GL_TRUE : GL_FALSE;
+        case GL_BLEND:                   return ctx->blend_state.enabled ? GL_TRUE : GL_FALSE;
+        case GL_CULL_FACE:               return ctx->raster_state.cull_enabled ? GL_TRUE : GL_FALSE;
+        case GL_SCISSOR_TEST:            return ctx->viewport_state.scissor_enabled ? GL_TRUE : GL_FALSE;
+        case GL_POLYGON_OFFSET_FILL:     return ctx->raster_state.polygon_offset_fill_enabled ? GL_TRUE : GL_FALSE;
+        case GL_DITHER:                  return ctx->dither_enabled ? GL_TRUE : GL_FALSE;
+        case GL_SAMPLE_ALPHA_TO_COVERAGE: return ctx->sample_alpha_to_coverage ? GL_TRUE : GL_FALSE;
+        case GL_SAMPLE_COVERAGE:         return ctx->sample_coverage_enabled ? GL_TRUE : GL_FALSE;
         default:
             sgl_set_error(ctx, GL_INVALID_ENUM);
             return GL_FALSE;
     }
 }
 
+/* ---- Validation Helpers ---- */
+
+static int sgl_valid_compare_func(GLenum func) {
+    return func == GL_NEVER || func == GL_LESS || func == GL_EQUAL ||
+           func == GL_LEQUAL || func == GL_GREATER || func == GL_NOTEQUAL ||
+           func == GL_GEQUAL || func == GL_ALWAYS;
+}
+
+static int sgl_valid_stencil_op(GLenum op) {
+    return op == GL_KEEP || op == GL_ZERO || op == GL_REPLACE ||
+           op == GL_INCR || op == GL_DECR || op == GL_INVERT ||
+           op == GL_INCR_WRAP || op == GL_DECR_WRAP;
+}
+
+static int sgl_valid_stencil_face(GLenum face) {
+    return face == GL_FRONT || face == GL_BACK || face == GL_FRONT_AND_BACK;
+}
+
+static int sgl_valid_blend_factor(GLenum f) {
+    return f == GL_ZERO || f == GL_ONE ||
+           f == GL_SRC_COLOR || f == GL_ONE_MINUS_SRC_COLOR ||
+           f == GL_DST_COLOR || f == GL_ONE_MINUS_DST_COLOR ||
+           f == GL_SRC_ALPHA || f == GL_ONE_MINUS_SRC_ALPHA ||
+           f == GL_DST_ALPHA || f == GL_ONE_MINUS_DST_ALPHA ||
+           f == GL_CONSTANT_COLOR || f == GL_ONE_MINUS_CONSTANT_COLOR ||
+           f == GL_CONSTANT_ALPHA || f == GL_ONE_MINUS_CONSTANT_ALPHA ||
+           f == GL_SRC_ALPHA_SATURATE;
+}
+
+static int sgl_valid_blend_equation(GLenum mode) {
+    return mode == GL_FUNC_ADD || mode == GL_FUNC_SUBTRACT ||
+           mode == GL_FUNC_REVERSE_SUBTRACT ||
+           mode == GL_MIN || mode == GL_MAX;
+}
+
 /* Depth Functions */
 
 GL_APICALL void GL_APIENTRY glDepthFunc(GLenum func) {
     GET_CTX();
+    if (!sgl_valid_compare_func(func)) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
     if (sgl_state_depth_set_func(&ctx->depth_state, func)) {
         apply_depth(ctx);
     }
@@ -216,6 +276,10 @@ GL_APICALL void GL_APIENTRY glDepthMask(GLboolean flag) {
 
 GL_APICALL void GL_APIENTRY glBlendFunc(GLenum sfactor, GLenum dfactor) {
     GET_CTX();
+    if (!sgl_valid_blend_factor(sfactor) || !sgl_valid_blend_factor(dfactor)) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
     if (sgl_state_blend_set_func(&ctx->blend_state, sfactor, dfactor, sfactor, dfactor)) {
         apply_blend(ctx);
     }
@@ -224,6 +288,11 @@ GL_APICALL void GL_APIENTRY glBlendFunc(GLenum sfactor, GLenum dfactor) {
 
 GL_APICALL void GL_APIENTRY glBlendFuncSeparate(GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha) {
     GET_CTX();
+    if (!sgl_valid_blend_factor(srcRGB) || !sgl_valid_blend_factor(dstRGB) ||
+        !sgl_valid_blend_factor(srcAlpha) || !sgl_valid_blend_factor(dstAlpha)) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
     if (sgl_state_blend_set_func(&ctx->blend_state, srcRGB, dstRGB, srcAlpha, dstAlpha)) {
         apply_blend(ctx);
     }
@@ -232,6 +301,10 @@ GL_APICALL void GL_APIENTRY glBlendFuncSeparate(GLenum srcRGB, GLenum dstRGB, GL
 
 GL_APICALL void GL_APIENTRY glBlendEquation(GLenum mode) {
     GET_CTX();
+    if (!sgl_valid_blend_equation(mode)) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
     if (sgl_state_blend_set_equation(&ctx->blend_state, mode, mode)) {
         apply_blend(ctx);
     }
@@ -240,6 +313,10 @@ GL_APICALL void GL_APIENTRY glBlendEquation(GLenum mode) {
 
 GL_APICALL void GL_APIENTRY glBlendEquationSeparate(GLenum modeRGB, GLenum modeAlpha) {
     GET_CTX();
+    if (!sgl_valid_blend_equation(modeRGB) || !sgl_valid_blend_equation(modeAlpha)) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
     if (sgl_state_blend_set_equation(&ctx->blend_state, modeRGB, modeAlpha)) {
         apply_blend(ctx);
     }
@@ -260,6 +337,10 @@ GL_APICALL void GL_APIENTRY glBlendColor(GLfloat red, GLfloat green, GLfloat blu
 
 GL_APICALL void GL_APIENTRY glCullFace(GLenum mode) {
     GET_CTX();
+    if (mode != GL_FRONT && mode != GL_BACK && mode != GL_FRONT_AND_BACK) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
     if (sgl_state_raster_set_cull_mode(&ctx->raster_state, mode)) {
         apply_raster(ctx);
     }
@@ -268,6 +349,10 @@ GL_APICALL void GL_APIENTRY glCullFace(GLenum mode) {
 
 GL_APICALL void GL_APIENTRY glFrontFace(GLenum mode) {
     GET_CTX();
+    if (mode != GL_CW && mode != GL_CCW) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
     if (sgl_state_raster_set_front_face(&ctx->raster_state, mode)) {
         apply_raster(ctx);
     }
@@ -289,6 +374,10 @@ GL_APICALL void GL_APIENTRY glColorMask(GLboolean red, GLboolean green, GLboolea
 
 GL_APICALL void GL_APIENTRY glStencilFunc(GLenum func, GLint ref, GLuint mask) {
     GET_CTX();
+    if (!sgl_valid_compare_func(func)) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
     sgl_state_stencil_set_func(&ctx->depth_state, GL_FRONT_AND_BACK, func, ref, mask);
     apply_stencil(ctx);
     SGL_TRACE_STATE("glStencilFunc(0x%X, %d, 0x%X)", func, ref, mask);
@@ -296,6 +385,14 @@ GL_APICALL void GL_APIENTRY glStencilFunc(GLenum func, GLint ref, GLuint mask) {
 
 GL_APICALL void GL_APIENTRY glStencilFuncSeparate(GLenum face, GLenum func, GLint ref, GLuint mask) {
     GET_CTX();
+    if (!sgl_valid_stencil_face(face)) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
+    if (!sgl_valid_compare_func(func)) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
     sgl_state_stencil_set_func(&ctx->depth_state, face, func, ref, mask);
     apply_stencil(ctx);
     SGL_TRACE_STATE("glStencilFuncSeparate(0x%X, 0x%X, %d, 0x%X)", face, func, ref, mask);
@@ -310,6 +407,10 @@ GL_APICALL void GL_APIENTRY glStencilMask(GLuint mask) {
 
 GL_APICALL void GL_APIENTRY glStencilMaskSeparate(GLenum face, GLuint mask) {
     GET_CTX();
+    if (!sgl_valid_stencil_face(face)) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
     sgl_state_stencil_set_write_mask(&ctx->depth_state, face, mask);
     apply_stencil(ctx);
     SGL_TRACE_STATE("glStencilMaskSeparate(0x%X, 0x%X)", face, mask);
@@ -317,6 +418,10 @@ GL_APICALL void GL_APIENTRY glStencilMaskSeparate(GLenum face, GLuint mask) {
 
 GL_APICALL void GL_APIENTRY glStencilOp(GLenum fail, GLenum zfail, GLenum zpass) {
     GET_CTX();
+    if (!sgl_valid_stencil_op(fail) || !sgl_valid_stencil_op(zfail) || !sgl_valid_stencil_op(zpass)) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
     sgl_state_stencil_set_op(&ctx->depth_state, GL_FRONT_AND_BACK, fail, zfail, zpass);
     apply_stencil(ctx);
     SGL_TRACE_STATE("glStencilOp(0x%X, 0x%X, 0x%X)", fail, zfail, zpass);
@@ -324,6 +429,14 @@ GL_APICALL void GL_APIENTRY glStencilOp(GLenum fail, GLenum zfail, GLenum zpass)
 
 GL_APICALL void GL_APIENTRY glStencilOpSeparate(GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass) {
     GET_CTX();
+    if (!sgl_valid_stencil_face(face)) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
+    if (!sgl_valid_stencil_op(sfail) || !sgl_valid_stencil_op(dpfail) || !sgl_valid_stencil_op(dppass)) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
     sgl_state_stencil_set_op(&ctx->depth_state, face, sfail, dpfail, dppass);
     apply_stencil(ctx);
     SGL_TRACE_STATE("glStencilOpSeparate(0x%X, 0x%X, 0x%X, 0x%X)", face, sfail, dpfail, dppass);
