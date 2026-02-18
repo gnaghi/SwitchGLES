@@ -18,6 +18,12 @@
 
 #include "dk_internal.h"
 
+/* deko3d requires linear buffer row strides to be 32-byte aligned */
+#define DK_LINEAR_STRIDE_ALIGNMENT 32
+
+/* Bitmask for all 6 cubemap faces uploaded (bits 0-5) */
+#define DK_CUBEMAP_ALL_FACES 0x3F
+
 /* ============================================================================
  * Cubemap Helpers
  * ============================================================================ */
@@ -96,10 +102,10 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
         DkImage *texImage = &dk->textures[handle];
 
         uint32_t row_size = width * 4;
-        uint32_t aligned_row_size = (row_size + 31) & ~31;
+        uint32_t aligned_row_size = SGL_ALIGN_UP(row_size, DK_LINEAR_STRIDE_ALIGNMENT);
         uint32_t staging_size = aligned_row_size * height;
 
-        uint32_t stagingOffset = (dk->client_array_offset + 31) & ~31;
+        uint32_t stagingOffset = SGL_ALIGN_UP(dk->client_array_offset, DK_LINEAR_STRIDE_ALIGNMENT);
         if (stagingOffset + staging_size > dk->uniform_base - dk->client_array_base) {
             SGL_ERROR_BACKEND("cubemap staging buffer overflow");
             return;
@@ -166,7 +172,7 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
         /* GLOVE pattern: Create descriptor only after ALL 6 faces are uploaded.
          * This ensures the cubemap image is fully populated before creating
          * the sampling descriptor. */
-        if (dk->cubemap_face_mask[handle] == 0x3F) {
+        if (dk->cubemap_face_mask[handle] == DK_CUBEMAP_ALL_FACES) {
             /* All 6 faces uploaded - create the cubemap image descriptor now */
             DkImageView imageView;
             dkImageViewDefaults(&imageView, texImage);
@@ -186,31 +192,7 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
                               handle);
         }
 
-        /* Re-bind render target - must check FBO state (same pattern as dk_copy_tex_image_2d) */
-        if (dk->current_fbo != 0 && dk->current_fbo_color > 0 &&
-            dk->current_fbo_color < SGL_MAX_TEXTURES &&
-            dk->texture_initialized[dk->current_fbo_color]) {
-            DkImageView colorView;
-            dkImageViewDefaults(&colorView, &dk->textures[dk->current_fbo_color]);
-            DkImageView *pDepthView = NULL;
-            DkImageView depthView;
-            if (dk->current_fbo_depth > 0 && dk->current_fbo_depth < SGL_MAX_RENDERBUFFERS &&
-                dk->renderbuffer_initialized[dk->current_fbo_depth]) {
-                dkImageViewDefaults(&depthView, &dk->renderbuffer_images[dk->current_fbo_depth]);
-                pDepthView = &depthView;
-            }
-            dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, pDepthView);
-        } else if (dk->framebuffers) {
-            DkImageView colorView;
-            dkImageViewDefaults(&colorView, &dk->framebuffers[dk->current_slot]);
-            if (dk->depth_images[dk->current_slot]) {
-                DkImageView depthView;
-                dkImageViewDefaults(&depthView, dk->depth_images[dk->current_slot]);
-                dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, &depthView);
-            } else {
-                dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, NULL);
-            }
-        }
+        dk_rebind_render_target(dk);
     }
 }
 
@@ -297,13 +279,13 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     if (pixels) {
         /* Calculate source size with stride alignment (like legacy) */
         uint32_t row_size = width * 4;  /* RGBA */
-        uint32_t aligned_row_size = (row_size + 31) & ~31;  /* DK_IMAGE_LINEAR_STRIDE_ALIGNMENT */
+        uint32_t aligned_row_size = SGL_ALIGN_UP(row_size, DK_LINEAR_STRIDE_ALIGNMENT);
         uint32_t staging_size = aligned_row_size * height;
 
         const uint8_t *src = (const uint8_t*)pixels;
 
         /* Use client array region as staging */
-        uint32_t stagingOffset = (dk->client_array_offset + 31) & ~31;
+        uint32_t stagingOffset = SGL_ALIGN_UP(dk->client_array_offset, DK_LINEAR_STRIDE_ALIGNMENT);
         if (stagingOffset + staging_size <= dk->uniform_base - dk->client_array_base) {
             uint8_t *staging = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock)
                                + dk->client_array_base + stagingOffset;
@@ -364,31 +346,7 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
             /* Reset descriptors_bound since we cleared the command buffer */
             dk->descriptors_bound = false;
 
-            /* Re-bind render target - check FBO state */
-            if (dk->current_fbo != 0 && dk->current_fbo_color > 0 &&
-                dk->current_fbo_color < SGL_MAX_TEXTURES &&
-                dk->texture_initialized[dk->current_fbo_color]) {
-                DkImageView colorView;
-                dkImageViewDefaults(&colorView, &dk->textures[dk->current_fbo_color]);
-                DkImageView *pDepthView = NULL;
-                DkImageView depthView;
-                if (dk->current_fbo_depth > 0 && dk->current_fbo_depth < SGL_MAX_RENDERBUFFERS &&
-                    dk->renderbuffer_initialized[dk->current_fbo_depth]) {
-                    dkImageViewDefaults(&depthView, &dk->renderbuffer_images[dk->current_fbo_depth]);
-                    pDepthView = &depthView;
-                }
-                dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, pDepthView);
-            } else if (dk->framebuffers) {
-                DkImageView colorView;
-                dkImageViewDefaults(&colorView, &dk->framebuffers[dk->current_slot]);
-                if (dk->depth_images[dk->current_slot]) {
-                    DkImageView depthView;
-                    dkImageViewDefaults(&depthView, dk->depth_images[dk->current_slot]);
-                    dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, &depthView);
-                } else {
-                    dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, NULL);
-                }
-            }
+            dk_rebind_render_target(dk);
         }
     }
 
@@ -420,13 +378,13 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
     /* Calculate source size with stride alignment */
     uint32_t row_size = width * 4;  /* RGBA */
-    uint32_t aligned_row_size = (row_size + 31) & ~31;  /* DK_IMAGE_LINEAR_STRIDE_ALIGNMENT */
+    uint32_t aligned_row_size = SGL_ALIGN_UP(row_size, DK_LINEAR_STRIDE_ALIGNMENT);
     uint32_t staging_size = aligned_row_size * height;
 
     const uint8_t *src = (const uint8_t*)pixels;
 
     /* Use client array region as staging */
-    uint32_t stagingOffset = (dk->client_array_offset + 31) & ~31;
+    uint32_t stagingOffset = SGL_ALIGN_UP(dk->client_array_offset, DK_LINEAR_STRIDE_ALIGNMENT);
     if (stagingOffset + staging_size > dk->uniform_base - dk->client_array_base) {
         SGL_ERROR_BACKEND("texture_sub_image_2d: staging buffer overflow");
         return;
@@ -491,31 +449,7 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     /* Reset descriptors_bound since we cleared the command buffer */
     dk->descriptors_bound = false;
 
-    /* Re-bind render target - check FBO state */
-    if (dk->current_fbo != 0 && dk->current_fbo_color > 0 &&
-        dk->current_fbo_color < SGL_MAX_TEXTURES &&
-        dk->texture_initialized[dk->current_fbo_color]) {
-        DkImageView colorView;
-        dkImageViewDefaults(&colorView, &dk->textures[dk->current_fbo_color]);
-        DkImageView *pDepthView = NULL;
-        DkImageView depthView;
-        if (dk->current_fbo_depth > 0 && dk->current_fbo_depth < SGL_MAX_RENDERBUFFERS &&
-            dk->renderbuffer_initialized[dk->current_fbo_depth]) {
-            dkImageViewDefaults(&depthView, &dk->renderbuffer_images[dk->current_fbo_depth]);
-            pDepthView = &depthView;
-        }
-        dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, pDepthView);
-    } else if (dk->framebuffers) {
-        DkImageView colorView;
-        dkImageViewDefaults(&colorView, &dk->framebuffers[dk->current_slot]);
-        if (dk->depth_images[dk->current_slot]) {
-            DkImageView depthView;
-            dkImageViewDefaults(&depthView, dk->depth_images[dk->current_slot]);
-            dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, &depthView);
-        } else {
-            dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, NULL);
-        }
-    }
+    dk_rebind_render_target(dk);
 
     SGL_TRACE_TEXTURE("texture_sub_image_2d handle=%u offset=(%d,%d) %dx%d",
                       handle, xoffset, yoffset, width, height);
@@ -801,7 +735,7 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     /* === Step 2: Read framebuffer to CPU-accessible memory ===
      * Same approach as dk_read_pixels (proven to work). */
     size_t pixelBufSize = (size_t)width * (size_t)height * 4;
-    size_t alignedBufSize = (pixelBufSize + 0xFFF) & ~0xFFF;  /* 4KB align */
+    size_t alignedBufSize = SGL_ALIGN_UP(pixelBufSize, SGL_PAGE_ALIGNMENT);  /* 4KB align */
 
     DkMemBlock readbackMem;
     DkMemBlockMaker memMaker;
@@ -885,10 +819,10 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     uint8_t *gpuData = (uint8_t *)dkMemBlockGetCpuAddr(readbackMem);
     size_t row_bytes = (size_t)width * 4;
 
-    uint32_t aligned_row_size = ((uint32_t)(width * 4) + 31) & ~31;
+    uint32_t aligned_row_size = SGL_ALIGN_UP((uint32_t)(width * 4), DK_LINEAR_STRIDE_ALIGNMENT);
     uint32_t staging_size = aligned_row_size * height;
 
-    uint32_t stagingOffset = (dk->client_array_offset + 31) & ~31;
+    uint32_t stagingOffset = SGL_ALIGN_UP(dk->client_array_offset, DK_LINEAR_STRIDE_ALIGNMENT);
     if (stagingOffset + staging_size > dk->uniform_base - dk->client_array_base) {
         SGL_ERROR_BACKEND("copy_tex_image_2d: staging buffer overflow");
         dkMemBlockDestroy(readbackMem);
@@ -943,31 +877,7 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
     dk->descriptors_bound = false;
 
-    /* Re-bind render target (check FBO — from dk_read_pixels pattern) */
-    if (dk->current_fbo != 0 && dk->current_fbo_color > 0 &&
-        dk->current_fbo_color < SGL_MAX_TEXTURES &&
-        dk->texture_initialized[dk->current_fbo_color]) {
-        DkImageView colorView;
-        dkImageViewDefaults(&colorView, &dk->textures[dk->current_fbo_color]);
-        DkImageView *pDepthView = NULL;
-        DkImageView depthView;
-        if (dk->current_fbo_depth > 0 && dk->current_fbo_depth < SGL_MAX_RENDERBUFFERS &&
-            dk->renderbuffer_initialized[dk->current_fbo_depth]) {
-            dkImageViewDefaults(&depthView, &dk->renderbuffer_images[dk->current_fbo_depth]);
-            pDepthView = &depthView;
-        }
-        dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, pDepthView);
-    } else if (dk->framebuffers) {
-        DkImageView colorView;
-        dkImageViewDefaults(&colorView, &dk->framebuffers[dk->current_slot]);
-        if (dk->depth_images[dk->current_slot]) {
-            DkImageView depthView;
-            dkImageViewDefaults(&depthView, dk->depth_images[dk->current_slot]);
-            dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, &depthView);
-        } else {
-            dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, NULL);
-        }
-    }
+    dk_rebind_render_target(dk);
 
     SGL_TRACE_TEXTURE("copy_tex_image_2d handle=%u (%d,%d) %dx%d", handle, x, y, width, height);
 }
@@ -1023,7 +933,7 @@ void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
     /* === Step 2: Read framebuffer to CPU-accessible memory === */
     size_t pixelBufSize = (size_t)width * (size_t)height * 4;
-    size_t alignedBufSize = (pixelBufSize + 0xFFF) & ~0xFFF;
+    size_t alignedBufSize = SGL_ALIGN_UP(pixelBufSize, SGL_PAGE_ALIGNMENT);
 
     DkMemBlock readbackMem;
     DkMemBlockMaker memMaker;
@@ -1055,10 +965,10 @@ void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     uint8_t *gpuData = (uint8_t *)dkMemBlockGetCpuAddr(readbackMem);
     size_t row_bytes = (size_t)width * 4;
 
-    uint32_t aligned_row_size = ((uint32_t)(width * 4) + 31) & ~31;
+    uint32_t aligned_row_size = SGL_ALIGN_UP((uint32_t)(width * 4), DK_LINEAR_STRIDE_ALIGNMENT);
     uint32_t staging_size = aligned_row_size * height;
 
-    uint32_t stagingOffset = (dk->client_array_offset + 31) & ~31;
+    uint32_t stagingOffset = SGL_ALIGN_UP(dk->client_array_offset, DK_LINEAR_STRIDE_ALIGNMENT);
     if (stagingOffset + staging_size > dk->uniform_base - dk->client_array_base) {
         SGL_ERROR_BACKEND("copy_tex_sub_image_2d: staging buffer overflow");
         dkMemBlockDestroy(readbackMem);
@@ -1113,30 +1023,7 @@ void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
     dk->descriptors_bound = false;
 
-    if (dk->current_fbo != 0 && dk->current_fbo_color > 0 &&
-        dk->current_fbo_color < SGL_MAX_TEXTURES &&
-        dk->texture_initialized[dk->current_fbo_color]) {
-        DkImageView colorView;
-        dkImageViewDefaults(&colorView, &dk->textures[dk->current_fbo_color]);
-        DkImageView *pDepthView = NULL;
-        DkImageView depthView;
-        if (dk->current_fbo_depth > 0 && dk->current_fbo_depth < SGL_MAX_RENDERBUFFERS &&
-            dk->renderbuffer_initialized[dk->current_fbo_depth]) {
-            dkImageViewDefaults(&depthView, &dk->renderbuffer_images[dk->current_fbo_depth]);
-            pDepthView = &depthView;
-        }
-        dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, pDepthView);
-    } else if (dk->framebuffers) {
-        DkImageView colorView;
-        dkImageViewDefaults(&colorView, &dk->framebuffers[dk->current_slot]);
-        if (dk->depth_images[dk->current_slot]) {
-            DkImageView depthView;
-            dkImageViewDefaults(&depthView, dk->depth_images[dk->current_slot]);
-            dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, &depthView);
-        } else {
-            dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, NULL);
-        }
-    }
+    dk_rebind_render_target(dk);
 
     SGL_TRACE_TEXTURE("copy_tex_sub_image_2d handle=%u fb(%d,%d)->tex(%d,%d) %dx%d",
                       handle, x, y, xoffset, yoffset, width, height);
@@ -1214,7 +1101,7 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     /* Upload compressed data if provided */
     if (data && imageSize > 0) {
         /* Use client array region as staging (NOT offset 0 which overwrites VBOs!) */
-        uint32_t stagingOffset = (dk->client_array_offset + 31) & ~31;
+        uint32_t stagingOffset = SGL_ALIGN_UP(dk->client_array_offset, DK_LINEAR_STRIDE_ALIGNMENT);
         if (stagingOffset + (uint32_t)imageSize <= dk->uniform_base - dk->client_array_base) {
             uint8_t *staging = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock)
                                + dk->client_array_base + stagingOffset;
@@ -1286,21 +1173,17 @@ void dk_compressed_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
                                          GLenum format, GLsizei imageSize, const void *data) {
     (void)target;
     (void)level;
+    (void)format;
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
     if (handle == 0 || handle >= SGL_MAX_TEXTURES) return;
     if (!dk->texture_initialized[handle]) return;
     if (!data || imageSize <= 0) return;
 
-    /* Get block dimensions */
-    int blockWidth, blockHeight;
-    dk_get_compressed_block_size(format, &blockWidth, &blockHeight);
-
-    /* Calculate destination region in blocks */
     DkImage *texImage = &dk->textures[handle];
 
     /* Use client array region as staging (NOT offset 0 which overwrites VBOs!) */
-    uint32_t stagingOffset = (dk->client_array_offset + 31) & ~31;
+    uint32_t stagingOffset = SGL_ALIGN_UP(dk->client_array_offset, DK_LINEAR_STRIDE_ALIGNMENT);
     if (stagingOffset + (uint32_t)imageSize > dk->uniform_base - dk->client_array_base) {
         SGL_ERROR_TEXTURE("Compressed sub-image staging memory exhausted");
         return;

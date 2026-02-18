@@ -10,6 +10,7 @@
 #define GL_COMMON_H
 
 #include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
 #include "../context/sgl_context.h"
 #include "../backend/sgl_backend.h"
 #include "../util/sgl_log.h"

@@ -73,7 +73,8 @@ GL_APICALL GLboolean GL_APIENTRY sglRegisterUniform(const GLchar *name, GLint st
         slot = s_registered_count++;
     }
 
-    strcpy(s_registered_uniforms[slot].name, name);
+    strncpy(s_registered_uniforms[slot].name, name, SGL_UNIFORM_NAME_MAX - 1);
+    s_registered_uniforms[slot].name[SGL_UNIFORM_NAME_MAX - 1] = '\0';
     s_registered_uniforms[slot].stage = stage;
     s_registered_uniforms[slot].binding = binding;
     s_registered_uniforms[slot].byte_offset = -1; /* legacy mode */
@@ -144,7 +145,8 @@ GL_APICALL GLboolean GL_APIENTRY sglRegisterPackedUniform(const GLchar *name,
         slot = s_registered_count++;
     }
 
-    strcpy(s_registered_uniforms[slot].name, name);
+    strncpy(s_registered_uniforms[slot].name, name, SGL_UNIFORM_NAME_MAX - 1);
+    s_registered_uniforms[slot].name[SGL_UNIFORM_NAME_MAX - 1] = '\0';
     s_registered_uniforms[slot].stage = stage;
     s_registered_uniforms[slot].binding = binding;
     s_registered_uniforms[slot].byte_offset = byte_offset;
@@ -167,9 +169,9 @@ static GLint lookup_registered_uniform(const GLchar *name) {
             strcmp(s_registered_uniforms[i].name, name) == 0) {
             if (s_registered_uniforms[i].byte_offset >= 0) {
                 /* Packed mode encoding */
-                return (GLint)((1u << 31) |
-                       ((unsigned)s_registered_uniforms[i].stage << 24) |
-                       ((unsigned)s_registered_uniforms[i].binding << 16) |
+                return (GLint)(SGL_LOC_PACKED_FLAG |
+                       ((unsigned)s_registered_uniforms[i].stage << SGL_LOC_STAGE_SHIFT) |
+                       ((unsigned)s_registered_uniforms[i].binding << SGL_LOC_BINDING_SHIFT) |
                        (unsigned)s_registered_uniforms[i].byte_offset);
             } else {
                 /* Legacy encoding */
@@ -228,9 +230,9 @@ GL_APICALL GLint GL_APIENTRY glGetUniformLocation(GLuint program, const GLchar *
     GLint registered = lookup_registered_uniform(name);
     if (registered != -1) {
         /* If packed mode, configure the program's packed UBO size */
-        if (registered & (1 << 31)) {
-            int stage = (registered >> 24) & 0x7F;
-            int binding = (registered >> 16) & 0xFF;
+        if (registered & SGL_LOC_PACKED_FLAG) {
+            int stage = (registered >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
+            int binding = (registered >> SGL_LOC_BINDING_SHIFT) & SGL_LOC_BINDING_MASK;
             sgl_packed_ubo_t *packed = (stage == 0)
                 ? &prog->packed_vertex[binding]
                 : &prog->packed_fragment[binding];
@@ -464,7 +466,8 @@ GL_APICALL void GL_APIENTRY glBindAttribLocation(GLuint program, GLuint index, c
     /* Add new binding */
     if (prog->num_attrib_bindings < SGL_MAX_ATTRIBS) {
         int slot = prog->num_attrib_bindings++;
-        strcpy(prog->attrib_bindings[slot].name, name);
+        strncpy(prog->attrib_bindings[slot].name, name, SGL_ATTRIB_NAME_MAX - 1);
+        prog->attrib_bindings[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
         prog->attrib_bindings[slot].index = index;
         prog->attrib_bindings[slot].used = true;
     }
@@ -563,10 +566,10 @@ GL_APICALL void GL_APIENTRY glGetUniformfv(GLuint program, GLint location, GLflo
     }
 
     /* Packed mode readback */
-    if (location & (1 << 31)) {
-        int stage = (location >> 24) & 0x7F;
-        int binding = (location >> 16) & 0xFF;
-        int offset = location & 0xFFFF;
+    if (location & SGL_LOC_PACKED_FLAG) {
+        int stage = (location >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
+        int binding = (location >> SGL_LOC_BINDING_SHIFT) & SGL_LOC_BINDING_MASK;
+        int offset = location & SGL_LOC_OFFSET_MASK;
         if (binding >= SGL_MAX_PACKED_UBOS) return;
         sgl_packed_ubo_t *packed = (stage == 0)
             ? &prog->packed_vertex[binding]
@@ -613,10 +616,10 @@ GL_APICALL void GL_APIENTRY glGetUniformiv(GLuint program, GLint location, GLint
     }
 
     /* Packed mode readback */
-    if (location & (1 << 31)) {
-        int stage = (location >> 24) & 0x7F;
-        int binding = (location >> 16) & 0xFF;
-        int offset = location & 0xFFFF;
+    if (location & SGL_LOC_PACKED_FLAG) {
+        int stage = (location >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
+        int binding = (location >> SGL_LOC_BINDING_SHIFT) & SGL_LOC_BINDING_MASK;
+        int offset = location & SGL_LOC_OFFSET_MASK;
         if (binding >= SGL_MAX_PACKED_UBOS) return;
         sgl_packed_ubo_t *packed = (stage == 0)
             ? &prog->packed_vertex[binding]
@@ -670,10 +673,10 @@ static void set_float_uniform(GLint location, int num_components, GLsizei count,
     if (!prog) return;
 
     /* Packed mode: write directly to shadow buffer */
-    if (location & (1 << 31)) {
-        int stage = (location >> 24) & 0x7F;
-        int binding = (location >> 16) & 0xFF;
-        int offset = location & 0xFFFF;
+    if (location & SGL_LOC_PACKED_FLAG) {
+        int stage = (location >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
+        int binding = (location >> SGL_LOC_BINDING_SHIFT) & SGL_LOC_BINDING_MASK;
+        int offset = location & SGL_LOC_OFFSET_MASK;
 
         if (binding >= SGL_MAX_PACKED_UBOS) return;  /* Bounds check */
 
@@ -715,7 +718,7 @@ static void set_float_uniform(GLint location, int num_components, GLsizei count,
 
     /* std140: each array element padded to 16 bytes (vec4) */
     uint32_t dataSize = clampedCount * 16;
-    uint32_t alignedSize = (dataSize + SGL_UNIFORM_ALIGNMENT - 1) & ~(SGL_UNIFORM_ALIGNMENT - 1);
+    uint32_t alignedSize = SGL_ALIGN_UP(dataSize, SGL_UNIFORM_ALIGNMENT);
 
     /* ALWAYS allocate a new offset for each uniform write.
      * This ensures each draw gets unique uniform data, preventing
@@ -791,10 +794,10 @@ static void set_int_uniform(GLint location, int num_components, GLsizei count, c
     if (!prog) return;
 
     /* Packed mode: write directly to shadow buffer */
-    if (location & (1 << 31)) {
-        int stage = (location >> 24) & 0x7F;
-        int binding = (location >> 16) & 0xFF;
-        int offset = location & 0xFFFF;
+    if (location & SGL_LOC_PACKED_FLAG) {
+        int stage = (location >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
+        int binding = (location >> SGL_LOC_BINDING_SHIFT) & SGL_LOC_BINDING_MASK;
+        int offset = location & SGL_LOC_OFFSET_MASK;
 
         if (binding >= SGL_MAX_PACKED_UBOS) return;  /* Bounds check */
 
@@ -836,7 +839,7 @@ static void set_int_uniform(GLint location, int num_components, GLsizei count, c
 
     /* std140: each array element padded to 16 bytes (ivec4) */
     uint32_t dataSize = clampedCount * 16;
-    uint32_t alignedSize = (dataSize + SGL_UNIFORM_ALIGNMENT - 1) & ~(SGL_UNIFORM_ALIGNMENT - 1);
+    uint32_t alignedSize = SGL_ALIGN_UP(dataSize, SGL_UNIFORM_ALIGNMENT);
 
     /* ALWAYS allocate new offset to avoid data races between draws */
     if (ctx->backend->ops->alloc_uniform) {
@@ -956,10 +959,10 @@ GL_APICALL void GL_APIENTRY glUniformMatrix2fv(GLint location, GLsizei count, GL
     if (!prog || !prog->linked) return;
 
     /* Packed mode: write std140 mat2 to shadow buffer */
-    if (location & (1 << 31)) {
-        int stage = (location >> 24) & 0x7F;
-        int binding = (location >> 16) & 0xFF;
-        int offset = location & 0xFFFF;
+    if (location & SGL_LOC_PACKED_FLAG) {
+        int stage = (location >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
+        int binding = (location >> SGL_LOC_BINDING_SHIFT) & SGL_LOC_BINDING_MASK;
+        int offset = location & SGL_LOC_OFFSET_MASK;
         sgl_packed_ubo_t *packed = (stage == 0)
             ? &prog->packed_vertex[binding]
             : &prog->packed_fragment[binding];
@@ -990,7 +993,7 @@ GL_APICALL void GL_APIENTRY glUniformMatrix2fv(GLint location, GLsizei count, GL
 
     /* mat2 in std140: 2 columns of vec4 (padded from vec2) = 32 bytes */
     uint32_t dataSize = 32 * count;
-    uint32_t alignedSize = (dataSize + SGL_UNIFORM_ALIGNMENT - 1) & ~(SGL_UNIFORM_ALIGNMENT - 1);
+    uint32_t alignedSize = SGL_ALIGN_UP(dataSize, SGL_UNIFORM_ALIGNMENT);
 
     /* ALWAYS allocate new offset to avoid data races between draws */
     if (ctx->backend->ops->alloc_uniform) {
@@ -1043,10 +1046,10 @@ GL_APICALL void GL_APIENTRY glUniformMatrix3fv(GLint location, GLsizei count, GL
     if (!prog || !prog->linked) return;
 
     /* Packed mode: write std140 mat3 to shadow buffer */
-    if (location & (1 << 31)) {
-        int stage = (location >> 24) & 0x7F;
-        int binding = (location >> 16) & 0xFF;
-        int offset = location & 0xFFFF;
+    if (location & SGL_LOC_PACKED_FLAG) {
+        int stage = (location >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
+        int binding = (location >> SGL_LOC_BINDING_SHIFT) & SGL_LOC_BINDING_MASK;
+        int offset = location & SGL_LOC_OFFSET_MASK;
         sgl_packed_ubo_t *packed = (stage == 0)
             ? &prog->packed_vertex[binding]
             : &prog->packed_fragment[binding];
@@ -1079,7 +1082,7 @@ GL_APICALL void GL_APIENTRY glUniformMatrix3fv(GLint location, GLsizei count, GL
 
     /* mat3 in std140: 3 columns of vec4 (padded from vec3) = 48 bytes */
     uint32_t dataSize = 48 * count;
-    uint32_t alignedSize = (dataSize + SGL_UNIFORM_ALIGNMENT - 1) & ~(SGL_UNIFORM_ALIGNMENT - 1);
+    uint32_t alignedSize = SGL_ALIGN_UP(dataSize, SGL_UNIFORM_ALIGNMENT);
 
     /* ALWAYS allocate new offset to avoid data races between draws */
     if (ctx->backend->ops->alloc_uniform) {
@@ -1135,10 +1138,10 @@ GL_APICALL void GL_APIENTRY glUniformMatrix4fv(GLint location, GLsizei count, GL
     if (!prog || !prog->linked) return;
 
     /* Packed mode: write std140 mat4 to shadow buffer */
-    if (location & (1 << 31)) {
-        int stage = (location >> 24) & 0x7F;
-        int binding = (location >> 16) & 0xFF;
-        int offset = location & 0xFFFF;
+    if (location & SGL_LOC_PACKED_FLAG) {
+        int stage = (location >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
+        int binding = (location >> SGL_LOC_BINDING_SHIFT) & SGL_LOC_BINDING_MASK;
+        int offset = location & SGL_LOC_OFFSET_MASK;
         sgl_packed_ubo_t *packed = (stage == 0)
             ? &prog->packed_vertex[binding]
             : &prog->packed_fragment[binding];
@@ -1169,7 +1172,7 @@ GL_APICALL void GL_APIENTRY glUniformMatrix4fv(GLint location, GLsizei count, GL
 
     /* mat4 in std140: 4 columns of vec4 = 64 bytes */
     uint32_t data_size = 64 * count;
-    uint32_t aligned_size = (data_size + SGL_UNIFORM_ALIGNMENT - 1) & ~(SGL_UNIFORM_ALIGNMENT - 1);
+    uint32_t aligned_size = SGL_ALIGN_UP(data_size, SGL_UNIFORM_ALIGNMENT);
 
     /* ALWAYS allocate new offset to avoid data races between draws */
     if (ctx->backend->ops->alloc_uniform) {

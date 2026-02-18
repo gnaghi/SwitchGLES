@@ -12,6 +12,7 @@
  */
 
 #include "dk_internal.h"
+#include <GLES2/gl2ext.h>
 
 /* ============================================================================
  * Compare Operation Conversion
@@ -135,154 +136,182 @@ DkImageFormat dk_convert_format(GLenum internalformat, GLenum format, GLenum typ
  */
 DkImageFormat dk_convert_compressed_format(GLenum internalformat) {
     switch (internalformat) {
-        /* ASTC formats (most common on mobile/Switch) */
-        case 0x93B0: return DkImageFormat_RGBA_ASTC_4x4;    /* GL_COMPRESSED_RGBA_ASTC_4x4_KHR */
-        case 0x93B1: return DkImageFormat_RGBA_ASTC_5x4;    /* GL_COMPRESSED_RGBA_ASTC_5x4_KHR */
-        case 0x93B2: return DkImageFormat_RGBA_ASTC_5x5;    /* GL_COMPRESSED_RGBA_ASTC_5x5_KHR */
-        case 0x93B3: return DkImageFormat_RGBA_ASTC_6x5;    /* GL_COMPRESSED_RGBA_ASTC_6x5_KHR */
-        case 0x93B4: return DkImageFormat_RGBA_ASTC_6x6;    /* GL_COMPRESSED_RGBA_ASTC_6x6_KHR */
-        case 0x93B5: return DkImageFormat_RGBA_ASTC_8x5;    /* GL_COMPRESSED_RGBA_ASTC_8x5_KHR */
-        case 0x93B6: return DkImageFormat_RGBA_ASTC_8x6;    /* GL_COMPRESSED_RGBA_ASTC_8x6_KHR */
-        case 0x93B7: return DkImageFormat_RGBA_ASTC_8x8;    /* GL_COMPRESSED_RGBA_ASTC_8x8_KHR */
-        case 0x93B8: return DkImageFormat_RGBA_ASTC_10x5;   /* GL_COMPRESSED_RGBA_ASTC_10x5_KHR */
-        case 0x93B9: return DkImageFormat_RGBA_ASTC_10x6;   /* GL_COMPRESSED_RGBA_ASTC_10x6_KHR */
-        case 0x93BA: return DkImageFormat_RGBA_ASTC_10x8;   /* GL_COMPRESSED_RGBA_ASTC_10x8_KHR */
-        case 0x93BB: return DkImageFormat_RGBA_ASTC_10x10;  /* GL_COMPRESSED_RGBA_ASTC_10x10_KHR */
-        case 0x93BC: return DkImageFormat_RGBA_ASTC_12x10;  /* GL_COMPRESSED_RGBA_ASTC_12x10_KHR */
-        case 0x93BD: return DkImageFormat_RGBA_ASTC_12x12;  /* GL_COMPRESSED_RGBA_ASTC_12x12_KHR */
+        /* ASTC LDR formats */
+        case GL_COMPRESSED_RGBA_ASTC_4x4_KHR:   return DkImageFormat_RGBA_ASTC_4x4;
+        case GL_COMPRESSED_RGBA_ASTC_5x4_KHR:   return DkImageFormat_RGBA_ASTC_5x4;
+        case GL_COMPRESSED_RGBA_ASTC_5x5_KHR:   return DkImageFormat_RGBA_ASTC_5x5;
+        case GL_COMPRESSED_RGBA_ASTC_6x5_KHR:   return DkImageFormat_RGBA_ASTC_6x5;
+        case GL_COMPRESSED_RGBA_ASTC_6x6_KHR:   return DkImageFormat_RGBA_ASTC_6x6;
+        case GL_COMPRESSED_RGBA_ASTC_8x5_KHR:   return DkImageFormat_RGBA_ASTC_8x5;
+        case GL_COMPRESSED_RGBA_ASTC_8x6_KHR:   return DkImageFormat_RGBA_ASTC_8x6;
+        case GL_COMPRESSED_RGBA_ASTC_8x8_KHR:   return DkImageFormat_RGBA_ASTC_8x8;
+        case GL_COMPRESSED_RGBA_ASTC_10x5_KHR:  return DkImageFormat_RGBA_ASTC_10x5;
+        case GL_COMPRESSED_RGBA_ASTC_10x6_KHR:  return DkImageFormat_RGBA_ASTC_10x6;
+        case GL_COMPRESSED_RGBA_ASTC_10x8_KHR:  return DkImageFormat_RGBA_ASTC_10x8;
+        case GL_COMPRESSED_RGBA_ASTC_10x10_KHR: return DkImageFormat_RGBA_ASTC_10x10;
+        case GL_COMPRESSED_RGBA_ASTC_12x10_KHR: return DkImageFormat_RGBA_ASTC_12x10;
+        case GL_COMPRESSED_RGBA_ASTC_12x12_KHR: return DkImageFormat_RGBA_ASTC_12x12;
 
         /* ASTC sRGB formats */
-        case 0x93D0: return DkImageFormat_RGBA_ASTC_4x4_sRGB;   /* GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR */
-        case 0x93D1: return DkImageFormat_RGBA_ASTC_5x4_sRGB;   /* GL_COMPRESSED_SRGB8_ALPHA8_ASTC_5x4_KHR */
-        case 0x93D2: return DkImageFormat_RGBA_ASTC_5x5_sRGB;   /* GL_COMPRESSED_SRGB8_ALPHA8_ASTC_5x5_KHR */
-        case 0x93D3: return DkImageFormat_RGBA_ASTC_6x5_sRGB;   /* GL_COMPRESSED_SRGB8_ALPHA8_ASTC_6x5_KHR */
-        case 0x93D4: return DkImageFormat_RGBA_ASTC_6x6_sRGB;   /* GL_COMPRESSED_SRGB8_ALPHA8_ASTC_6x6_KHR */
-        case 0x93D5: return DkImageFormat_RGBA_ASTC_8x5_sRGB;   /* GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x5_KHR */
-        case 0x93D6: return DkImageFormat_RGBA_ASTC_8x6_sRGB;   /* GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x6_KHR */
-        case 0x93D7: return DkImageFormat_RGBA_ASTC_8x8_sRGB;   /* GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x8_KHR */
-        case 0x93D8: return DkImageFormat_RGBA_ASTC_10x5_sRGB;  /* GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x5_KHR */
-        case 0x93D9: return DkImageFormat_RGBA_ASTC_10x6_sRGB;  /* GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x6_KHR */
-        case 0x93DA: return DkImageFormat_RGBA_ASTC_10x8_sRGB;  /* GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x8_KHR */
-        case 0x93DB: return DkImageFormat_RGBA_ASTC_10x10_sRGB; /* GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x10_KHR */
-        case 0x93DC: return DkImageFormat_RGBA_ASTC_12x10_sRGB; /* GL_COMPRESSED_SRGB8_ALPHA8_ASTC_12x10_KHR */
-        case 0x93DD: return DkImageFormat_RGBA_ASTC_12x12_sRGB; /* GL_COMPRESSED_SRGB8_ALPHA8_ASTC_12x12_KHR */
+        case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR:   return DkImageFormat_RGBA_ASTC_4x4_sRGB;
+        case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_5x4_KHR:   return DkImageFormat_RGBA_ASTC_5x4_sRGB;
+        case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_5x5_KHR:   return DkImageFormat_RGBA_ASTC_5x5_sRGB;
+        case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_6x5_KHR:   return DkImageFormat_RGBA_ASTC_6x5_sRGB;
+        case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_6x6_KHR:   return DkImageFormat_RGBA_ASTC_6x6_sRGB;
+        case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x5_KHR:   return DkImageFormat_RGBA_ASTC_8x5_sRGB;
+        case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x6_KHR:   return DkImageFormat_RGBA_ASTC_8x6_sRGB;
+        case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x8_KHR:   return DkImageFormat_RGBA_ASTC_8x8_sRGB;
+        case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x5_KHR:  return DkImageFormat_RGBA_ASTC_10x5_sRGB;
+        case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x6_KHR:  return DkImageFormat_RGBA_ASTC_10x6_sRGB;
+        case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x8_KHR:  return DkImageFormat_RGBA_ASTC_10x8_sRGB;
+        case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x10_KHR: return DkImageFormat_RGBA_ASTC_10x10_sRGB;
+        case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_12x10_KHR: return DkImageFormat_RGBA_ASTC_12x10_sRGB;
+        case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_12x12_KHR: return DkImageFormat_RGBA_ASTC_12x12_sRGB;
 
-        /* ETC2 formats */
-        case 0x9274: return DkImageFormat_RGB_ETC2;         /* GL_COMPRESSED_RGB8_ETC2 */
-        case 0x9278: return DkImageFormat_RGBA_ETC2;        /* GL_COMPRESSED_RGBA8_ETC2_EAC */
-        case 0x9275: return DkImageFormat_RGB_ETC2_sRGB;    /* GL_COMPRESSED_SRGB8_ETC2 */
-        case 0x9279: return DkImageFormat_RGBA_ETC2_sRGB;   /* GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC */
-        case 0x9276: return DkImageFormat_RGB_PTA_ETC2;     /* GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2 */
-        case 0x9277: return DkImageFormat_RGB_PTA_ETC2_sRGB;/* GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2 */
-        case 0x9270: return DkImageFormat_R_ETC2_Unorm;     /* GL_COMPRESSED_R11_EAC */
-        case 0x9271: return DkImageFormat_R_ETC2_Snorm;     /* GL_COMPRESSED_SIGNED_R11_EAC */
-        case 0x9272: return DkImageFormat_RG_ETC2_Unorm;    /* GL_COMPRESSED_RG11_EAC */
-        case 0x9273: return DkImageFormat_RG_ETC2_Snorm;    /* GL_COMPRESSED_SIGNED_RG11_EAC */
+        /* ETC2/EAC formats */
+        case GL_COMPRESSED_RGB8_ETC2:                    return DkImageFormat_RGB_ETC2;
+        case GL_COMPRESSED_RGBA8_ETC2_EAC:               return DkImageFormat_RGBA_ETC2;
+        case GL_COMPRESSED_SRGB8_ETC2:                   return DkImageFormat_RGB_ETC2_sRGB;
+        case GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC:        return DkImageFormat_RGBA_ETC2_sRGB;
+        case GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2: return DkImageFormat_RGB_PTA_ETC2;
+        case GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2: return DkImageFormat_RGB_PTA_ETC2_sRGB;
+        case GL_COMPRESSED_R11_EAC:                      return DkImageFormat_R_ETC2_Unorm;
+        case GL_COMPRESSED_SIGNED_R11_EAC:               return DkImageFormat_R_ETC2_Snorm;
+        case GL_COMPRESSED_RG11_EAC:                     return DkImageFormat_RG_ETC2_Unorm;
+        case GL_COMPRESSED_SIGNED_RG11_EAC:              return DkImageFormat_RG_ETC2_Snorm;
 
-        /* ETC1 (legacy, maps to ETC2 RGB which is compatible) */
-        case 0x8D64: return DkImageFormat_RGB_ETC2;         /* GL_ETC1_RGB8_OES */
+        /* ETC1 (legacy, maps to ETC2 RGB which is backward compatible) */
+        case GL_ETC1_RGB8_OES:                           return DkImageFormat_RGB_ETC2;
 
-        /* S3TC/BC formats (Desktop, also supported by Tegra) */
-        case 0x83F0: return DkImageFormat_RGB_BC1;          /* GL_COMPRESSED_RGB_S3TC_DXT1_EXT */
-        case 0x83F1: return DkImageFormat_RGBA_BC1;         /* GL_COMPRESSED_RGBA_S3TC_DXT1_EXT */
-        case 0x83F2: return DkImageFormat_RGBA_BC2;         /* GL_COMPRESSED_RGBA_S3TC_DXT3_EXT */
-        case 0x83F3: return DkImageFormat_RGBA_BC3;         /* GL_COMPRESSED_RGBA_S3TC_DXT5_EXT */
+        /* S3TC/DXT (BC1-BC3) */
+        case GL_COMPRESSED_RGB_S3TC_DXT1_EXT:            return DkImageFormat_RGB_BC1;
+        case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:           return DkImageFormat_RGBA_BC1;
+        case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:           return DkImageFormat_RGBA_BC2;
+        case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:           return DkImageFormat_RGBA_BC3;
 
-        /* BC4/BC5 (RGTC) */
-        case 0x8DBB: return DkImageFormat_R_BC4_Unorm;      /* GL_COMPRESSED_RED_RGTC1 */
-        case 0x8DBC: return DkImageFormat_R_BC4_Snorm;      /* GL_COMPRESSED_SIGNED_RED_RGTC1 */
-        case 0x8DBD: return DkImageFormat_RG_BC5_Unorm;     /* GL_COMPRESSED_RG_RGTC2 */
-        case 0x8DBE: return DkImageFormat_RG_BC5_Snorm;     /* GL_COMPRESSED_SIGNED_RG_RGTC2 */
+        /* RGTC (BC4/BC5) */
+        case GL_COMPRESSED_RED_RGTC1_EXT:                return DkImageFormat_R_BC4_Unorm;
+        case GL_COMPRESSED_SIGNED_RED_RGTC1_EXT:         return DkImageFormat_R_BC4_Snorm;
+        case GL_COMPRESSED_RED_GREEN_RGTC2_EXT:          return DkImageFormat_RG_BC5_Unorm;
+        case GL_COMPRESSED_SIGNED_RED_GREEN_RGTC2_EXT:   return DkImageFormat_RG_BC5_Snorm;
 
-        /* BC6H/BC7 (BPTC) */
-        case 0x8E8C: return DkImageFormat_RGBA_BC7_Unorm;       /* GL_COMPRESSED_RGBA_BPTC_UNORM */
-        case 0x8E8D: return DkImageFormat_RGBA_BC7_Unorm_sRGB;  /* GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM */
-        case 0x8E8E: return DkImageFormat_RGBA_BC6H_SF16_Float; /* GL_COMPRESSED_RGB_BPTC_SIGNED_FLOAT */
-        case 0x8E8F: return DkImageFormat_RGBA_BC6H_UF16_Float; /* GL_COMPRESSED_RGB_BPTC_UNSIGNED_FLOAT */
+        /* BPTC (BC6H/BC7) */
+        case GL_COMPRESSED_RGBA_BPTC_UNORM_EXT:          return DkImageFormat_RGBA_BC7_Unorm;
+        case GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_EXT:    return DkImageFormat_RGBA_BC7_Unorm_sRGB;
+        case GL_COMPRESSED_RGB_BPTC_SIGNED_FLOAT_EXT:    return DkImageFormat_RGBA_BC6H_SF16_Float;
+        case GL_COMPRESSED_RGB_BPTC_UNSIGNED_FLOAT_EXT:  return DkImageFormat_RGBA_BC6H_UF16_Float;
 
         default:
-            return (DkImageFormat)0;  /* Unsupported format */
+            return (DkImageFormat)0;
     }
+}
+
+/* ============================================================================
+ * Compressed Format Descriptor Table
+ *
+ * Single source of truth for block dimensions and byte sizes.
+ * Eliminates duplication between block_size and block_bytes functions.
+ * ============================================================================ */
+
+typedef struct {
+    GLenum format;
+    uint8_t blockWidth;
+    uint8_t blockHeight;
+    uint8_t blockBytes;
+} compressed_format_info_t;
+
+static const compressed_format_info_t s_compressed_format_table[] = {
+    /* ASTC LDR (all 16 bytes/block, variable block dimensions) */
+    { GL_COMPRESSED_RGBA_ASTC_4x4_KHR,   4,  4,  16 },
+    { GL_COMPRESSED_RGBA_ASTC_5x4_KHR,   5,  4,  16 },
+    { GL_COMPRESSED_RGBA_ASTC_5x5_KHR,   5,  5,  16 },
+    { GL_COMPRESSED_RGBA_ASTC_6x5_KHR,   6,  5,  16 },
+    { GL_COMPRESSED_RGBA_ASTC_6x6_KHR,   6,  6,  16 },
+    { GL_COMPRESSED_RGBA_ASTC_8x5_KHR,   8,  5,  16 },
+    { GL_COMPRESSED_RGBA_ASTC_8x6_KHR,   8,  6,  16 },
+    { GL_COMPRESSED_RGBA_ASTC_8x8_KHR,   8,  8,  16 },
+    { GL_COMPRESSED_RGBA_ASTC_10x5_KHR,  10, 5,  16 },
+    { GL_COMPRESSED_RGBA_ASTC_10x6_KHR,  10, 6,  16 },
+    { GL_COMPRESSED_RGBA_ASTC_10x8_KHR,  10, 8,  16 },
+    { GL_COMPRESSED_RGBA_ASTC_10x10_KHR, 10, 10, 16 },
+    { GL_COMPRESSED_RGBA_ASTC_12x10_KHR, 12, 10, 16 },
+    { GL_COMPRESSED_RGBA_ASTC_12x12_KHR, 12, 12, 16 },
+    /* ASTC sRGB (same dimensions/sizes as LDR) */
+    { GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR,   4,  4,  16 },
+    { GL_COMPRESSED_SRGB8_ALPHA8_ASTC_5x4_KHR,   5,  4,  16 },
+    { GL_COMPRESSED_SRGB8_ALPHA8_ASTC_5x5_KHR,   5,  5,  16 },
+    { GL_COMPRESSED_SRGB8_ALPHA8_ASTC_6x5_KHR,   6,  5,  16 },
+    { GL_COMPRESSED_SRGB8_ALPHA8_ASTC_6x6_KHR,   6,  6,  16 },
+    { GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x5_KHR,   8,  5,  16 },
+    { GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x6_KHR,   8,  6,  16 },
+    { GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x8_KHR,   8,  8,  16 },
+    { GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x5_KHR,  10, 5,  16 },
+    { GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x6_KHR,  10, 6,  16 },
+    { GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x8_KHR,  10, 8,  16 },
+    { GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x10_KHR, 10, 10, 16 },
+    { GL_COMPRESSED_SRGB8_ALPHA8_ASTC_12x10_KHR, 12, 10, 16 },
+    { GL_COMPRESSED_SRGB8_ALPHA8_ASTC_12x12_KHR, 12, 12, 16 },
+    /* ETC2/EAC (all 4x4 blocks) */
+    { GL_COMPRESSED_RGB8_ETC2,                     4, 4,  8  },
+    { GL_COMPRESSED_SRGB8_ETC2,                    4, 4,  8  },
+    { GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2, 4, 4,  8  },
+    { GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2,4, 4,  8  },
+    { GL_COMPRESSED_RGBA8_ETC2_EAC,                4, 4,  16 },
+    { GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC,         4, 4,  16 },
+    { GL_COMPRESSED_R11_EAC,                       4, 4,  8  },
+    { GL_COMPRESSED_SIGNED_R11_EAC,                4, 4,  8  },
+    { GL_COMPRESSED_RG11_EAC,                      4, 4,  16 },
+    { GL_COMPRESSED_SIGNED_RG11_EAC,               4, 4,  16 },
+    { GL_ETC1_RGB8_OES,                            4, 4,  8  },
+    /* S3TC/DXT (all 4x4 blocks) */
+    { GL_COMPRESSED_RGB_S3TC_DXT1_EXT,             4, 4,  8  },
+    { GL_COMPRESSED_RGBA_S3TC_DXT1_EXT,            4, 4,  8  },
+    { GL_COMPRESSED_RGBA_S3TC_DXT3_EXT,            4, 4,  16 },
+    { GL_COMPRESSED_RGBA_S3TC_DXT5_EXT,            4, 4,  16 },
+    /* RGTC (BC4/BC5, all 4x4 blocks) */
+    { GL_COMPRESSED_RED_RGTC1_EXT,                 4, 4,  8  },
+    { GL_COMPRESSED_SIGNED_RED_RGTC1_EXT,          4, 4,  8  },
+    { GL_COMPRESSED_RED_GREEN_RGTC2_EXT,           4, 4,  16 },
+    { GL_COMPRESSED_SIGNED_RED_GREEN_RGTC2_EXT,    4, 4,  16 },
+    /* BPTC (BC6H/BC7, all 4x4 blocks, 16 bytes) */
+    { GL_COMPRESSED_RGBA_BPTC_UNORM_EXT,           4, 4,  16 },
+    { GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_EXT,     4, 4,  16 },
+    { GL_COMPRESSED_RGB_BPTC_SIGNED_FLOAT_EXT,     4, 4,  16 },
+    { GL_COMPRESSED_RGB_BPTC_UNSIGNED_FLOAT_EXT,   4, 4,  16 },
+};
+#define NUM_COMPRESSED_FORMATS_TABLE (sizeof(s_compressed_format_table) / sizeof(s_compressed_format_table[0]))
+
+static const compressed_format_info_t *dk_find_compressed_format(GLenum internalformat) {
+    for (size_t i = 0; i < NUM_COMPRESSED_FORMATS_TABLE; i++) {
+        if (s_compressed_format_table[i].format == internalformat)
+            return &s_compressed_format_table[i];
+    }
+    return NULL;
 }
 
 /**
  * Get compressed block dimensions for a given format.
  * Returns block width and height via output parameters.
+ * Defaults to 4x4 for unknown formats (matches ETC2/S3TC/BC).
  */
 void dk_get_compressed_block_size(GLenum internalformat, int *blockWidth, int *blockHeight) {
-    switch (internalformat) {
-        /* ASTC formats - block size is encoded in the format name */
-        case 0x93B0: case 0x93D0: *blockWidth = 4;  *blockHeight = 4;  break;
-        case 0x93B1: case 0x93D1: *blockWidth = 5;  *blockHeight = 4;  break;
-        case 0x93B2: case 0x93D2: *blockWidth = 5;  *blockHeight = 5;  break;
-        case 0x93B3: case 0x93D3: *blockWidth = 6;  *blockHeight = 5;  break;
-        case 0x93B4: case 0x93D4: *blockWidth = 6;  *blockHeight = 6;  break;
-        case 0x93B5: case 0x93D5: *blockWidth = 8;  *blockHeight = 5;  break;
-        case 0x93B6: case 0x93D6: *blockWidth = 8;  *blockHeight = 6;  break;
-        case 0x93B7: case 0x93D7: *blockWidth = 8;  *blockHeight = 8;  break;
-        case 0x93B8: case 0x93D8: *blockWidth = 10; *blockHeight = 5;  break;
-        case 0x93B9: case 0x93D9: *blockWidth = 10; *blockHeight = 6;  break;
-        case 0x93BA: case 0x93DA: *blockWidth = 10; *blockHeight = 8;  break;
-        case 0x93BB: case 0x93DB: *blockWidth = 10; *blockHeight = 10; break;
-        case 0x93BC: case 0x93DC: *blockWidth = 12; *blockHeight = 10; break;
-        case 0x93BD: case 0x93DD: *blockWidth = 12; *blockHeight = 12; break;
-
-        /* ETC2/EAC and S3TC/BC - all use 4x4 blocks */
-        default:
-            *blockWidth = 4;
-            *blockHeight = 4;
-            break;
+    const compressed_format_info_t *info = dk_find_compressed_format(internalformat);
+    if (info) {
+        *blockWidth = info->blockWidth;
+        *blockHeight = info->blockHeight;
+    } else {
+        *blockWidth = 4;
+        *blockHeight = 4;
     }
 }
 
 /**
  * Get bytes per block for a given compressed format.
+ * Defaults to 16 bytes for unknown formats.
  */
 int dk_get_compressed_block_bytes(GLenum internalformat) {
-    switch (internalformat) {
-        /* ASTC - all block sizes use 16 bytes per block */
-        case 0x93B0: case 0x93B1: case 0x93B2: case 0x93B3:
-        case 0x93B4: case 0x93B5: case 0x93B6: case 0x93B7:
-        case 0x93B8: case 0x93B9: case 0x93BA: case 0x93BB:
-        case 0x93BC: case 0x93BD:
-        case 0x93D0: case 0x93D1: case 0x93D2: case 0x93D3:
-        case 0x93D4: case 0x93D5: case 0x93D6: case 0x93D7:
-        case 0x93D8: case 0x93D9: case 0x93DA: case 0x93DB:
-        case 0x93DC: case 0x93DD:
-            return 16;
-
-        /* ETC2 RGBA and RG11 - 16 bytes */
-        case 0x9278: case 0x9279:  /* RGBA8_ETC2 */
-        case 0x9272: case 0x9273:  /* RG11_EAC */
-            return 16;
-
-        /* ETC2 RGB, R11, and punch-through alpha - 8 bytes */
-        case 0x9274: case 0x9275:  /* RGB8_ETC2 */
-        case 0x9276: case 0x9277:  /* RGB8_PTA_ETC2 */
-        case 0x9270: case 0x9271:  /* R11_EAC */
-        case 0x8D64:               /* ETC1 */
-            return 8;
-
-        /* S3TC/BC1 (DXT1) - 8 bytes */
-        case 0x83F0: case 0x83F1:
-            return 8;
-
-        /* S3TC/BC2-3 (DXT3/5) - 16 bytes */
-        case 0x83F2: case 0x83F3:
-            return 16;
-
-        /* BC4 - 8 bytes */
-        case 0x8DBB: case 0x8DBC:
-            return 8;
-
-        /* BC5, BC6H, BC7 - 16 bytes */
-        case 0x8DBD: case 0x8DBE:
-        case 0x8E8C: case 0x8E8D: case 0x8E8E: case 0x8E8F:
-            return 16;
-
-        default:
-            return 16;  /* Default to 16 bytes */
-    }
+    const compressed_format_info_t *info = dk_find_compressed_format(internalformat);
+    return info ? info->blockBytes : 16;
 }
 
 /* ============================================================================

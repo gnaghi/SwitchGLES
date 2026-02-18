@@ -6,7 +6,6 @@
 #include "gl_common.h"
 #include <string.h>
 #include <stdlib.h>
-#include <stdio.h>
 
 #ifdef SGL_ENABLE_RUNTIME_COMPILER
 #include <libuam.h>
@@ -140,12 +139,11 @@ static bool sgl_compile_glsl460(sgl_context_t *ctx, GLuint shader_id,
     if (uam_compile_dksh(compiler, glsl_source)) {
         size_t dksh_size = uam_get_code_size(compiler);
 
-        printf("[SGL-RT] shader %u: DKSH size=%zu align256=%d GPRs=%d\n",
-               shader_id, dksh_size, (int)(dksh_size % 256), uam_get_num_gprs(compiler));
-        fflush(stdout);
+        SGL_TRACE_SHADER("RT compile shader %u: DKSH size=%zu align256=%d GPRs=%d",
+                         shader_id, dksh_size, (int)(dksh_size % 256), uam_get_num_gprs(compiler));
 
         /* CRITICAL: Buffer MUST be 256-byte aligned for libuam's pa256(). */
-        size_t alloc_size = (dksh_size + 4095) & ~(size_t)4095;
+        size_t alloc_size = SGL_ALIGN_UP(dksh_size, SGL_PAGE_ALIGNMENT);
         void *dksh = memalign(256, alloc_size);
         if (dksh) {
             memset(dksh, 0, alloc_size);
@@ -408,8 +406,7 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
                            (fs_sh && fs_sh->needs_transpile);
 
     if (needs_transpile) {
-        printf("[SGL-TRANSPILER] Transpiling ES 1.00 shaders for program %u\n", program);
-        fflush(stdout);
+        SGL_TRACE_SHADER("transpiling ES 1.00 shaders for program %u", program);
 
         /* 1. Set up transpiler options with attrib bindings from glBindAttribLocation */
         glslt_options_t vs_opts;
@@ -431,8 +428,7 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
         if (vs_sh && vs_sh->needs_transpile && vs_sh->source) {
             vs_result = glslt_transpile(vs_sh->source, GLSLT_VERTEX, &vs_opts);
             if (!vs_result.success) {
-                printf("[SGL-TRANSPILER] VS transpile failed: %s\n", vs_result.error);
-                fflush(stdout);
+                SGL_TRACE_SHADER("VS transpile failed: %s", vs_result.error);
                 if (vs_sh->info_log) free(vs_sh->info_log);
                 vs_sh->info_log = strdup(vs_result.error);
                 vs_sh->compiled = false;
@@ -441,10 +437,9 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
                 SGL_TRACE_SHADER("glLinkProgram(%u) - VS transpile FAILED", program);
                 return;
             }
-            printf("[SGL-TRANSPILER] VS transpiled: %d uniforms, %d samplers, %d attribs, %d varyings\n",
-                   vs_result.num_uniforms, vs_result.num_samplers,
-                   vs_result.num_attributes, vs_result.num_varyings);
-            fflush(stdout);
+            SGL_TRACE_SHADER("VS transpiled: %d uniforms, %d samplers, %d attribs, %d varyings",
+                             vs_result.num_uniforms, vs_result.num_samplers,
+                             vs_result.num_attributes, vs_result.num_varyings);
         }
 
         /* 3. Transpile fragment shader (pass VS varying locations for consistency) */
@@ -465,8 +460,7 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
 
             fs_result = glslt_transpile(fs_sh->source, GLSLT_FRAGMENT, &fs_opts);
             if (!fs_result.success) {
-                printf("[SGL-TRANSPILER] FS transpile failed: %s\n", fs_result.error);
-                fflush(stdout);
+                SGL_TRACE_SHADER("FS transpile failed: %s", fs_result.error);
                 if (fs_sh->info_log) free(fs_sh->info_log);
                 fs_sh->info_log = strdup(fs_result.error);
                 fs_sh->compiled = false;
@@ -476,9 +470,8 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
                 SGL_TRACE_SHADER("glLinkProgram(%u) - FS transpile FAILED", program);
                 return;
             }
-            printf("[SGL-TRANSPILER] FS transpiled: %d uniforms, %d samplers, %d varyings\n",
-                   fs_result.num_uniforms, fs_result.num_samplers, fs_result.num_varyings);
-            fflush(stdout);
+            SGL_TRACE_SHADER("FS transpiled: %d uniforms, %d samplers, %d varyings",
+                             fs_result.num_uniforms, fs_result.num_samplers, fs_result.num_varyings);
         }
 
         /* 4. Compile transpiled GLSL 4.60 → DKSH via libuam */
@@ -487,8 +480,7 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
             vs_sh->compiled = sgl_compile_glsl460(ctx, prog->vertex_shader,
                                                    vs_sh, vs_result.output);
             if (!vs_sh->compiled) {
-                printf("[SGL-TRANSPILER] VS compile failed after transpile\n");
-                fflush(stdout);
+                SGL_TRACE_SHADER("VS compile failed after transpile");
                 prog->linked = false;
                 glslt_result_free(&vs_result);
                 glslt_result_free(&fs_result);
@@ -503,8 +495,7 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
             fs_sh->compiled = sgl_compile_glsl460(ctx, prog->fragment_shader,
                                                    fs_sh, fs_result.output);
             if (!fs_sh->compiled) {
-                printf("[SGL-TRANSPILER] FS compile failed after transpile\n");
-                fflush(stdout);
+                SGL_TRACE_SHADER("FS compile failed after transpile");
                 prog->linked = false;
                 glslt_result_free(&vs_result);
                 glslt_result_free(&fs_result);
@@ -523,9 +514,8 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
                                          0, vs_opts.ubo_binding,
                                          vs_result.uniforms[i].offset);
             }
-            printf("[SGL-TRANSPILER] Registered %d VS uniforms (UBO size=%d)\n",
-                   vs_result.num_uniforms, vs_result.ubo_total_size);
-            fflush(stdout);
+            SGL_TRACE_SHADER("registered %d VS uniforms (UBO size=%d)",
+                             vs_result.num_uniforms, vs_result.ubo_total_size);
         }
         /* FS uniforms → packed UBO at FS binding 0 */
         if (fs_result.num_uniforms > 0) {
@@ -535,9 +525,8 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
                                          1, 0,
                                          fs_result.uniforms[i].offset);
             }
-            printf("[SGL-TRANSPILER] Registered %d FS uniforms (UBO size=%d)\n",
-                   fs_result.num_uniforms, fs_result.ubo_total_size);
-            fflush(stdout);
+            SGL_TRACE_SHADER("registered %d FS uniforms (UBO size=%d)",
+                             fs_result.num_uniforms, fs_result.ubo_total_size);
         }
 
         /* 6. Register attrib bindings from transpiler result into program */
@@ -564,8 +553,7 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
         glslt_result_free(&vs_result);
         glslt_result_free(&fs_result);
 
-        printf("[SGL-TRANSPILER] Transpilation complete for program %u\n", program);
-        fflush(stdout);
+        SGL_TRACE_SHADER("transpilation complete for program %u", program);
     }
 #endif /* SGL_ENABLE_RUNTIME_COMPILER */
 

@@ -20,8 +20,21 @@
 #define SGL_DATA_MEM_SIZE       (16 * 1024 * 1024)
 #define SGL_UNIFORM_BUF_SIZE    (256 * 1024)
 #define SGL_UNIFORM_ALIGNMENT   0x100   /* DK_UNIFORM_BUF_ALIGNMENT */
+#define SGL_CODE_ALIGNMENT      0x100   /* Shader code alignment (256 bytes) */
+#define SGL_PAGE_ALIGNMENT      0x1000  /* Memory block page alignment (4KB) */
 #define SGL_TEXTURE_MEM_SIZE    (32 * 1024 * 1024)
 #define SGL_DESCRIPTOR_MEM_SIZE (SGL_MAX_TEXTURES * 64)  /* 64 = sizeof(DkImageDescriptor) + sizeof(DkSamplerDescriptor) */
+
+/* Alignment helper */
+#define SGL_ALIGN_UP(x, align) (((x) + (align) - 1) & ~((align) - 1))
+
+/* Packed uniform location encoding: bit 31 = packed flag */
+#define SGL_LOC_PACKED_FLAG     (1u << 31)
+#define SGL_LOC_STAGE_SHIFT     24
+#define SGL_LOC_STAGE_MASK      0x7F
+#define SGL_LOC_BINDING_SHIFT   16
+#define SGL_LOC_BINDING_MASK    0xFF
+#define SGL_LOC_OFFSET_MASK     0xFFFF
 
 /* Maximum resources */
 #define SGL_MAX_SURFACES        4

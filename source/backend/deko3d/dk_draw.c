@@ -83,7 +83,7 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
             /* Disabled attribute - use constant value from glVertexAttrib*f */
             if (constBufSlot < 0) {
                 /* First disabled attribute: allocate shared constant buffer */
-                uint32_t alignedOff = (dk->client_array_offset + 255) & ~255;
+                uint32_t alignedOff = SGL_ALIGN_UP(dk->client_array_offset, SGL_UNIFORM_ALIGNMENT);
                 uint32_t totalSize = numAttribs * 16; /* worst case: all disabled */
                 uint32_t clientAddr = dk->client_array_base + alignedOff;
 
@@ -213,7 +213,7 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
                 GLsizei dataSize = totalVertices * effectiveStride;
 
                 /* Align current offset to 256 bytes */
-                uint32_t alignedOffset = (dk->client_array_offset + 255) & ~255;
+                uint32_t alignedOffset = SGL_ALIGN_UP(dk->client_array_offset, SGL_UNIFORM_ALIGNMENT);
                 uint32_t clientArrayAddr = dk->client_array_base + alignedOffset;
 
                 /* Check we have space in this slot's sub-region */
@@ -347,7 +347,7 @@ void dk_draw_elements(sgl_backend_t *be, GLenum mode, GLsizei count,
         DkGpuAddr gpu_base = dkMemBlockGetGpuAddr(dk->data_memblock);
 
         /* Align offset */
-        uint32_t alignedOffset = (dk->client_array_offset + 255) & ~255;
+        uint32_t alignedOffset = SGL_ALIGN_UP(dk->client_array_offset, SGL_UNIFORM_ALIGNMENT);
         uint32_t clientAddr = dk->client_array_base + alignedOffset;
 
         if (type == GL_UNSIGNED_BYTE) {

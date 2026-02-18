@@ -53,7 +53,7 @@ bool dk_load_shader_file(sgl_backend_t *be, sgl_handle_t handle, const char *pat
     }
 
     /* Align code offset to 256 bytes */
-    uint32_t aligned_offset = (dk->code_offset + 255) & ~255;
+    uint32_t aligned_offset = SGL_ALIGN_UP(dk->code_offset, SGL_CODE_ALIGNMENT);
     uint8_t *code_ptr = (uint8_t*)dkMemBlockGetCpuAddr(dk->code_memblock) + aligned_offset;
 
     if (fread(code_ptr, 1, size, f) != (size_t)size) {
@@ -78,7 +78,7 @@ bool dk_load_shader_file(sgl_backend_t *be, sgl_handle_t handle, const char *pat
     }
 
     dk->shader_loaded[handle] = true;
-    dk->code_offset = aligned_offset + ((size + 255) & ~255);
+    dk->code_offset = aligned_offset + SGL_ALIGN_UP(size, SGL_CODE_ALIGNMENT);
 
     SGL_TRACE_SHADER("load_shader_file: handle=%u path=%s at 0x%lx (valid)",
                      handle, path, (unsigned long)code_addr);
@@ -112,9 +112,9 @@ bool dk_load_shader_binary(sgl_backend_t *be, sgl_handle_t handle,
         return false;
     }
 
-    /* Align code offset to 256 bytes (DK_SHADER_CODE_ALIGNMENT) */
-    uint32_t aligned_offset = (dk->code_offset + 255) & ~255;
-    uint32_t aligned_size = (uint32_t)((size + 255) & ~(size_t)255);
+    /* Align code offset and size to 256 bytes (DK_SHADER_CODE_ALIGNMENT) */
+    uint32_t aligned_offset = SGL_ALIGN_UP(dk->code_offset, SGL_CODE_ALIGNMENT);
+    uint32_t aligned_size = (uint32_t)SGL_ALIGN_UP(size, SGL_CODE_ALIGNMENT);
     uint8_t *code_ptr = (uint8_t*)dkMemBlockGetCpuAddr(dk->code_memblock) + aligned_offset;
 
     /* Zero the aligned region first, then copy DKSH data.
@@ -283,7 +283,7 @@ void dk_bind_program(sgl_backend_t *be, sgl_handle_t program,
             const sgl_packed_ubo_t *packed = &packed_vertex[i];
             if (!packed->valid || packed->size == 0) continue;
 
-            uint32_t aligned = (packed->size + SGL_UNIFORM_ALIGNMENT - 1) & ~(SGL_UNIFORM_ALIGNMENT - 1);
+            uint32_t aligned = SGL_ALIGN_UP(packed->size, SGL_UNIFORM_ALIGNMENT);
             uint32_t offset = dk_alloc_uniform(be, aligned);
 
             /* Copy shadow buffer to CPU-visible GPU memory */
@@ -303,7 +303,7 @@ void dk_bind_program(sgl_backend_t *be, sgl_handle_t program,
             const sgl_packed_ubo_t *packed = &packed_fragment[i];
             if (!packed->valid || packed->size == 0) continue;
 
-            uint32_t aligned = (packed->size + SGL_UNIFORM_ALIGNMENT - 1) & ~(SGL_UNIFORM_ALIGNMENT - 1);
+            uint32_t aligned = SGL_ALIGN_UP(packed->size, SGL_UNIFORM_ALIGNMENT);
             uint32_t offset = dk_alloc_uniform(be, aligned);
 
             /* Copy shadow buffer to CPU-visible GPU memory */

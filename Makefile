@@ -22,7 +22,7 @@ VERSION	:=	$(SWITCHGLES_MAJOR).$(SWITCHGLES_MINOR).$(SWITCHGLES_PATCH)
 #---------------------------------------------------------------------------------
 # Directories
 #---------------------------------------------------------------------------------
-SOURCES		:=	source source/util source/context source/backend source/backend/deko3d source/gl
+SOURCES		:=	source source/util source/context source/backend source/backend/deko3d source/gl source/transpiler
 INCLUDES	:=	include source
 
 #---------------------------------------------------------------------------------

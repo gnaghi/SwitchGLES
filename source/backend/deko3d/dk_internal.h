@@ -119,6 +119,27 @@ void dk_finish(sgl_backend_t *be);
  */
 void dk_insert_barrier(sgl_backend_t *be);
 
+/**
+ * Re-bind the default framebuffer's render target for the current slot.
+ * Called after command buffer resets to restore rendering state.
+ *
+ * @param dk    Backend data pointer (not sgl_backend_t)
+ */
+void dk_rebind_default_render_target(dk_backend_data_t *dk);
+
+/**
+ * Re-bind the current render target (FBO-aware).
+ *
+ * If an FBO is currently bound, re-binds the FBO color+depth attachments.
+ * Otherwise, falls back to dk_rebind_default_render_target() (swapchain).
+ *
+ * Call this after clearing/resetting the command buffer to restore the
+ * render target state that was lost when the cmdbuf was cleared.
+ *
+ * @param dk    Backend data pointer (not sgl_backend_t)
+ */
+void dk_rebind_render_target(dk_backend_data_t *dk);
+
 /* ============================================================================
  * State Application (dk_state.c)
  * ============================================================================ */

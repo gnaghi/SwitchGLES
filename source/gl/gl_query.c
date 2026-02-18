@@ -10,38 +10,38 @@
 /* Compressed texture formats supported by deko3d (Tegra X1 Maxwell GPU) */
 static const GLint s_compressed_formats[] = {
     /* ETC1 */
-    0x8D64,  /* GL_ETC1_RGB8_OES */
-    /* ETC2 */
-    0x9274,  /* GL_COMPRESSED_RGB8_ETC2 */
-    0x9275,  /* GL_COMPRESSED_SRGB8_ETC2 */
-    0x9276,  /* GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2 */
-    0x9277,  /* GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2 */
-    0x9278,  /* GL_COMPRESSED_RGBA8_ETC2_EAC */
-    0x9279,  /* GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC */
-    0x9270,  /* GL_COMPRESSED_R11_EAC */
-    0x9271,  /* GL_COMPRESSED_SIGNED_R11_EAC */
-    0x9272,  /* GL_COMPRESSED_RG11_EAC */
-    0x9273,  /* GL_COMPRESSED_SIGNED_RG11_EAC */
-    /* S3TC / BC */
-    0x83F0,  /* GL_COMPRESSED_RGB_S3TC_DXT1_EXT */
-    0x83F1,  /* GL_COMPRESSED_RGBA_S3TC_DXT1_EXT */
-    0x83F2,  /* GL_COMPRESSED_RGBA_S3TC_DXT3_EXT */
-    0x83F3,  /* GL_COMPRESSED_RGBA_S3TC_DXT5_EXT */
+    GL_ETC1_RGB8_OES,
+    /* ETC2/EAC */
+    GL_COMPRESSED_RGB8_ETC2,
+    GL_COMPRESSED_SRGB8_ETC2,
+    GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2,
+    GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2,
+    GL_COMPRESSED_RGBA8_ETC2_EAC,
+    GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC,
+    GL_COMPRESSED_R11_EAC,
+    GL_COMPRESSED_SIGNED_R11_EAC,
+    GL_COMPRESSED_RG11_EAC,
+    GL_COMPRESSED_SIGNED_RG11_EAC,
+    /* S3TC/DXT */
+    GL_COMPRESSED_RGB_S3TC_DXT1_EXT,
+    GL_COMPRESSED_RGBA_S3TC_DXT1_EXT,
+    GL_COMPRESSED_RGBA_S3TC_DXT3_EXT,
+    GL_COMPRESSED_RGBA_S3TC_DXT5_EXT,
     /* ASTC LDR */
-    0x93B0,  /* GL_COMPRESSED_RGBA_ASTC_4x4_KHR */
-    0x93B1,  /* GL_COMPRESSED_RGBA_ASTC_5x4_KHR */
-    0x93B2,  /* GL_COMPRESSED_RGBA_ASTC_5x5_KHR */
-    0x93B3,  /* GL_COMPRESSED_RGBA_ASTC_6x5_KHR */
-    0x93B4,  /* GL_COMPRESSED_RGBA_ASTC_6x6_KHR */
-    0x93B5,  /* GL_COMPRESSED_RGBA_ASTC_8x5_KHR */
-    0x93B6,  /* GL_COMPRESSED_RGBA_ASTC_8x6_KHR */
-    0x93B7,  /* GL_COMPRESSED_RGBA_ASTC_8x8_KHR */
-    0x93B8,  /* GL_COMPRESSED_RGBA_ASTC_10x5_KHR */
-    0x93B9,  /* GL_COMPRESSED_RGBA_ASTC_10x6_KHR */
-    0x93BA,  /* GL_COMPRESSED_RGBA_ASTC_10x8_KHR */
-    0x93BB,  /* GL_COMPRESSED_RGBA_ASTC_10x10_KHR */
-    0x93BC,  /* GL_COMPRESSED_RGBA_ASTC_12x10_KHR */
-    0x93BD,  /* GL_COMPRESSED_RGBA_ASTC_12x12_KHR */
+    GL_COMPRESSED_RGBA_ASTC_4x4_KHR,
+    GL_COMPRESSED_RGBA_ASTC_5x4_KHR,
+    GL_COMPRESSED_RGBA_ASTC_5x5_KHR,
+    GL_COMPRESSED_RGBA_ASTC_6x5_KHR,
+    GL_COMPRESSED_RGBA_ASTC_6x6_KHR,
+    GL_COMPRESSED_RGBA_ASTC_8x5_KHR,
+    GL_COMPRESSED_RGBA_ASTC_8x6_KHR,
+    GL_COMPRESSED_RGBA_ASTC_8x8_KHR,
+    GL_COMPRESSED_RGBA_ASTC_10x5_KHR,
+    GL_COMPRESSED_RGBA_ASTC_10x6_KHR,
+    GL_COMPRESSED_RGBA_ASTC_10x8_KHR,
+    GL_COMPRESSED_RGBA_ASTC_10x10_KHR,
+    GL_COMPRESSED_RGBA_ASTC_12x10_KHR,
+    GL_COMPRESSED_RGBA_ASTC_12x12_KHR,
 };
 #define NUM_COMPRESSED_FORMATS (sizeof(s_compressed_formats) / sizeof(s_compressed_formats[0]))
 
@@ -169,7 +169,7 @@ GL_APICALL void GL_APIENTRY glGetIntegerv(GLenum pname, GLint *params) {
             *params = 1;
             break;
         case GL_SHADER_BINARY_FORMATS:
-            *params = 0x10DE0001;  /* GL_DKSH_BINARY_FORMAT_NX */
+            *params = GL_DKSH_BINARY_FORMAT_NX;
             break;
 
         /* Bindings */
@@ -316,17 +316,17 @@ GL_APICALL void GL_APIENTRY glGetIntegerv(GLenum pname, GLint *params) {
             *params = ctx->unpack_alignment;
             break;
 
-        /* Spearmint queries */
-        case 0x8B4A: /* GL_MAX_VERTEX_UNIFORM_COMPONENTS */
+        /* GL 3.0+ queries (used by Spearmint/ioquake3) */
+        case GL_MAX_VERTEX_UNIFORM_COMPONENTS:
             *params = 1024;  /* 256 vec4 * 4 components */
             break;
-        case 0x8D57: /* GL_MAX_SAMPLES */
+        case GL_MAX_SAMPLES:
             *params = 0;     /* No MSAA */
             break;
-        case 0x8CDF: /* GL_MAX_COLOR_ATTACHMENTS */
+        case GL_MAX_COLOR_ATTACHMENTS:
             *params = 1;
             break;
-        case 0x821D: /* GL_NUM_EXTENSIONS */
+        case GL_NUM_EXTENSIONS:
             *params = 0;     /* Use glGetString(GL_EXTENSIONS) instead */
             break;
 

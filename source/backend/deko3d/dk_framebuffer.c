@@ -124,7 +124,7 @@ void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y,
     /* Allocate separate memory block for readback
      * Using a dedicated block ensures proper CPU visibility */
     size_t bufferSize = (size_t)width * (size_t)height * 4;
-    bufferSize = (bufferSize + 0xFFF) & ~0xFFF;  /* Align to 4KB */
+    bufferSize = SGL_ALIGN_UP(bufferSize, SGL_PAGE_ALIGNMENT);  /* Align to 4KB */
 
     DkMemBlock readbackMem;
     DkMemBlockMaker memMaker;
@@ -179,18 +179,7 @@ void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y,
         dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
         dk->descriptors_bound = false;
 
-        /* Re-bind render target */
-        if (dk->framebuffers) {
-            DkImageView colorView2;
-            dkImageViewDefaults(&colorView2, &dk->framebuffers[dk->current_slot]);
-            if (dk->depth_images[dk->current_slot]) {
-                DkImageView depthView2;
-                dkImageViewDefaults(&depthView2, dk->depth_images[dk->current_slot]);
-                dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView2, &depthView2);
-            } else {
-                dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView2, NULL);
-            }
-        }
+        dk_rebind_default_render_target(dk);
         return;
     }
 
@@ -230,34 +219,7 @@ void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y,
     dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
 
     /* Re-bind render target after clearing command buffer */
-    if (dk->current_fbo != 0 && dk->current_fbo_color > 0 &&
-        dk->current_fbo_color < SGL_MAX_TEXTURES &&
-        dk->texture_initialized[dk->current_fbo_color]) {
-        /* Restore FBO binding */
-        DkImageView colorView;
-        dkImageViewDefaults(&colorView, &dk->textures[dk->current_fbo_color]);
-
-        DkImageView *pDepthView = NULL;
-        DkImageView depthView;
-        if (dk->current_fbo_depth > 0 && dk->current_fbo_depth < SGL_MAX_RENDERBUFFERS &&
-            dk->renderbuffer_initialized[dk->current_fbo_depth]) {
-            dkImageViewDefaults(&depthView, &dk->renderbuffer_images[dk->current_fbo_depth]);
-            pDepthView = &depthView;
-        }
-
-        dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, pDepthView);
-    } else if (dk->framebuffers) {
-        /* Restore default framebuffer */
-        DkImageView colorView;
-        dkImageViewDefaults(&colorView, &dk->framebuffers[dk->current_slot]);
-        if (dk->depth_images[dk->current_slot]) {
-            DkImageView depthView;
-            dkImageViewDefaults(&depthView, dk->depth_images[dk->current_slot]);
-            dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, &depthView);
-        } else {
-            dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, NULL);
-        }
-    }
+    dk_rebind_render_target(dk);
 
     /* Reset descriptors_bound flag */
     dk->descriptors_bound = false;
@@ -314,7 +276,7 @@ void dk_renderbuffer_storage(sgl_backend_t *be, sgl_handle_t handle,
 
     /* Create dedicated memory block for this renderbuffer (like default depth buffer)
      * Align size to alignment requirement */
-    uint32_t alignedSize = (imgSize + imgAlign - 1) & ~(imgAlign - 1);
+    uint32_t alignedSize = SGL_ALIGN_UP(imgSize, imgAlign);
 
     DkMemBlockMaker memMaker;
     dkMemBlockMakerDefaults(&memMaker, dk->device, alignedSize);

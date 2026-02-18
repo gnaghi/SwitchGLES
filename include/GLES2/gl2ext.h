@@ -285,6 +285,53 @@ GL_APICALL void GL_APIENTRY glEGLImageTargetRenderbufferStorageOES (GLenum targe
 #define GL_ETC1_RGB8_OES                  0x8D64
 #endif /* GL_OES_compressed_ETC1_RGB8_texture */
 
+/* ETC2/EAC compressed texture formats (GLES 3.0 core, used by SwitchGLES) */
+#ifndef GL_COMPRESSED_R11_EAC
+#define GL_COMPRESSED_R11_EAC                             0x9270
+#define GL_COMPRESSED_SIGNED_R11_EAC                      0x9271
+#define GL_COMPRESSED_RG11_EAC                            0x9272
+#define GL_COMPRESSED_SIGNED_RG11_EAC                     0x9273
+#define GL_COMPRESSED_RGB8_ETC2                           0x9274
+#define GL_COMPRESSED_SRGB8_ETC2                          0x9275
+#define GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2       0x9276
+#define GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2      0x9277
+#define GL_COMPRESSED_RGBA8_ETC2_EAC                      0x9278
+#define GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC               0x9279
+#endif
+
+/* GL 3.0+ query constants used by Spearmint/ioquake3 */
+#ifndef GL_MAX_VERTEX_UNIFORM_COMPONENTS
+#define GL_MAX_VERTEX_UNIFORM_COMPONENTS  0x8B4A
+#endif
+#ifndef GL_MAX_SAMPLES
+#define GL_MAX_SAMPLES                    0x8D57
+#endif
+#ifndef GL_MAX_COLOR_ATTACHMENTS
+#define GL_MAX_COLOR_ATTACHMENTS          0x8CDF
+#endif
+#ifndef GL_NUM_EXTENSIONS
+#define GL_NUM_EXTENSIONS                 0x821D
+#endif
+
+/* Framebuffer constants (GL 3.0 core, needed for GLES2 FBO path) */
+#ifndef GL_FRAMEBUFFER_UNDEFINED
+#define GL_FRAMEBUFFER_UNDEFINED          0x8219
+#endif
+#ifndef GL_DEPTH_STENCIL_ATTACHMENT
+#define GL_DEPTH_STENCIL_ATTACHMENT       0x821A
+#endif
+#ifndef GL_READ_FRAMEBUFFER
+#define GL_READ_FRAMEBUFFER               0x8CA8
+#endif
+#ifndef GL_DRAW_FRAMEBUFFER
+#define GL_DRAW_FRAMEBUFFER               0x8CA9
+#endif
+
+/* SwitchGLES custom binary format */
+#ifndef GL_DKSH_BINARY_FORMAT_NX
+#define GL_DKSH_BINARY_FORMAT_NX          0x10DE0001
+#endif
+
 #ifndef GL_OES_compressed_paletted_texture
 #define GL_OES_compressed_paletted_texture 1
 #define GL_PALETTE4_RGB8_OES              0x8B90

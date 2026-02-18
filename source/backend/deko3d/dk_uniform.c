@@ -28,7 +28,7 @@ uint32_t dk_alloc_uniform(sgl_backend_t *be, uint32_t size) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
     /* Align size to 256 bytes (DK_UNIFORM_BUF_ALIGNMENT) */
-    uint32_t alignedSize = (size + 255) & ~255;
+    uint32_t alignedSize = SGL_ALIGN_UP(size, SGL_UNIFORM_ALIGNMENT);
 
     /* Check for overflow */
     if (dk->uniform_offset + alignedSize > SGL_UNIFORM_BUF_SIZE) {

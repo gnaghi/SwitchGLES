@@ -45,7 +45,7 @@ uint32_t dk_buffer_data(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
     /* Allocate from data memory with 256-byte alignment */
-    uint32_t aligned_offset = (dk->data_offset + 255) & ~255;
+    uint32_t aligned_offset = SGL_ALIGN_UP(dk->data_offset, SGL_UNIFORM_ALIGNMENT);
     if (aligned_offset + size > dk->client_array_base) {
         SGL_ERROR_BACKEND("Buffer allocation failed: out of memory");
         return 0;

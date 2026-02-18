@@ -7,19 +7,7 @@
 #include <string.h>
 #include <stdio.h>
 
-/* GLES2 extension constants (not in standard headers) */
-#ifndef GL_FRAMEBUFFER_UNDEFINED
-#define GL_FRAMEBUFFER_UNDEFINED 0x8219
-#endif
-#ifndef GL_DEPTH_STENCIL_ATTACHMENT
-#define GL_DEPTH_STENCIL_ATTACHMENT 0x821A
-#endif
-#ifndef GL_READ_FRAMEBUFFER
-#define GL_READ_FRAMEBUFFER 0x8CA8
-#endif
-#ifndef GL_DRAW_FRAMEBUFFER
-#define GL_DRAW_FRAMEBUFFER 0x8CA9
-#endif
+/* GL 3.0+ constants now defined in gl2ext.h */
 
 /* Framebuffer Objects */
 

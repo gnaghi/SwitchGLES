@@ -13,6 +13,60 @@
 #include "dk_internal.h"
 
 /* ============================================================================
+ * Shared Helpers
+ * ============================================================================ */
+
+void dk_rebind_default_render_target(dk_backend_data_t *dk) {
+    if (!dk->framebuffers) return;
+
+    DkImageView colorView;
+    dkImageViewDefaults(&colorView, &dk->framebuffers[dk->current_slot]);
+    if (dk->depth_images[dk->current_slot]) {
+        DkImageView depthView;
+        dkImageViewDefaults(&depthView, dk->depth_images[dk->current_slot]);
+        dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, &depthView);
+    } else {
+        dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, NULL);
+    }
+}
+
+void dk_rebind_render_target(dk_backend_data_t *dk) {
+    if (dk->current_fbo != 0 && dk->current_fbo_color > 0 &&
+        dk->current_fbo_color < SGL_MAX_TEXTURES &&
+        dk->texture_initialized[dk->current_fbo_color]) {
+        DkImageView colorView;
+        dkImageViewDefaults(&colorView, &dk->textures[dk->current_fbo_color]);
+        DkImageView *pDepthView = NULL;
+        DkImageView depthView;
+        if (dk->current_fbo_depth > 0 && dk->current_fbo_depth < SGL_MAX_RENDERBUFFERS &&
+            dk->renderbuffer_initialized[dk->current_fbo_depth]) {
+            dkImageViewDefaults(&depthView, &dk->renderbuffer_images[dk->current_fbo_depth]);
+            pDepthView = &depthView;
+        }
+        dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, pDepthView);
+    } else {
+        dk_rebind_default_render_target(dk);
+    }
+}
+
+/*
+ * Submit current command buffer, wait for GPU, and reset for continued use.
+ * Shared implementation for dk_flush() and dk_finish().
+ */
+static void dk_submit_and_reset(dk_backend_data_t *dk) {
+    DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
+    dkQueueSubmitCommands(dk->queue, cmdlist);
+    dkQueueWaitIdle(dk->queue);
+
+    /* Reset command buffer for continued use */
+    dkCmdBufClear(dk->cmdbuf);
+    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+    dk->descriptors_bound = false;
+
+    dk_rebind_default_render_target(dk);
+}
+
+/* ============================================================================
  * Frame Management
  * ============================================================================ */
 
@@ -35,17 +89,7 @@ void dk_begin_frame(sgl_backend_t *be, int slot) {
         dk->client_array_slot_end = (slot + 1) * per_slot_size;
     }
 
-    /* Bind render target - use per-slot depth buffer */
-    if (dk->framebuffers) {
-        DkImageView colorView, depthView;
-        dkImageViewDefaults(&colorView, &dk->framebuffers[slot]);
-        if (dk->depth_images[slot]) {
-            dkImageViewDefaults(&depthView, dk->depth_images[slot]);
-            dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, &depthView);
-        } else {
-            dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, NULL);
-        }
-    }
+    dk_rebind_default_render_target(dk);
 
     SGL_TRACE_BACKEND("begin_frame slot=%d", slot);
 }
@@ -126,7 +170,6 @@ void dk_wait_fence(sgl_backend_t *be, int slot) {
 void dk_flush(sgl_backend_t *be) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
-    /* Check GPU queue error state before any operation */
     if (dkQueueIsInErrorState(dk->queue)) {
         SGL_ERROR_BACKEND("flush: GPU queue in ERROR STATE — skipping");
         dk->cmdbuf_submitted = false;
@@ -134,43 +177,19 @@ void dk_flush(sgl_backend_t *be) {
     }
 
     if (dk->cmdbuf_submitted) {
-        /* Already submitted by dk_end_frame — just wait idle */
         dkQueueWaitIdle(dk->queue);
         dk->cmdbuf_submitted = false;
         SGL_TRACE_BACKEND("flush (already submitted, waited idle)");
         return;
     }
 
-    /* Submit and wait for GPU to complete */
-    DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
-    dkQueueSubmitCommands(dk->queue, cmdlist);
-    dkQueueWaitIdle(dk->queue);
-
-    /* Reset command buffer for continued use */
-    dkCmdBufClear(dk->cmdbuf);
-    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
-    dk->descriptors_bound = false;
-
-    /* Re-bind render target - use per-slot depth buffer */
-    if (dk->framebuffers) {
-        DkImageView colorView;
-        dkImageViewDefaults(&colorView, &dk->framebuffers[dk->current_slot]);
-        if (dk->depth_images[dk->current_slot]) {
-            DkImageView depthView;
-            dkImageViewDefaults(&depthView, dk->depth_images[dk->current_slot]);
-            dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, &depthView);
-        } else {
-            dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, NULL);
-        }
-    }
-
+    dk_submit_and_reset(dk);
     SGL_TRACE_BACKEND("flush");
 }
 
 void dk_finish(sgl_backend_t *be) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
-    /* Check GPU queue error state before any operation */
     if (dkQueueIsInErrorState(dk->queue)) {
         SGL_ERROR_BACKEND("finish: GPU queue in ERROR STATE — skipping");
         dk->cmdbuf_submitted = false;
@@ -178,37 +197,15 @@ void dk_finish(sgl_backend_t *be) {
     }
 
     if (dk->cmdbuf_submitted) {
-        /* Cmdbuf was already finished and submitted by dk_end_frame (eglSwapBuffers).
-         * Just wait for the queue to become idle — do NOT call dkCmdBufFinishList again. */
+        /* Already submitted by dk_end_frame — just wait idle,
+         * do NOT call dkCmdBufFinishList again. */
         dkQueueWaitIdle(dk->queue);
         dk->cmdbuf_submitted = false;
         SGL_TRACE_BACKEND("finish (already submitted, waited idle)");
         return;
     }
 
-    /* Submit and wait for GPU to complete */
-    DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
-    dkQueueSubmitCommands(dk->queue, cmdlist);
-    dkQueueWaitIdle(dk->queue);
-
-    /* Reset command buffer for continued use */
-    dkCmdBufClear(dk->cmdbuf);
-    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
-    dk->descriptors_bound = false;
-
-    /* Re-bind render target - use per-slot depth buffer */
-    if (dk->framebuffers) {
-        DkImageView colorView;
-        dkImageViewDefaults(&colorView, &dk->framebuffers[dk->current_slot]);
-        if (dk->depth_images[dk->current_slot]) {
-            DkImageView depthView;
-            dkImageViewDefaults(&depthView, dk->depth_images[dk->current_slot]);
-            dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, &depthView);
-        } else {
-            dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, NULL);
-        }
-    }
-
+    dk_submit_and_reset(dk);
     SGL_TRACE_BACKEND("finish");
 }
 
