@@ -100,7 +100,8 @@ GL_APICALL void GL_APIENTRY glGenTextures(GLsizei n, GLuint *textures) {
 GL_APICALL void GL_APIENTRY glDeleteTextures(GLsizei n, const GLuint *textures) {
     GET_CTX();
 
-    if (n < 0 || !textures) return;
+    if (n < 0) { sgl_set_error(ctx, GL_INVALID_VALUE); return; }
+    if (!textures) return;
 
     for (GLsizei i = 0; i < n; i++) {
         GLuint id = textures[i];
@@ -327,19 +328,40 @@ GL_APICALL void GL_APIENTRY glTexParameteri(GLenum target, GLenum pname, GLint p
 
     GLuint tex_id = ctx->bound_textures[ctx->active_texture_unit];
     sgl_texture_t *tex = GET_TEXTURE(tex_id);
-    if (!tex) return;
+    if (!tex) {
+        sgl_set_error(ctx, GL_INVALID_OPERATION);
+        return;
+    }
 
     switch (pname) {
         case GL_TEXTURE_MIN_FILTER:
+            if (param != GL_NEAREST && param != GL_LINEAR &&
+                param != GL_NEAREST_MIPMAP_NEAREST && param != GL_LINEAR_MIPMAP_NEAREST &&
+                param != GL_NEAREST_MIPMAP_LINEAR && param != GL_LINEAR_MIPMAP_LINEAR) {
+                sgl_set_error(ctx, GL_INVALID_ENUM);
+                return;
+            }
             tex->min_filter = (GLenum)param;
             break;
         case GL_TEXTURE_MAG_FILTER:
+            if (param != GL_NEAREST && param != GL_LINEAR) {
+                sgl_set_error(ctx, GL_INVALID_ENUM);
+                return;
+            }
             tex->mag_filter = (GLenum)param;
             break;
         case GL_TEXTURE_WRAP_S:
+            if (param != GL_REPEAT && param != GL_CLAMP_TO_EDGE && param != GL_MIRRORED_REPEAT) {
+                sgl_set_error(ctx, GL_INVALID_ENUM);
+                return;
+            }
             tex->wrap_s = (GLenum)param;
             break;
         case GL_TEXTURE_WRAP_T:
+            if (param != GL_REPEAT && param != GL_CLAMP_TO_EDGE && param != GL_MIRRORED_REPEAT) {
+                sgl_set_error(ctx, GL_INVALID_ENUM);
+                return;
+            }
             tex->wrap_t = (GLenum)param;
             break;
         default:

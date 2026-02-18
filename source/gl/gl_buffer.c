@@ -28,7 +28,8 @@ GL_APICALL void GL_APIENTRY glGenBuffers(GLsizei n, GLuint *buffers) {
 GL_APICALL void GL_APIENTRY glDeleteBuffers(GLsizei n, const GLuint *buffers) {
     GET_CTX();
 
-    if (n < 0 || !buffers) return;
+    if (n < 0) { sgl_set_error(ctx, GL_INVALID_VALUE); return; }
+    if (!buffers) return;
 
     for (GLsizei i = 0; i < n; i++) {
         GLuint id = buffers[i];

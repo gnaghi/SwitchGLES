@@ -4,8 +4,6 @@
  */
 
 #include "gl_common.h"
-#include <string.h>
-#include <stdio.h>
 
 /* GL 3.0+ constants now defined in gl2ext.h */
 
@@ -33,7 +31,8 @@ GL_APICALL void GL_APIENTRY glGenFramebuffers(GLsizei n, GLuint *framebuffers) {
 GL_APICALL void GL_APIENTRY glDeleteFramebuffers(GLsizei n, const GLuint *framebuffers) {
     GET_CTX();
 
-    if (n < 0 || !framebuffers) return;
+    if (n < 0) { sgl_set_error(ctx, GL_INVALID_VALUE); return; }
+    if (!framebuffers) return;
 
     for (GLsizei i = 0; i < n; i++) {
         GLuint id = framebuffers[i];
@@ -333,6 +332,9 @@ GL_APICALL void GL_APIENTRY glGetFramebufferAttachmentParameteriv(GLenum target,
         case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL:
             *params = 0;
             break;
+        case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_CUBE_MAP_FACE:
+            *params = 0;  /* Always 0 for non-cubemap attachments */
+            break;
         default:
             sgl_set_error(ctx, GL_INVALID_ENUM);
             break;
@@ -363,7 +365,8 @@ GL_APICALL void GL_APIENTRY glGenRenderbuffers(GLsizei n, GLuint *renderbuffers)
 GL_APICALL void GL_APIENTRY glDeleteRenderbuffers(GLsizei n, const GLuint *renderbuffers) {
     GET_CTX();
 
-    if (n < 0 || !renderbuffers) return;
+    if (n < 0) { sgl_set_error(ctx, GL_INVALID_VALUE); return; }
+    if (!renderbuffers) return;
 
     for (GLsizei i = 0; i < n; i++) {
         GLuint id = renderbuffers[i];
@@ -419,6 +422,15 @@ GL_APICALL void GL_APIENTRY glRenderbufferStorage(GLenum target, GLenum internal
 
     if (width > 8192 || height > 8192) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
+    /* Validate internalformat (GLES2 spec + common extensions) */
+    if (internalformat != GL_RGBA4 && internalformat != GL_RGB5_A1 &&
+        internalformat != GL_RGB565 && internalformat != GL_DEPTH_COMPONENT16 &&
+        internalformat != GL_STENCIL_INDEX8 && internalformat != GL_DEPTH_COMPONENT &&
+        internalformat != 0x88F0 /* GL_DEPTH24_STENCIL8 */) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
     }
 
