@@ -25,6 +25,47 @@
 #define DK_CUBEMAP_ALL_FACES 0x3F
 
 /* ============================================================================
+ * GLES2 Format Helpers (Luminance / Alpha / LuminanceAlpha)
+ *
+ * deko3d stores these as R8 or RG8; DkImageView.swizzle remaps channels
+ * so the shader sees the correct RGBA values at zero GPU cost.
+ * ============================================================================ */
+
+/* Apply GLES2 format-specific channel swizzle to an image view */
+static void dk_apply_format_swizzle(DkImageView *view, GLenum gl_format) {
+    switch (gl_format) {
+        case GL_LUMINANCE:
+            view->swizzle[0] = DkImageSwizzle_Red;   /* R = L */
+            view->swizzle[1] = DkImageSwizzle_Red;   /* G = L */
+            view->swizzle[2] = DkImageSwizzle_Red;   /* B = L */
+            view->swizzle[3] = DkImageSwizzle_One;   /* A = 1.0 */
+            break;
+        case GL_ALPHA:
+            view->swizzle[0] = DkImageSwizzle_Zero;  /* R = 0 */
+            view->swizzle[1] = DkImageSwizzle_Zero;  /* G = 0 */
+            view->swizzle[2] = DkImageSwizzle_Zero;  /* B = 0 */
+            view->swizzle[3] = DkImageSwizzle_Red;   /* A = stored in R channel */
+            break;
+        case GL_LUMINANCE_ALPHA:
+            view->swizzle[0] = DkImageSwizzle_Red;   /* R = L (stored in R) */
+            view->swizzle[1] = DkImageSwizzle_Red;   /* G = L */
+            view->swizzle[2] = DkImageSwizzle_Red;   /* B = L */
+            view->swizzle[3] = DkImageSwizzle_Green; /* A = A (stored in G) */
+            break;
+        default: break; /* RGBA/RGB: default swizzle is identity */
+    }
+}
+
+/* Get bytes-per-pixel for staging buffer size computation */
+static uint32_t dk_gl_format_bpp(GLenum gl_format) {
+    switch (gl_format) {
+        case GL_LUMINANCE: case GL_ALPHA: return 1;
+        case GL_LUMINANCE_ALPHA: return 2;
+        default: return 4; /* RGBA and RGB (RGB expanded to RGBA on upload) */
+    }
+}
+
+/* ============================================================================
  * Cubemap Helpers
  * ============================================================================ */
 
@@ -84,6 +125,7 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
         dk->texture_height[handle] = height;
         dk->texture_mip_levels[handle] = 1;
         dk->texture_format[handle] = layoutMaker.format;
+        dk->texture_gl_format[handle] = (GLenum)internalformat;
 
         dk->texture_min_filter[handle] = GL_LINEAR;
         dk->texture_mag_filter[handle] = GL_LINEAR;
@@ -101,7 +143,8 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
     if (pixels) {
         DkImage *texImage = &dk->textures[handle];
 
-        uint32_t row_size = width * 4;
+        uint32_t bpp = dk_gl_format_bpp(format);
+        uint32_t row_size = width * bpp;
         uint32_t aligned_row_size = SGL_ALIGN_UP(row_size, DK_LINEAR_STRIDE_ALIGNMENT);
         uint32_t staging_size = aligned_row_size * height;
 
@@ -116,11 +159,8 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
         const uint8_t *src = (const uint8_t*)pixels;
 
         /* Copy pixels to staging buffer */
-        if (format == GL_RGBA && type == GL_UNSIGNED_BYTE) {
-            for (int y = 0; y < height; y++) {
-                memcpy(staging + y * aligned_row_size, src + y * width * 4, width * 4);
-            }
-        } else if (format == GL_RGB && type == GL_UNSIGNED_BYTE) {
+        if (format == GL_RGB && type == GL_UNSIGNED_BYTE) {
+            /* Convert RGB to RGBA (bpp=4 for staging) */
             for (int y = 0; y < height; y++) {
                 uint8_t *dst_row = staging + y * aligned_row_size;
                 const uint8_t *src_row = src + y * width * 3;
@@ -132,8 +172,9 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
                 }
             }
         } else {
+            /* RGBA, LUMINANCE, ALPHA, LUMINANCE_ALPHA: copy bpp bytes per pixel */
             for (int y = 0; y < height; y++) {
-                memcpy(staging + y * aligned_row_size, src + y * width * 4, width * 4);
+                memcpy(staging + y * aligned_row_size, src + y * width * bpp, width * bpp);
             }
         }
 
@@ -177,6 +218,7 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
             DkImageView imageView;
             dkImageViewDefaults(&imageView, texImage);
             imageView.type = DkImageType_Cubemap;
+            dk_apply_format_swizzle(&imageView, dk->texture_gl_format[handle]);
 
             DkImageDescriptor *imgDesc = &dk->texture_descriptors[handle];
             dkImageDescriptorInitialize(imgDesc, &imageView, false, false);
@@ -261,6 +303,7 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     dk->texture_height[handle] = height;
     dk->texture_mip_levels[handle] = mip_levels;
     dk->texture_format[handle] = layoutMaker.format;
+    dk->texture_gl_format[handle] = (GLenum)internalformat;
 
     /* Initialize default sampler parameters (GL defaults) */
     dk->texture_min_filter[handle] = GL_NEAREST_MIPMAP_LINEAR;  /* GL default */
@@ -268,17 +311,19 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     dk->texture_wrap_s[handle] = GL_REPEAT;
     dk->texture_wrap_t[handle] = GL_REPEAT;
 
-    /* Create image descriptor */
+    /* Create image descriptor with format-specific swizzle */
     DkImageView imageView;
     dkImageViewDefaults(&imageView, texImage);
+    dk_apply_format_swizzle(&imageView, internalformat);
 
     DkImageDescriptor *imgDesc = &dk->texture_descriptors[handle];
     dkImageDescriptorInitialize(imgDesc, &imageView, false, false);
 
     /* Upload pixel data if provided - use staging buffer and GPU copy like legacy */
     if (pixels) {
-        /* Calculate source size with stride alignment (like legacy) */
-        uint32_t row_size = width * 4;  /* RGBA */
+        /* Calculate source size with stride alignment (bpp-aware) */
+        uint32_t bpp = dk_gl_format_bpp(format);
+        uint32_t row_size = width * bpp;
         uint32_t aligned_row_size = SGL_ALIGN_UP(row_size, DK_LINEAR_STRIDE_ALIGNMENT);
         uint32_t staging_size = aligned_row_size * height;
 
@@ -296,15 +341,8 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
              * OpenGL texture V=0 samples the bottom of the texture content.
              * deko3d texture V=0 samples the TOP of the texture storage (row 0).
              * By storing GL row 0 (bottom) at storage row 0 (top), deko3d V=0
-             * will sample what GL expects at V=0 (bottom content).
-             *
-             * This means the texture appears "upside down" in GPU memory
-             * compared to GL's logical view, but sampling works correctly. */
-            if (format == GL_RGBA && type == GL_UNSIGNED_BYTE) {
-                for (int y = 0; y < height; y++) {
-                    memcpy(staging + y * aligned_row_size, src + y * width * 4, width * 4);
-                }
-            } else if (format == GL_RGB && type == GL_UNSIGNED_BYTE) {
+             * will sample what GL expects at V=0 (bottom content). */
+            if (format == GL_RGB && type == GL_UNSIGNED_BYTE) {
                 /* Convert RGB to RGBA, no Y-flip */
                 for (int y = 0; y < height; y++) {
                     uint8_t *dst_row = staging + y * aligned_row_size;
@@ -317,10 +355,9 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
                     }
                 }
             } else {
-                /* For other formats, just copy with stride, no Y-flip */
-                int src_bpp = 4;  /* Default to RGBA */
+                /* RGBA, LUMINANCE, ALPHA, LUMINANCE_ALPHA: copy bpp bytes per pixel */
                 for (int y = 0; y < height; y++) {
-                    memcpy(staging + y * aligned_row_size, src + y * width * src_bpp, width * src_bpp);
+                    memcpy(staging + y * aligned_row_size, src + y * width * bpp, width * bpp);
                 }
             }
 
@@ -375,8 +412,9 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     /* Get the existing DkImage */
     DkImage *texImage = &dk->textures[handle];
 
-    /* Calculate source size with stride alignment */
-    uint32_t row_size = width * 4;  /* RGBA */
+    /* Calculate source size with stride alignment (bpp from stored GL format) */
+    uint32_t bpp = dk_gl_format_bpp(dk->texture_gl_format[handle]);
+    uint32_t row_size = width * bpp;
     uint32_t aligned_row_size = SGL_ALIGN_UP(row_size, DK_LINEAR_STRIDE_ALIGNMENT);
     uint32_t staging_size = aligned_row_size * height;
 
@@ -394,11 +432,7 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
     /* Copy pixel data to staging buffer with proper stride.
      * No Y-flip needed - texture storage matches GL row order (see glTexImage2D comment). */
-    if (format == GL_RGBA && type == GL_UNSIGNED_BYTE) {
-        for (int y = 0; y < height; y++) {
-            memcpy(staging + y * aligned_row_size, src + y * width * 4, width * 4);
-        }
-    } else if (format == GL_RGB && type == GL_UNSIGNED_BYTE) {
+    if (format == GL_RGB && type == GL_UNSIGNED_BYTE) {
         /* Convert RGB to RGBA, no Y-flip */
         for (int y = 0; y < height; y++) {
             uint8_t *dst_row = staging + y * aligned_row_size;
@@ -411,9 +445,9 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
             }
         }
     } else {
-        /* For other formats, just copy with stride, no Y-flip */
+        /* RGBA, LUMINANCE, ALPHA, LUMINANCE_ALPHA: copy bpp bytes per pixel */
         for (int y = 0; y < height; y++) {
-            memcpy(staging + y * aligned_row_size, src + y * width * 4, width * 4);
+            memcpy(staging + y * aligned_row_size, src + y * width * bpp, width * bpp);
         }
     }
 
@@ -803,6 +837,7 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     dk->texture_height[handle] = height;
     dk->texture_mip_levels[handle] = 1;
     dk->texture_format[handle] = layoutMaker.format;
+    dk->texture_gl_format[handle] = (GLenum)internalformat;
 
     dk->texture_min_filter[handle] = GL_NEAREST;
     dk->texture_mag_filter[handle] = GL_LINEAR;
@@ -815,6 +850,7 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
     DkImageView texView;
     dkImageViewDefaults(&texView, texImage);
+    dk_apply_format_swizzle(&texView, internalformat);
 
     /* === Step 4: CPU reads readback data, Y-flips, writes to staging ===
      * Readback buffer has storage order (top of screen at row 0).
@@ -866,7 +902,8 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
     /* === Step 6: Create descriptor AFTER upload completes ===
      * The standalone deko3d test creates the descriptor after CopyBufferToImage.
-     * This ensures the image metadata is fully consistent after the DMA copy. */
+     * This ensures the image metadata is fully consistent after the DMA copy.
+     * Swizzle was already applied to texView above. */
     DkImageDescriptor *imgDesc = &dk->texture_descriptors[handle];
     dkImageDescriptorInitialize(imgDesc, &texView, false, false);
 
@@ -1017,9 +1054,10 @@ void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
      * Also recreate the descriptor to ensure consistency after the DMA copy. */
     dk->texture_used_as_rt[handle] = true;
 
-    /* Refresh descriptor after sub-image update */
+    /* Refresh descriptor after sub-image update (preserve swizzle) */
     DkImageView updatedView;
     dkImageViewDefaults(&updatedView, texImage);
+    dk_apply_format_swizzle(&updatedView, dk->texture_gl_format[handle]);
     DkImageDescriptor *imgDesc = &dk->texture_descriptors[handle];
     dkImageDescriptorInitialize(imgDesc, &updatedView, false, false);
 

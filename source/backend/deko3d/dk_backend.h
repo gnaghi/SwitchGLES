@@ -85,6 +85,7 @@ typedef struct dk_backend_data {
     uint32_t texture_height[SGL_MAX_TEXTURES];
     uint32_t texture_mip_levels[SGL_MAX_TEXTURES];
     DkImageFormat texture_format[SGL_MAX_TEXTURES];
+    GLenum texture_gl_format[SGL_MAX_TEXTURES];  /* Original GL internalformat (for swizzle/bpp) */
 
     /* Texture sampler parameters - indexed by texture ID */
     GLenum texture_min_filter[SGL_MAX_TEXTURES];

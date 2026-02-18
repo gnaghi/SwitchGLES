@@ -123,6 +123,9 @@ DkImageFormat dk_convert_format(GLenum internalformat, GLenum format, GLenum typ
     if (format == GL_ALPHA && type == GL_UNSIGNED_BYTE) {
         return DkImageFormat_R8_Unorm;
     }
+    if (format == GL_LUMINANCE_ALPHA && type == GL_UNSIGNED_BYTE) {
+        return DkImageFormat_RG8_Unorm;
+    }
     return DkImageFormat_RGBA8_Unorm;
 }
 
