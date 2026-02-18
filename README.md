@@ -4,7 +4,7 @@
 
 [![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)]()
-[![Tests](https://img.shields.io/badge/tests-100%2F100%20pass-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-226%2F226%20pass-brightgreen.svg)]()
 
 SwitchGLES provides a standards-compliant OpenGL ES 2.0 and EGL 1.4 API for Nintendo Switch homebrew applications. It translates graphics calls to deko3d, the native low-level graphics API.
 
@@ -12,8 +12,8 @@ SwitchGLES provides a standards-compliant OpenGL ES 2.0 and EGL 1.4 API for Nint
 
 - **Full OpenGL ES 2.0 core** - All functions implemented and validated
 - **EGL 1.4 support** - Standard display/context management
-- **SDL2 compatible** - Works with SDL2 for easy porting
-- **Comprehensive test suite** - 100 automated tests, all passing
+- **Runtime shader compilation** - GLSL 4.60 and GLSL ES 1.00 via libuam
+- **Comprehensive test suite** - 226 hardware-validated tests, all passing
 
 ## Features
 
@@ -27,7 +27,8 @@ SwitchGLES provides a standards-compliant OpenGL ES 2.0 and EGL 1.4 API for Nint
 ### OpenGL ES 2.0
 
 - **Programmable Pipeline**
-  - Vertex and fragment shaders (precompiled DKSH format)
+  - Vertex and fragment shaders (precompiled DKSH or runtime-compiled GLSL)
+  - GLSL ES 1.00 transpiler (automatic conversion to GLSL 4.60)
   - All uniform types (`float`, `int`, `vec2/3/4`, `mat2/3/4`)
   - Uniform buffers with `std140` layout
   - Attribute binding (`glVertexAttribPointer`)
@@ -40,8 +41,8 @@ SwitchGLES provides a standards-compliant OpenGL ES 2.0 and EGL 1.4 API for Nint
 
 - **Textures**
   - 2D textures and Cube maps
-  - Multiple formats: RGBA, RGB, luminance, alpha
-  - Compressed formats: ASTC, ETC2, BC/S3TC
+  - Multiple formats: RGBA, RGB, luminance, alpha, luminance-alpha
+  - Compressed formats: ASTC, ETC2, EAC, BC/S3TC, RGTC, BPTC
   - Filtering, wrap modes, mipmaps (`glGenerateMipmap`)
   - `glTexSubImage2D`, `glCopyTexImage2D`, `glCopyTexSubImage2D`
   - Multiple texture units (0-7)
@@ -67,6 +68,7 @@ SwitchGLES provides a standards-compliant OpenGL ES 2.0 and EGL 1.4 API for Nint
 - **devkitPro** with devkitA64 and libnx
 - **deko3d** library (included with devkitPro)
 - **UAM** shader compiler (included with devkitPro)
+- **libuam** (optional, for runtime shader compilation)
 
 ### Build and Install
 
@@ -120,21 +122,20 @@ int main() {
 }
 ```
 
-## Important: Shader Compilation
+## Shader Compilation
 
-**deko3d does not support runtime GLSL compilation.** All shaders must be precompiled at build time using the UAM compiler.
+SwitchGLES supports both **precompiled shaders** (recommended for production) and **runtime compilation** via libuam.
 
-### Compiling Shaders
+### Option 1: Precompiled Shaders
+
+Compile shaders offline with the UAM compiler:
 
 ```bash
-# Compile vertex shader
 uam -s vert shader.vert.glsl -o shader.vert.dksh
-
-# Compile fragment shader
 uam -s frag shader.frag.glsl -o shader.frag.dksh
 ```
 
-### Loading Shaders at Runtime
+Load precompiled DKSH files at runtime:
 
 ```c
 #include <GLES2/gl2sgl.h>  // SwitchGLES extensions
@@ -142,11 +143,9 @@ uam -s frag shader.frag.glsl -o shader.frag.dksh
 GLuint vs = glCreateShader(GL_VERTEX_SHADER);
 GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
 
-// Load precompiled DKSH files
 sgl_load_shader_from_file(vs, "romfs:/shader.vert.dksh");
 sgl_load_shader_from_file(fs, "romfs:/shader.frag.dksh");
 
-// Link program as usual
 GLuint program = glCreateProgram();
 glAttachShader(program, vs);
 glAttachShader(program, fs);
@@ -154,26 +153,17 @@ glLinkProgram(program);
 glUseProgram(program);
 ```
 
-### Shader Requirements
-
-All shaders must use GLSL 460 with **UBO syntax** (std140 layout):
+Precompiled shaders must use **GLSL 4.60** with **UBO syntax** (std140 layout):
 
 ```glsl
 #version 460
 
-// Uniforms MUST use UBO syntax with std140 layout
 layout(std140, binding = 0) uniform MatrixBlock {
     mat4 u_matrix;
 };
 
-layout(std140, binding = 1) uniform ColorBlock {
-    vec4 u_color;
-};
-
-// Explicit locations for attributes
 layout(location = 0) in vec3 a_position;
 layout(location = 1) in vec2 a_texcoord;
-
 layout(location = 0) out vec2 v_texcoord;
 
 void main() {
@@ -182,11 +172,45 @@ void main() {
 }
 ```
 
-**Note:** Classic `uniform mat4 u_matrix;` syntax is NOT supported. Use UBO blocks.
+### Option 2: Runtime Compilation (libuam)
+
+Enable runtime compilation in your Makefile:
+
+```makefile
+CFLAGS += -DSGL_ENABLE_RUNTIME_COMPILER
+LIBS := -lSwitchGLES -luam -ldeko3d -lnx -lstdc++ -lm
+```
+
+Then use standard GL shader calls with either **GLSL 4.60** or **GLSL ES 1.00** source:
+
+```c
+// GLSL 4.60 (native deko3d syntax)
+const char *src = "#version 460\n"
+    "layout(location=0) in vec3 pos;\n"
+    "void main() { gl_Position = vec4(pos, 1.0); }";
+
+// Or GLSL ES 1.00 (automatically transpiled to 4.60)
+const char *src = "#version 100\n"
+    "attribute vec3 pos;\n"
+    "void main() { gl_Position = vec4(pos, 1.0); }";
+
+GLuint vs = glCreateShader(GL_VERTEX_SHADER);
+glShaderSource(vs, 1, &src, NULL);
+glCompileShader(vs);
+
+GLint status;
+glGetShaderiv(vs, GL_COMPILE_STATUS, &status);
+```
+
+The built-in transpiler handles GLSL ES 1.00 → 4.60 conversion automatically:
+- `attribute` / `varying` → `in` / `out`
+- `texture2D()` → `texture()`
+- `gl_FragColor` → layout output
+- Adds `#version 460` and UBO wrappers
 
 ### Registering Custom Uniforms
 
-Since deko3d shaders are precompiled with explicit binding numbers, SwitchGLES needs to know which binding to use for each uniform name:
+deko3d uses explicit UBO binding numbers. SwitchGLES needs to know which binding to use for each uniform name:
 
 ```c
 #include <GLES2/gl2sgl.h>
@@ -218,7 +242,12 @@ This copies:
 
 After installation:
 ```makefile
+# Without runtime compilation
 LIBS := -lSwitchGLES -ldeko3d -lnx
+
+# With runtime compilation (add libuam)
+CFLAGS += -DSGL_ENABLE_RUNTIME_COMPILER
+LIBS := -lSwitchGLES -luam -ldeko3d -lnx -lstdc++ -lm
 ```
 
 ### Option 2: Use from Local Path
@@ -228,27 +257,6 @@ SWITCHGLES_DIR := /path/to/SwitchGLES
 INCLUDES += $(SWITCHGLES_DIR)/include
 LIBDIRS += $(SWITCHGLES_DIR)/lib
 LIBS := -lSwitchGLES -ldeko3d -lnx
-```
-
-## SDL2 Integration
-
-SwitchGLES works with SDL2 for easy porting of existing applications.
-
-See `SDL/README_SWITCHGLES.md` for complete instructions on building SDL2 with the SwitchGLES backend.
-
-```c
-// SDL2 + SwitchGLES example
-SDL_Init(SDL_INIT_VIDEO);
-SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-
-SDL_Window *window = SDL_CreateWindow("My App", 0, 0, 1280, 720, SDL_WINDOW_OPENGL);
-SDL_GLContext context = SDL_GL_CreateContext(window);
-
-// Use standard GL calls...
-glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
-glClear(GL_COLOR_BUFFER_BIT);
-SDL_GL_SwapWindow(window);
 ```
 
 ## API Coverage
@@ -298,7 +306,7 @@ SDL_GL_SwapWindow(window);
 ```c
 #include <GLES2/gl2sgl.h>
 
-// Shader loading
+// Shader loading (precompiled DKSH)
 bool sgl_load_shader_from_file(GLuint shader, const char *path);
 
 // Uniform registration
@@ -308,15 +316,24 @@ void sglClearUniformRegistry(void);
 // Constants
 #define SGL_STAGE_VERTEX   0
 #define SGL_STAGE_FRAGMENT 1
+
+// Reported GL extensions
+GL_EXT_blend_minmax
+GL_OES_element_index_uint
+GL_OES_texture_npot
+GL_KHR_texture_compression_astc_ldr
+GL_EXT_texture_compression_s3tc
+GL_EXT_texture_compression_rgtc
+GL_EXT_texture_compression_bptc
+GL_OES_compressed_ETC1_RGB8_texture
 ```
 
 ### Known Limitations
 
 | Limitation | Notes |
 |------------|-------|
-| Runtime shader compilation | Not supported - use precompiled DKSH |
+| glLineWidth | Not supported by Switch GPU hardware (would need geometry shader) |
 | GL_UNSIGNED_BYTE indices | Auto-converted to 16-bit (Maxwell GPU limitation) |
-| Stencil + colorMask(0,0,0,0) | May not work correctly on some operations |
 
 ## Technical Details
 
@@ -324,10 +341,11 @@ void sglClearUniformRegistry(void);
 
 | Memory Pool | Size | Purpose |
 |-------------|------|---------|
-| Code memory | 64 KB | Shader code |
-| Data memory | 16 MB | Vertex/index buffers, uniforms |
+| Code memory | 4 MB | Shader DKSH binaries |
+| Command buffers | 1 MB x 3 | Per-slot command buffers (triple-buffered) |
+| Data memory | 16 MB | Vertex/index buffers, client arrays, uniforms |
 | Texture memory | 32 MB | Texture images |
-| Descriptor memory | 4 KB | Texture/sampler descriptors |
+| Descriptor memory | 16 KB | Image + sampler descriptors |
 
 ### Important: Uniforms Must Be Set Every Frame
 
@@ -354,8 +372,8 @@ void render() {
 ## Troubleshooting
 
 ### Black screen
-- Check shader paths (use romfs:/ prefix)
-- Ensure shaders use UBO syntax, not classic uniforms
+- Check shader paths (use romfs:/ prefix for precompiled DKSH)
+- Precompiled shaders must use UBO syntax (`layout(std140, binding=N) uniform Block { ... }`)
 - Verify `eglSwapBuffers` is called
 
 ### Object appears then disappears
@@ -371,9 +389,9 @@ void render() {
 |---------|-------------|
 | `01_textured_quad` | Basic textured quad - texture loading and UV mapping |
 | `02_es2gears` | Classic gears demo - animated 3D scene with lighting |
-| `03_fbo` | Framebuffer Objects - render-to-texture (14 tests) |
+| `03_fbo` | Framebuffer Objects - render-to-texture |
 | `04_cubemap` | Cubemap textures - environment mapping |
-| `validation_test` | Comprehensive test suite (100 tests) |
+| `validation_test` | Comprehensive test suite (226 tests) |
 
 Build and run an example:
 ```bash
@@ -389,5 +407,6 @@ MIT License - See LICENSE file
 ## Credits
 
 - Built on [deko3d](https://github.com/devkitPro/deko3d) by fincs
+- Runtime shader compilation via [libuam](https://github.com/gnaghi/libuam)
 - Architecture inspired by [GLOVE](https://github.com/aspect/glove) (GL Over Vulkan)
 - EGL/GLES2 headers from [Khronos Group](https://www.khronos.org/)
