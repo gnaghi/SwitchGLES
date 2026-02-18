@@ -11,6 +11,10 @@
 #ifdef SGL_ENABLE_RUNTIME_COMPILER
 #include <libuam.h>
 #include <malloc.h>  /* memalign — needed for 256-byte aligned DKSH buffer */
+#include "../transpiler/glsl_transpiler.h"
+/* Forward-declare packed uniform API (defined in gl_uniform.c, declared in gl2sgl.h) */
+extern GLboolean sglRegisterPackedUniform(const GLchar *name, GLint stage, GLint binding, GLint byte_offset);
+extern void sglSetPackedUBOSize(GLint stage, GLint binding, GLint size);
 #endif
 
 /* Shader Objects */
@@ -99,9 +103,101 @@ GL_APICALL void GL_APIENTRY glShaderSource(GLuint shader, GLsizei count, const G
 
     /* Reset compilation state */
     sh->compiled = false;
+    sh->needs_transpile = false;
 
     SGL_TRACE_SHADER("glShaderSource(%u, %d) - %zu bytes", shader, count, total);
 }
+
+#ifdef SGL_ENABLE_RUNTIME_COMPILER
+/*
+ * sgl_compile_glsl460 - Compile GLSL 4.60 source to DKSH and load into backend.
+ *
+ * Shared helper used by both glCompileShader (for direct GLSL 460 source)
+ * and glLinkProgram (for transpiled ES 1.00 → 460 source).
+ *
+ * Returns true on success. Sets sh->info_log on failure.
+ */
+static bool sgl_compile_glsl460(sgl_context_t *ctx, GLuint shader_id,
+                                 sgl_shader_t *sh, const char *glsl_source) {
+    DkStage stage;
+    if (sh->type == GL_VERTEX_SHADER) {
+        stage = DkStage_Vertex;
+    } else if (sh->type == GL_FRAGMENT_SHADER) {
+        stage = DkStage_Fragment;
+    } else {
+        sh->info_log = strdup("ERROR: Unsupported shader type\n");
+        return false;
+    }
+
+    uam_compiler *compiler = uam_create_compiler(stage);
+    if (!compiler) {
+        sh->info_log = strdup("ERROR: Failed to create shader compiler\n");
+        return false;
+    }
+
+    bool result = false;
+
+    if (uam_compile_dksh(compiler, glsl_source)) {
+        size_t dksh_size = uam_get_code_size(compiler);
+
+        printf("[SGL-RT] shader %u: DKSH size=%zu align256=%d GPRs=%d\n",
+               shader_id, dksh_size, (int)(dksh_size % 256), uam_get_num_gprs(compiler));
+        fflush(stdout);
+
+        /* CRITICAL: Buffer MUST be 256-byte aligned for libuam's pa256(). */
+        size_t alloc_size = (dksh_size + 4095) & ~(size_t)4095;
+        void *dksh = memalign(256, alloc_size);
+        if (dksh) {
+            memset(dksh, 0, alloc_size);
+            uam_write_code(compiler, dksh);
+
+            if (ctx->backend && ctx->backend->ops->load_shader_binary) {
+                result = ctx->backend->ops->load_shader_binary(
+                    ctx->backend, shader_id, dksh, dksh_size);
+            } else {
+                sh->info_log = strdup("ERROR: Backend does not support shader loading\n");
+            }
+
+            free(dksh);
+        } else {
+            sh->info_log = strdup("ERROR: Out of memory for compiled shader\n");
+        }
+
+        const char *log = uam_get_error_log(compiler);
+        if (log && log[0] != '\0' && !sh->info_log) {
+            sh->info_log = strdup(log);
+        }
+    } else {
+        const char *log = uam_get_error_log(compiler);
+        sh->info_log = (log && log[0]) ? strdup(log) : strdup("ERROR: Compilation failed\n");
+    }
+
+    uam_free_compiler(compiler);
+    return result;
+}
+
+/*
+ * Detect if shader source is GLSL ES 1.00 (needs transpilation).
+ * Returns true if #version 100 or no #version directive found.
+ */
+static bool sgl_is_es100_source(const char *source) {
+    const char *p = source;
+    /* Skip leading whitespace and empty lines */
+    while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+
+    if (strncmp(p, "#version", 8) == 0) {
+        p += 8;
+        while (*p == ' ' || *p == '\t') p++;
+        int ver = atoi(p);
+        if (ver == 100) return true;
+        /* #version 300 es could also be transpiled in future */
+        return false;
+    }
+
+    /* No #version directive at all → treat as ES 1.00 */
+    return true;
+}
+#endif /* SGL_ENABLE_RUNTIME_COMPILER */
 
 GL_APICALL void GL_APIENTRY glCompileShader(GLuint shader) {
     GET_CTX();
@@ -117,6 +213,8 @@ GL_APICALL void GL_APIENTRY glCompileShader(GLuint shader) {
         sh->info_log = NULL;
     }
 
+    sh->needs_transpile = false;
+
     /* If no source set, mark as compiled for precompiled path (glShaderBinary) */
     if (!sh->source) {
         sh->compiled = true;
@@ -124,83 +222,16 @@ GL_APICALL void GL_APIENTRY glCompileShader(GLuint shader) {
     }
 
 #ifdef SGL_ENABLE_RUNTIME_COMPILER
-    /* Map GL shader type to DkStage */
-    DkStage stage;
-    if (sh->type == GL_VERTEX_SHADER) {
-        stage = DkStage_Vertex;
-    } else if (sh->type == GL_FRAGMENT_SHADER) {
-        stage = DkStage_Fragment;
-    } else {
-        sh->info_log = strdup("ERROR: Unsupported shader type\n");
-        sh->compiled = false;
+    /* Check if source is GLSL ES 1.00 → defer compilation to glLinkProgram */
+    if (sgl_is_es100_source(sh->source)) {
+        sh->needs_transpile = true;
+        sh->compiled = true;  /* Report success; actual compilation deferred to link time */
+        SGL_TRACE_SHADER("glCompileShader(%u) - ES 1.00 detected, deferred to link time", shader);
         return;
     }
 
-    /* Create compiler and compile GLSL to DKSH */
-    uam_compiler *compiler = uam_create_compiler(stage);
-    if (!compiler) {
-        sh->info_log = strdup("ERROR: Failed to create shader compiler\n");
-        sh->compiled = false;
-        return;
-    }
-
-    if (uam_compile_dksh(compiler, sh->source)) {
-        /* Get compiled DKSH binary */
-        size_t dksh_size = uam_get_code_size(compiler);
-
-        printf("[SGL-RT] shader %u: DKSH size=%zu align256=%d GPRs=%d\n",
-               shader, dksh_size, (int)(dksh_size % 256), uam_get_num_gprs(compiler));
-        fflush(stdout);
-
-        /* CRITICAL: libuam OutputDkshToMemory uses pa256() which aligns to
-         * ABSOLUTE memory addresses, not relative to buffer start. If the buffer
-         * is not 256-byte aligned, the code section ends up at the wrong offset
-         * within the DKSH, causing dkShaderInitialize to read garbage → GPU fault.
-         * Fix: use memalign(256, ...) to ensure 256-byte alignment. */
-        size_t alloc_size = (dksh_size + 4095) & ~(size_t)4095;
-        void *dksh = memalign(256, alloc_size);
-        if (dksh) {
-            memset(dksh, 0, alloc_size);
-            uam_write_code(compiler, dksh);
-
-            /* Diagnostic: dump DKSH header (first 32 bytes) for comparison */
-            {
-                const uint8_t *hdr = (const uint8_t *)dksh;
-                printf("[SGL-RT] DKSH header:");
-                for (int ii = 0; ii < 32 && ii < (int)dksh_size; ii++)
-                    printf(" %02X", hdr[ii]);
-                printf("\n");
-                fflush(stdout);
-            }
-
-            /* Load DKSH into backend */
-            if (ctx->backend && ctx->backend->ops->load_shader_binary) {
-                sh->compiled = ctx->backend->ops->load_shader_binary(
-                    ctx->backend, shader, dksh, dksh_size);
-            } else {
-                sh->compiled = false;
-                sh->info_log = strdup("ERROR: Backend does not support shader loading\n");
-            }
-
-            free(dksh);
-        } else {
-            sh->compiled = false;
-            sh->info_log = strdup("ERROR: Out of memory for compiled shader\n");
-        }
-
-        /* Store any warnings from compilation */
-        const char *log = uam_get_error_log(compiler);
-        if (log && log[0] != '\0' && !sh->info_log) {
-            sh->info_log = strdup(log);
-        }
-    } else {
-        /* Compilation failed - store error log */
-        const char *log = uam_get_error_log(compiler);
-        sh->info_log = (log && log[0]) ? strdup(log) : strdup("ERROR: Compilation failed\n");
-        sh->compiled = false;
-    }
-
-    uam_free_compiler(compiler);
+    /* GLSL 4.60 source → compile directly */
+    sh->compiled = sgl_compile_glsl460(ctx, shader, sh, sh->source);
     SGL_TRACE_SHADER("glCompileShader(%u) - %s", shader, sh->compiled ? "OK" : "FAILED");
 #else
     /* No runtime compiler - source shaders cannot be compiled */
@@ -369,7 +400,176 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
         return;
     }
 
-    /* CRITICAL: Call backend to copy shader data to per-program storage.
+#ifdef SGL_ENABLE_RUNTIME_COMPILER
+    /* Check if any attached shader needs transpilation (GLSL ES 1.00 → 4.60) */
+    sgl_shader_t *vs_sh = prog->vertex_shader ? GET_SHADER(prog->vertex_shader) : NULL;
+    sgl_shader_t *fs_sh = prog->fragment_shader ? GET_SHADER(prog->fragment_shader) : NULL;
+    bool needs_transpile = (vs_sh && vs_sh->needs_transpile) ||
+                           (fs_sh && fs_sh->needs_transpile);
+
+    if (needs_transpile) {
+        printf("[SGL-TRANSPILER] Transpiling ES 1.00 shaders for program %u\n", program);
+        fflush(stdout);
+
+        /* 1. Set up transpiler options with attrib bindings from glBindAttribLocation */
+        glslt_options_t vs_opts;
+        glslt_options_init(&vs_opts);
+
+        for (int i = 0; i < prog->num_attrib_bindings; i++) {
+            if (prog->attrib_bindings[i].used) {
+                glslt_set_attrib_location(&vs_opts,
+                    prog->attrib_bindings[i].name,
+                    (int)prog->attrib_bindings[i].index);
+            }
+        }
+
+        /* 2. Transpile vertex shader */
+        glslt_result_t vs_result;
+        memset(&vs_result, 0, sizeof(vs_result));
+        vs_result.success = 1; /* default to success if no VS to transpile */
+
+        if (vs_sh && vs_sh->needs_transpile && vs_sh->source) {
+            vs_result = glslt_transpile(vs_sh->source, GLSLT_VERTEX, &vs_opts);
+            if (!vs_result.success) {
+                printf("[SGL-TRANSPILER] VS transpile failed: %s\n", vs_result.error);
+                fflush(stdout);
+                if (vs_sh->info_log) free(vs_sh->info_log);
+                vs_sh->info_log = strdup(vs_result.error);
+                vs_sh->compiled = false;
+                prog->linked = false;
+                glslt_result_free(&vs_result);
+                SGL_TRACE_SHADER("glLinkProgram(%u) - VS transpile FAILED", program);
+                return;
+            }
+            printf("[SGL-TRANSPILER] VS transpiled: %d uniforms, %d samplers, %d attribs, %d varyings\n",
+                   vs_result.num_uniforms, vs_result.num_samplers,
+                   vs_result.num_attributes, vs_result.num_varyings);
+            fflush(stdout);
+        }
+
+        /* 3. Transpile fragment shader (pass VS varying locations for consistency) */
+        glslt_result_t fs_result;
+        memset(&fs_result, 0, sizeof(fs_result));
+        fs_result.success = 1;
+
+        if (fs_sh && fs_sh->needs_transpile && fs_sh->source) {
+            glslt_options_t fs_opts;
+            glslt_options_init(&fs_opts);
+
+            /* Pass VS varying locations so FS uses matching locations */
+            for (int i = 0; i < vs_result.num_varyings; i++) {
+                glslt_set_varying_location(&fs_opts,
+                    vs_result.varyings[i].name,
+                    vs_result.varyings[i].location);
+            }
+
+            fs_result = glslt_transpile(fs_sh->source, GLSLT_FRAGMENT, &fs_opts);
+            if (!fs_result.success) {
+                printf("[SGL-TRANSPILER] FS transpile failed: %s\n", fs_result.error);
+                fflush(stdout);
+                if (fs_sh->info_log) free(fs_sh->info_log);
+                fs_sh->info_log = strdup(fs_result.error);
+                fs_sh->compiled = false;
+                prog->linked = false;
+                glslt_result_free(&vs_result);
+                glslt_result_free(&fs_result);
+                SGL_TRACE_SHADER("glLinkProgram(%u) - FS transpile FAILED", program);
+                return;
+            }
+            printf("[SGL-TRANSPILER] FS transpiled: %d uniforms, %d samplers, %d varyings\n",
+                   fs_result.num_uniforms, fs_result.num_samplers, fs_result.num_varyings);
+            fflush(stdout);
+        }
+
+        /* 4. Compile transpiled GLSL 4.60 → DKSH via libuam */
+        if (vs_sh && vs_sh->needs_transpile && vs_result.output) {
+            if (vs_sh->info_log) { free(vs_sh->info_log); vs_sh->info_log = NULL; }
+            vs_sh->compiled = sgl_compile_glsl460(ctx, prog->vertex_shader,
+                                                   vs_sh, vs_result.output);
+            if (!vs_sh->compiled) {
+                printf("[SGL-TRANSPILER] VS compile failed after transpile\n");
+                fflush(stdout);
+                prog->linked = false;
+                glslt_result_free(&vs_result);
+                glslt_result_free(&fs_result);
+                SGL_TRACE_SHADER("glLinkProgram(%u) - VS compile FAILED", program);
+                return;
+            }
+            vs_sh->needs_transpile = false;
+        }
+
+        if (fs_sh && fs_sh->needs_transpile && fs_result.output) {
+            if (fs_sh->info_log) { free(fs_sh->info_log); fs_sh->info_log = NULL; }
+            fs_sh->compiled = sgl_compile_glsl460(ctx, prog->fragment_shader,
+                                                   fs_sh, fs_result.output);
+            if (!fs_sh->compiled) {
+                printf("[SGL-TRANSPILER] FS compile failed after transpile\n");
+                fflush(stdout);
+                prog->linked = false;
+                glslt_result_free(&vs_result);
+                glslt_result_free(&fs_result);
+                SGL_TRACE_SHADER("glLinkProgram(%u) - FS compile FAILED", program);
+                return;
+            }
+            fs_sh->needs_transpile = false;
+        }
+
+        /* 5. Auto-register uniforms from transpiler reflection data */
+        /* VS uniforms → packed UBO at VS binding 0 */
+        if (vs_result.num_uniforms > 0) {
+            sglSetPackedUBOSize(0, vs_opts.ubo_binding, vs_result.ubo_total_size);
+            for (int i = 0; i < vs_result.num_uniforms; i++) {
+                sglRegisterPackedUniform(vs_result.uniforms[i].name,
+                                         0, vs_opts.ubo_binding,
+                                         vs_result.uniforms[i].offset);
+            }
+            printf("[SGL-TRANSPILER] Registered %d VS uniforms (UBO size=%d)\n",
+                   vs_result.num_uniforms, vs_result.ubo_total_size);
+            fflush(stdout);
+        }
+        /* FS uniforms → packed UBO at FS binding 0 */
+        if (fs_result.num_uniforms > 0) {
+            sglSetPackedUBOSize(1, 0, fs_result.ubo_total_size);
+            for (int i = 0; i < fs_result.num_uniforms; i++) {
+                sglRegisterPackedUniform(fs_result.uniforms[i].name,
+                                         1, 0,
+                                         fs_result.uniforms[i].offset);
+            }
+            printf("[SGL-TRANSPILER] Registered %d FS uniforms (UBO size=%d)\n",
+                   fs_result.num_uniforms, fs_result.ubo_total_size);
+            fflush(stdout);
+        }
+
+        /* 6. Register attrib bindings from transpiler result into program */
+        for (int i = 0; i < vs_result.num_attributes; i++) {
+            bool found = false;
+            for (int j = 0; j < prog->num_attrib_bindings; j++) {
+                if (strcmp(prog->attrib_bindings[j].name,
+                           vs_result.attributes[i].name) == 0) {
+                    prog->attrib_bindings[j].index = vs_result.attributes[i].location;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found && prog->num_attrib_bindings < SGL_MAX_ATTRIBS) {
+                int slot = prog->num_attrib_bindings++;
+                strncpy(prog->attrib_bindings[slot].name,
+                        vs_result.attributes[i].name, SGL_ATTRIB_NAME_MAX - 1);
+                prog->attrib_bindings[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+                prog->attrib_bindings[slot].index = vs_result.attributes[i].location;
+                prog->attrib_bindings[slot].used = true;
+            }
+        }
+
+        glslt_result_free(&vs_result);
+        glslt_result_free(&fs_result);
+
+        printf("[SGL-TRANSPILER] Transpilation complete for program %u\n", program);
+        fflush(stdout);
+    }
+#endif /* SGL_ENABLE_RUNTIME_COMPILER */
+
+    /* Call backend to copy shader data to per-program storage.
      * This prevents issues when shader IDs are reused after glDeleteShader. */
     bool link_ok = true;
     if (ctx->backend && ctx->backend->ops->link_program) {
@@ -378,7 +578,7 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
     }
 
     prog->linked = link_ok;
-    SGL_TRACE_SHADER("glLinkProgram(%u)", program);
+    SGL_TRACE_SHADER("glLinkProgram(%u) - %s", program, link_ok ? "OK" : "FAILED");
 }
 
 GL_APICALL void GL_APIENTRY glUseProgram(GLuint program) {

@@ -276,7 +276,7 @@ typedef struct {
     const char *details;
 } TestResult;
 
-#define MAX_TESTS 200
+#define MAX_TESTS 256
 static TestResult s_results[MAX_TESTS];
 static int s_numResults = 0;
 
@@ -3035,6 +3035,472 @@ static void testRuntimeShaderCompilation(void) {
 }
 
 /*==========================================================================
+ * TEST: GLSL ES 1.00 Transpiler Integration
+ * End-to-end: ES 1.00 source → transpiler → libuam → deko3d → pixels
+ *==========================================================================*/
+
+static GLuint s_transpilerProgram = 0;
+
+static void testTranspilerES100(void) {
+    printf("\n--- Test: GLSL ES 1.00 Transpiler ---\n");
+
+#ifdef SGL_ENABLE_RUNTIME_COMPILER
+    /* Reset GL state */
+    glDisable(GL_BLEND);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_CULL_FACE);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glDepthMask(GL_TRUE);
+    glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    for (int a = 0; a < 8; a++) glDisableVertexAttribArray(a);
+
+    /* ---- Test 1: Basic ES 1.00 colored triangle ----
+     * Vertex shader: attribute position + uniform MVP matrix
+     * Fragment shader: uniform color
+     * Tests: transpilation, glBindAttribLocation, packed UBO auto-registration */
+
+    const char *es100_vs =
+        "#version 100\n"
+        "attribute vec2 a_pos;\n"
+        "uniform mat4 u_mvpMatrix;\n"
+        "void main() {\n"
+        "    gl_Position = u_mvpMatrix * vec4(a_pos, 0.0, 1.0);\n"
+        "}\n";
+
+    const char *es100_fs =
+        "#version 100\n"
+        "precision mediump float;\n"
+        "uniform vec4 u_fragColor;\n"
+        "void main() {\n"
+        "    gl_FragColor = u_fragColor;\n"
+        "}\n";
+
+    /* Create shaders */
+    GLuint vs = glCreateShader(GL_VERTEX_SHADER);
+    GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
+    recordResult("ES100: glCreateShader", vs != 0 && fs != 0, NULL);
+
+    /* Set ES 1.00 source */
+    glShaderSource(vs, 1, &es100_vs, NULL);
+    glShaderSource(fs, 1, &es100_fs, NULL);
+
+    /* Compile — should succeed (deferred) */
+    glCompileShader(vs);
+    GLint vsOk = GL_FALSE;
+    glGetShaderiv(vs, GL_COMPILE_STATUS, &vsOk);
+    recordResult("ES100: VS compile (deferred)", vsOk == GL_TRUE, NULL);
+
+    glCompileShader(fs);
+    GLint fsOk = GL_FALSE;
+    glGetShaderiv(fs, GL_COMPILE_STATUS, &fsOk);
+    recordResult("ES100: FS compile (deferred)", fsOk == GL_TRUE, NULL);
+
+    if (vsOk != GL_TRUE || fsOk != GL_TRUE) {
+        char log[512];
+        if (vsOk != GL_TRUE) {
+            glGetShaderInfoLog(vs, sizeof(log), NULL, log);
+            printf("[DEBUG] ES100 VS log: %.200s\n", log);
+        }
+        if (fsOk != GL_TRUE) {
+            glGetShaderInfoLog(fs, sizeof(log), NULL, log);
+            printf("[DEBUG] ES100 FS log: %.200s\n", log);
+        }
+        glDeleteShader(vs);
+        glDeleteShader(fs);
+        recordResult("ES100: glBindAttribLocation", false, "compile failed");
+        recordResult("ES100: glLinkProgram", false, "compile failed");
+        recordResult("ES100: glGetUniformLocation(u_mvpMatrix)", false, "compile failed");
+        recordResult("ES100: glGetUniformLocation(u_fragColor)", false, "compile failed");
+        recordResult("ES100: rendered YELLOW triangle", false, "compile failed");
+        printf("--- ES 1.00 Transpiler tests skipped (compile fail) ---\n");
+        fflush(stdout);
+        return;
+    }
+
+    /* Create program + bind attrib location BEFORE link (key test!) */
+    GLuint program = glCreateProgram();
+    glAttachShader(program, vs);
+    glAttachShader(program, fs);
+
+    /* Bind attribute location — this must be respected by the transpiler */
+    glBindAttribLocation(program, 0, "a_pos");
+    recordResult("ES100: glBindAttribLocation", glGetError() == GL_NO_ERROR, NULL);
+
+    /* Link — triggers transpilation + libuam compilation */
+    glLinkProgram(program);
+    GLint linkOk = GL_FALSE;
+    glGetProgramiv(program, GL_LINK_STATUS, &linkOk);
+    recordResult("ES100: glLinkProgram", linkOk == GL_TRUE, NULL);
+
+    if (linkOk != GL_TRUE) {
+        printf("[DEBUG] ES100 link failed!\n");
+        char log[512];
+        glGetShaderInfoLog(vs, sizeof(log), NULL, log);
+        printf("[DEBUG] VS info: %.200s\n", log);
+        glGetShaderInfoLog(fs, sizeof(log), NULL, log);
+        printf("[DEBUG] FS info: %.200s\n", log);
+        fflush(stdout);
+        glDeleteShader(vs);
+        glDeleteShader(fs);
+        glDeleteProgram(program);
+        recordResult("ES100: glGetUniformLocation(u_mvpMatrix)", false, "link failed");
+        recordResult("ES100: glGetUniformLocation(u_fragColor)", false, "link failed");
+        recordResult("ES100: rendered YELLOW triangle", false, "link failed");
+        printf("--- ES 1.00 Transpiler tests skipped (link fail) ---\n");
+        fflush(stdout);
+        return;
+    }
+
+    s_transpilerProgram = program;
+    glUseProgram(program);
+
+    /* Get uniform locations — should find them via auto-registered packed UBOs */
+    GLint mvpLoc = glGetUniformLocation(program, "u_mvpMatrix");
+    GLint colorLoc = glGetUniformLocation(program, "u_fragColor");
+    printf("[ES100] u_mvpMatrix loc=%d (0x%X), u_fragColor loc=%d (0x%X)\n",
+           mvpLoc, mvpLoc, colorLoc, colorLoc);
+    fflush(stdout);
+    recordResult("ES100: glGetUniformLocation(u_mvpMatrix)", mvpLoc != -1, NULL);
+    recordResult("ES100: glGetUniformLocation(u_fragColor)", colorLoc != -1, NULL);
+
+    /* Draw a yellow triangle using the transpiled ES 1.00 shaders */
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    /* Identity matrix (no transform) */
+    float identity[16] = {
+        1,0,0,0,
+        0,1,0,0,
+        0,0,1,0,
+        0,0,0,1
+    };
+    if (mvpLoc != -1)
+        glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, identity);
+    if (colorLoc != -1)
+        glUniform4f(colorLoc, 1.0f, 1.0f, 0.0f, 1.0f); /* YELLOW */
+
+    static const float triVerts[] = {
+         0.0f,  0.5f,   /* top */
+        -0.5f, -0.5f,   /* bottom-left */
+         0.5f, -0.5f    /* bottom-right */
+    };
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, triVerts);
+    glEnableVertexAttribArray(0);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    /* Read center pixel */
+    GLubyte pixel[4] = {0};
+    glReadPixels(640, 360, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+    printf("[ES100] Center pixel: R=%d G=%d B=%d A=%d\n",
+           pixel[0], pixel[1], pixel[2], pixel[3]);
+    fflush(stdout);
+
+    /* Yellow = R>245, G>245, B<10 */
+    bool yellowOk = (pixel[0] > 245) && (pixel[1] > 245) && (pixel[2] < 10);
+    recordResult("ES100: rendered YELLOW triangle", yellowOk, NULL);
+
+    glDisableVertexAttribArray(0);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+
+    /* ---- Test 2: ES 1.00 with varyings (vertex color interpolation) ---- */
+    printf("\n[ES100] Test 2: Varyings (vertex color interpolation)...\n");
+    fflush(stdout);
+
+    const char *vary_vs =
+        "#version 100\n"
+        "attribute vec2 a_position;\n"
+        "attribute vec3 a_color;\n"
+        "varying vec3 v_color;\n"
+        "void main() {\n"
+        "    v_color = a_color;\n"
+        "    gl_Position = vec4(a_position, 0.0, 1.0);\n"
+        "}\n";
+
+    const char *vary_fs =
+        "#version 100\n"
+        "precision mediump float;\n"
+        "varying vec3 v_color;\n"
+        "void main() {\n"
+        "    gl_FragColor = vec4(v_color, 1.0);\n"
+        "}\n";
+
+    GLuint vs2 = glCreateShader(GL_VERTEX_SHADER);
+    GLuint fs2 = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(vs2, 1, &vary_vs, NULL);
+    glShaderSource(fs2, 1, &vary_fs, NULL);
+    glCompileShader(vs2);
+    glCompileShader(fs2);
+
+    GLuint prog2 = glCreateProgram();
+    glAttachShader(prog2, vs2);
+    glAttachShader(prog2, fs2);
+    glBindAttribLocation(prog2, 0, "a_position");
+    glBindAttribLocation(prog2, 1, "a_color");
+    glLinkProgram(prog2);
+
+    GLint link2 = GL_FALSE;
+    glGetProgramiv(prog2, GL_LINK_STATUS, &link2);
+    recordResult("ES100: varying program link", link2 == GL_TRUE, NULL);
+
+    if (link2 == GL_TRUE) {
+        glUseProgram(prog2);
+
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        /* Triangle with R, G, B at vertices → center should be grayish */
+        static const float colorTri[] = {
+             0.0f,  0.5f,   /* top */
+            -0.5f, -0.5f,   /* bottom-left */
+             0.5f, -0.5f    /* bottom-right */
+        };
+        static const float colors[] = {
+            1.0f, 0.0f, 0.0f,  /* red */
+            0.0f, 1.0f, 0.0f,  /* green */
+            0.0f, 0.0f, 1.0f   /* blue */
+        };
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, colorTri);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, colors);
+        glEnableVertexAttribArray(1);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+
+        GLubyte pixel2[4] = {0};
+        glReadPixels(640, 300, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel2);
+        printf("[ES100] Varying center pixel: R=%d G=%d B=%d A=%d\n",
+               pixel2[0], pixel2[1], pixel2[2], pixel2[3]);
+        fflush(stdout);
+
+        /* Center-ish of an RGB triangle: all components should be >30 and <230 */
+        bool varyOk = (pixel2[0] > 30 && pixel2[0] < 230) &&
+                      (pixel2[1] > 30 && pixel2[1] < 230) &&
+                      (pixel2[2] > 30 && pixel2[2] < 230);
+        recordResult("ES100: varying color interpolation", varyOk, NULL);
+
+        glDisableVertexAttribArray(0);
+        glDisableVertexAttribArray(1);
+    } else {
+        char log[512];
+        glGetShaderInfoLog(vs2, sizeof(log), NULL, log);
+        printf("[DEBUG] Vary VS log: %.200s\n", log);
+        glGetShaderInfoLog(fs2, sizeof(log), NULL, log);
+        printf("[DEBUG] Vary FS log: %.200s\n", log);
+        fflush(stdout);
+        recordResult("ES100: varying color interpolation", false, "link failed");
+    }
+
+    glDeleteShader(vs2);
+    glDeleteShader(fs2);
+    glDeleteProgram(prog2);
+
+    /* ---- Test 3: ES 1.00 with texture2D() ---- */
+    printf("\n[ES100] Test 3: texture2D() sampling...\n");
+    fflush(stdout);
+
+    const char *tex_vs =
+        "#version 100\n"
+        "attribute vec2 a_position;\n"
+        "attribute vec2 a_texCoord;\n"
+        "varying vec2 v_texCoord;\n"
+        "void main() {\n"
+        "    v_texCoord = a_texCoord;\n"
+        "    gl_Position = vec4(a_position, 0.0, 1.0);\n"
+        "}\n";
+
+    const char *tex_fs =
+        "#version 100\n"
+        "precision mediump float;\n"
+        "varying vec2 v_texCoord;\n"
+        "uniform sampler2D u_texture;\n"
+        "void main() {\n"
+        "    gl_FragColor = texture2D(u_texture, v_texCoord);\n"
+        "}\n";
+
+    GLuint vs3 = glCreateShader(GL_VERTEX_SHADER);
+    GLuint fs3 = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(vs3, 1, &tex_vs, NULL);
+    glShaderSource(fs3, 1, &tex_fs, NULL);
+    glCompileShader(vs3);
+    glCompileShader(fs3);
+
+    GLuint prog3 = glCreateProgram();
+    glAttachShader(prog3, vs3);
+    glAttachShader(prog3, fs3);
+    glBindAttribLocation(prog3, 0, "a_position");
+    glBindAttribLocation(prog3, 1, "a_texCoord");
+    glLinkProgram(prog3);
+
+    GLint link3 = GL_FALSE;
+    glGetProgramiv(prog3, GL_LINK_STATUS, &link3);
+    recordResult("ES100: texture2D program link", link3 == GL_TRUE, NULL);
+
+    if (link3 == GL_TRUE) {
+        glUseProgram(prog3);
+
+        /* Create a solid cyan 2x2 texture */
+        GLuint tex;
+        glGenTextures(1, &tex);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, tex);
+        GLubyte cyan[] = {
+            0,255,255,255, 0,255,255,255,
+            0,255,255,255, 0,255,255,255
+        };
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, cyan);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+        /* glUniform1i for sampler is a no-op (loc=-1), but the texture is bound to unit 0
+         * which matches binding=0 from transpiler → it just works */
+
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        static const float quadPos[] = { -0.5f,-0.5f, 0.5f,-0.5f, 0.5f,0.5f, -0.5f,0.5f };
+        static const float quadTex[] = { 0,0, 1,0, 1,1, 0,1 };
+        static const GLushort quadIdx[] = { 0,1,2, 0,2,3 };
+
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, quadPos);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 0, quadTex);
+        glEnableVertexAttribArray(1);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, quadIdx);
+
+        GLubyte pixel3[4] = {0};
+        glReadPixels(640, 360, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel3);
+        printf("[ES100] Texture pixel: R=%d G=%d B=%d A=%d\n",
+               pixel3[0], pixel3[1], pixel3[2], pixel3[3]);
+        fflush(stdout);
+
+        /* Cyan = R<10, G>245, B>245 */
+        bool texOk = (pixel3[0] < 10) && (pixel3[1] > 245) && (pixel3[2] > 245);
+        recordResult("ES100: texture2D sampling", texOk, NULL);
+
+        glDisableVertexAttribArray(0);
+        glDisableVertexAttribArray(1);
+        glDeleteTextures(1, &tex);
+    } else {
+        char log[512];
+        glGetShaderInfoLog(vs3, sizeof(log), NULL, log);
+        printf("[DEBUG] Tex VS log: %.200s\n", log);
+        glGetShaderInfoLog(fs3, sizeof(log), NULL, log);
+        printf("[DEBUG] Tex FS log: %.200s\n", log);
+        fflush(stdout);
+        recordResult("ES100: texture2D sampling", false, "link failed");
+    }
+
+    glDeleteShader(vs3);
+    glDeleteShader(fs3);
+    glDeleteProgram(prog3);
+
+    /* ---- Test 4: No #version → also treated as ES 1.00 ---- */
+    printf("\n[ES100] Test 4: No #version directive...\n");
+    fflush(stdout);
+
+    const char *noVer_vs =
+        "attribute vec2 a_position;\n"
+        "void main() {\n"
+        "    gl_Position = vec4(a_position, 0.0, 1.0);\n"
+        "}\n";
+
+    const char *noVer_fs =
+        "precision mediump float;\n"
+        "uniform vec4 u_outColor;\n"
+        "void main() {\n"
+        "    gl_FragColor = u_outColor;\n"
+        "}\n";
+
+    GLuint vs4 = glCreateShader(GL_VERTEX_SHADER);
+    GLuint fs4 = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(vs4, 1, &noVer_vs, NULL);
+    glShaderSource(fs4, 1, &noVer_fs, NULL);
+    glCompileShader(vs4);
+    glCompileShader(fs4);
+
+    GLint vs4Ok = GL_FALSE, fs4Ok = GL_FALSE;
+    glGetShaderiv(vs4, GL_COMPILE_STATUS, &vs4Ok);
+    glGetShaderiv(fs4, GL_COMPILE_STATUS, &fs4Ok);
+    recordResult("ES100: no-#version compile (deferred)", vs4Ok == GL_TRUE && fs4Ok == GL_TRUE, NULL);
+
+    GLuint prog4 = glCreateProgram();
+    glAttachShader(prog4, vs4);
+    glAttachShader(prog4, fs4);
+    glBindAttribLocation(prog4, 0, "a_position");
+    glLinkProgram(prog4);
+
+    GLint link4 = GL_FALSE;
+    glGetProgramiv(prog4, GL_LINK_STATUS, &link4);
+    recordResult("ES100: no-#version link", link4 == GL_TRUE, NULL);
+
+    if (link4 == GL_TRUE) {
+        glUseProgram(prog4);
+        GLint outColorLoc = glGetUniformLocation(prog4, "u_outColor");
+        printf("[ES100] u_outColor loc=%d (0x%X)\n", outColorLoc, outColorLoc);
+        fflush(stdout);
+
+        if (outColorLoc != -1) {
+            glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
+            glUniform4f(outColorLoc, 0.0f, 1.0f, 0.0f, 1.0f); /* GREEN */
+
+            static const float quad[] = { -0.5f,-0.5f, 0.5f,-0.5f, 0.5f,0.5f, -0.5f,0.5f };
+            static const GLushort idx[] = { 0,1,2, 0,2,3 };
+            glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, quad);
+            glEnableVertexAttribArray(0);
+            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+
+            GLubyte pixel4[4] = {0};
+            glReadPixels(640, 360, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel4);
+            printf("[ES100] No-version pixel: R=%d G=%d B=%d A=%d\n",
+                   pixel4[0], pixel4[1], pixel4[2], pixel4[3]);
+            fflush(stdout);
+
+            bool greenOk = (pixel4[0] < 10) && (pixel4[1] > 245) && (pixel4[2] < 10);
+            recordResult("ES100: no-#version rendered GREEN", greenOk, NULL);
+            glDisableVertexAttribArray(0);
+        } else {
+            recordResult("ES100: no-#version rendered GREEN", false, "uniform not found");
+        }
+    } else {
+        char log[512];
+        glGetShaderInfoLog(vs4, sizeof(log), NULL, log);
+        printf("[DEBUG] NoVer VS log: %.200s\n", log);
+        glGetShaderInfoLog(fs4, sizeof(log), NULL, log);
+        printf("[DEBUG] NoVer FS log: %.200s\n", log);
+        fflush(stdout);
+        recordResult("ES100: no-#version rendered GREEN", false, "link failed");
+    }
+
+    glDeleteShader(vs4);
+    glDeleteShader(fs4);
+    glDeleteProgram(prog4);
+
+    /* Switch back to known-good precompiled program */
+    glUseProgram(getSimpleProgram());
+
+    printf("--- ES 1.00 Transpiler tests complete ---\n");
+    fflush(stdout);
+
+#else
+    /* No runtime compiler available */
+    recordResult("ES100: glCreateShader", false, "no runtime compiler");
+    recordResult("ES100: VS compile (deferred)", false, "no runtime compiler");
+    recordResult("ES100: FS compile (deferred)", false, "no runtime compiler");
+    recordResult("ES100: glBindAttribLocation", false, "no runtime compiler");
+    recordResult("ES100: glLinkProgram", false, "no runtime compiler");
+    recordResult("ES100: glGetUniformLocation(u_mvpMatrix)", false, "no runtime compiler");
+    recordResult("ES100: glGetUniformLocation(u_fragColor)", false, "no runtime compiler");
+    recordResult("ES100: rendered YELLOW triangle", false, "no runtime compiler");
+    printf("--- ES 1.00 Transpiler tests skipped (no runtime compiler) ---\n");
+    fflush(stdout);
+#endif
+}
+
+/*==========================================================================
  * Print summary
  *==========================================================================*/
 
@@ -3233,6 +3699,11 @@ int main(int argc, char* argv[]) {
         "CYAN quad in center\n"
         "(Shader compiled at runtime from GLSL 4.60 source)");
 
+    RUN_TEST(testTranspilerES100, "GLSL ES 1.00 Transpiler",
+        "Black background\n"
+        "GREEN quad in center\n"
+        "(ES 1.00 source transpiled to 4.60, compiled via libuam)");
+
     /* Print summary */
     printf("[EXIT] About to print summary\n");
     fflush(stdout);
@@ -3272,6 +3743,7 @@ int main(int argc, char* argv[]) {
     if (s_cubemapProgram) glDeleteProgram(s_cubemapProgram);
     if (s_packedProgram) glDeleteProgram(s_packedProgram);
     if (s_runtimeProgram) glDeleteProgram(s_runtimeProgram);
+    if (s_transpilerProgram) glDeleteProgram(s_transpilerProgram);
 
     printf("\n[LIFECYCLE] All tests complete. Programs deleted.\n");
     fflush(stdout);

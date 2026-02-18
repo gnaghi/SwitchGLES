@@ -64,6 +64,7 @@ typedef struct sgl_shader {
     bool used;
     GLenum type;
     bool compiled;
+    bool needs_transpile;   /* true if source is GLSL ES 1.00 (deferred to link time) */
     uint32_t backend_handle;
     uint32_t code_offset;
     uint32_t code_size;
