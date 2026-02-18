@@ -4,8 +4,79 @@
  */
 
 #include "gl_common.h"
-#include <string.h>
-#include <stdio.h>
+
+/* Compute expected imageSize for compressed textures.
+ * Returns 0 if the format is unknown (caller should skip validation). */
+static GLsizei sgl_compressed_image_size(GLenum format, GLsizei width, GLsizei height) {
+    /* All block-compressed formats use ceil(dim / blockW) * ceil(dim / blockH) * bytesPerBlock */
+    int bw = 4, bh = 4, bpb = 0;
+
+    switch (format) {
+        /* 8 bytes/block, 4x4 */
+        case GL_ETC1_RGB8_OES:
+        case GL_COMPRESSED_RGB8_ETC2:
+        case GL_COMPRESSED_SRGB8_ETC2:
+        case GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2:
+        case GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2:
+        case GL_COMPRESSED_R11_EAC:
+        case GL_COMPRESSED_SIGNED_R11_EAC:
+        case GL_COMPRESSED_RGB_S3TC_DXT1_EXT:
+        case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
+            bpb = 8; break;
+
+        /* 16 bytes/block, 4x4 */
+        case GL_COMPRESSED_RGBA8_ETC2_EAC:
+        case GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC:
+        case GL_COMPRESSED_RG11_EAC:
+        case GL_COMPRESSED_SIGNED_RG11_EAC:
+        case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
+        case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
+            bpb = 16; break;
+
+        /* ASTC — all 16 bytes/block, varying block sizes */
+        case GL_COMPRESSED_RGBA_ASTC_4x4_KHR:   bw=4;  bh=4;  bpb=16; break;
+        case GL_COMPRESSED_RGBA_ASTC_5x4_KHR:   bw=5;  bh=4;  bpb=16; break;
+        case GL_COMPRESSED_RGBA_ASTC_5x5_KHR:   bw=5;  bh=5;  bpb=16; break;
+        case GL_COMPRESSED_RGBA_ASTC_6x5_KHR:   bw=6;  bh=5;  bpb=16; break;
+        case GL_COMPRESSED_RGBA_ASTC_6x6_KHR:   bw=6;  bh=6;  bpb=16; break;
+        case GL_COMPRESSED_RGBA_ASTC_8x5_KHR:   bw=8;  bh=5;  bpb=16; break;
+        case GL_COMPRESSED_RGBA_ASTC_8x6_KHR:   bw=8;  bh=6;  bpb=16; break;
+        case GL_COMPRESSED_RGBA_ASTC_8x8_KHR:   bw=8;  bh=8;  bpb=16; break;
+        case GL_COMPRESSED_RGBA_ASTC_10x5_KHR:  bw=10; bh=5;  bpb=16; break;
+        case GL_COMPRESSED_RGBA_ASTC_10x6_KHR:  bw=10; bh=6;  bpb=16; break;
+        case GL_COMPRESSED_RGBA_ASTC_10x8_KHR:  bw=10; bh=8;  bpb=16; break;
+        case GL_COMPRESSED_RGBA_ASTC_10x10_KHR: bw=10; bh=10; bpb=16; break;
+        case GL_COMPRESSED_RGBA_ASTC_12x10_KHR: bw=12; bh=10; bpb=16; break;
+        case GL_COMPRESSED_RGBA_ASTC_12x12_KHR: bw=12; bh=12; bpb=16; break;
+
+        default:
+            return 0; /* Unknown format — skip validation */
+    }
+
+    int blocks_w = (width + bw - 1) / bw;
+    int blocks_h = (height + bh - 1) / bh;
+    return (GLsizei)(blocks_w * blocks_h * bpb);
+}
+
+/* Validate GLES2 format/type combinations per Table 3.4 of the GLES2 spec.
+ * Returns true if the combination is valid. */
+static bool sgl_validate_tex_format_type(GLenum format, GLenum type) {
+    switch (format) {
+        case GL_RGBA:
+            return type == GL_UNSIGNED_BYTE ||
+                   type == GL_UNSIGNED_SHORT_4_4_4_4 ||
+                   type == GL_UNSIGNED_SHORT_5_5_5_1;
+        case GL_RGB:
+            return type == GL_UNSIGNED_BYTE ||
+                   type == GL_UNSIGNED_SHORT_5_6_5;
+        case GL_LUMINANCE_ALPHA:
+        case GL_LUMINANCE:
+        case GL_ALPHA:
+            return type == GL_UNSIGNED_BYTE;
+        default:
+            return false;
+    }
+}
 
 GL_APICALL void GL_APIENTRY glGenTextures(GLsizei n, GLuint *textures) {
     GET_CTX();
@@ -128,6 +199,18 @@ GL_APICALL void GL_APIENTRY glTexImage2D(GLenum target, GLint level, GLint inter
         return;
     }
 
+    /* GLES2: internalformat must equal format */
+    if ((GLenum)internalformat != format) {
+        sgl_set_error(ctx, GL_INVALID_OPERATION);
+        return;
+    }
+
+    /* Validate format/type combination (GLES2 Table 3.4) */
+    if (!sgl_validate_tex_format_type(format, type)) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
+
     /* Empty texture - silently return */
     if (width == 0 || height == 0) {
         return;
@@ -185,6 +268,13 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint xo
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
+
+    /* Validate format/type combination (GLES2 Table 3.4) */
+    if (!sgl_validate_tex_format_type(format, type)) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
+
     if (width == 0 || height == 0) return;
 
     GLuint tex_id = ctx->bound_textures[ctx->active_texture_unit];
@@ -474,6 +564,15 @@ GL_APICALL void GL_APIENTRY glCompressedTexImage2D(GLenum target, GLint level, G
         return;
     }
 
+    /* Validate imageSize against expected size for this format */
+    {
+        GLsizei expected = sgl_compressed_image_size(internalformat, width, height);
+        if (expected > 0 && imageSize != expected) {
+            sgl_set_error(ctx, GL_INVALID_VALUE);
+            return;
+        }
+    }
+
     /* Empty texture - silently return */
     if (width == 0 || height == 0) {
         return;
@@ -531,6 +630,16 @@ GL_APICALL void GL_APIENTRY glCompressedTexSubImage2D(GLenum target, GLint level
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
+
+    /* Validate imageSize against expected size for this format */
+    {
+        GLsizei expected = sgl_compressed_image_size(format, width, height);
+        if (expected > 0 && imageSize != expected) {
+            sgl_set_error(ctx, GL_INVALID_VALUE);
+            return;
+        }
+    }
+
     if (width == 0 || height == 0) return;
 
     GLuint tex_id = ctx->bound_textures[ctx->active_texture_unit];

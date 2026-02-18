@@ -176,7 +176,9 @@ static bool sgl_compile_glsl460(sgl_context_t *ctx, GLuint shader_id,
 
 /*
  * Detect if shader source is GLSL ES 1.00 (needs transpilation).
- * Returns true if #version 100 or no #version directive found.
+ * Returns true if #version 100, or if no #version but source contains
+ * ES-specific keywords (attribute, varying, gl_FragColor, precision).
+ * Garbage text with no #version returns false so libuam can report the error.
  */
 static bool sgl_is_es100_source(const char *source) {
     const char *p = source;
@@ -192,8 +194,16 @@ static bool sgl_is_es100_source(const char *source) {
         return false;
     }
 
-    /* No #version directive at all → treat as ES 1.00 */
-    return true;
+    /* No #version directive — only treat as ES 1.00 if source contains
+     * ES-specific keywords that distinguish it from garbage or GLSL 460 */
+    if (strstr(source, "attribute ") || strstr(source, "attribute\t") ||
+        strstr(source, "varying ") || strstr(source, "varying\t") ||
+        strstr(source, "gl_FragColor") || strstr(source, "gl_FragData") ||
+        strstr(source, "precision ") || strstr(source, "precision\t")) {
+        return true;
+    }
+
+    return false;
 }
 #endif /* SGL_ENABLE_RUNTIME_COMPILER */
 

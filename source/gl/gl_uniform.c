@@ -953,6 +953,13 @@ GL_APICALL void GL_APIENTRY glUniform4iv(GLint location, GLsizei count, const GL
 GL_APICALL void GL_APIENTRY glUniformMatrix2fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx || !ctx->backend) return;
+
+    /* GLES2 spec: transpose must be GL_FALSE */
+    if (transpose != GL_FALSE) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
     if (location == -1 || count <= 0 || !value) return;
 
     sgl_program_t *prog = GET_PROGRAM(ctx->current_program);
@@ -971,13 +978,8 @@ GL_APICALL void GL_APIENTRY glUniformMatrix2fv(GLint location, GLsizei count, GL
         for (GLsizei m = 0; m < count; m++) {
             const float *src = value + m * 4;
             float *dst = (float *)(packed->data + offset + m * 32);
-            if (transpose == GL_FALSE) {
-                dst[0] = src[0]; dst[1] = src[1]; dst[2] = 0.0f; dst[3] = 0.0f;
-                dst[4] = src[2]; dst[5] = src[3]; dst[6] = 0.0f; dst[7] = 0.0f;
-            } else {
-                dst[0] = src[0]; dst[1] = src[2]; dst[2] = 0.0f; dst[3] = 0.0f;
-                dst[4] = src[1]; dst[5] = src[3]; dst[6] = 0.0f; dst[7] = 0.0f;
-            }
+            dst[0] = src[0]; dst[1] = src[1]; dst[2] = 0.0f; dst[3] = 0.0f;
+            dst[4] = src[2]; dst[5] = src[3]; dst[6] = 0.0f; dst[7] = 0.0f;
         }
         packed->dirty = true;
         SGL_TRACE_UNIFORM("glUniformMatrix2fv(packed loc=0x%X, count=%d)", location, count);
@@ -1012,17 +1014,8 @@ GL_APICALL void GL_APIENTRY glUniformMatrix2fv(GLint location, GLsizei count, GL
         for (GLsizei m = 0; m < count; m++) {
             const float *src = value + m * 4;
             float *dst = std140_data + m * 8;
-
-            if (transpose == GL_FALSE) {
-                /* Column 0 */
-                dst[0] = src[0]; dst[1] = src[1]; dst[2] = 0.0f; dst[3] = 0.0f;
-                /* Column 1 */
-                dst[4] = src[2]; dst[5] = src[3]; dst[6] = 0.0f; dst[7] = 0.0f;
-            } else {
-                /* Transposed: swap rows/cols */
-                dst[0] = src[0]; dst[1] = src[2]; dst[2] = 0.0f; dst[3] = 0.0f;
-                dst[4] = src[1]; dst[5] = src[3]; dst[6] = 0.0f; dst[7] = 0.0f;
-            }
+            dst[0] = src[0]; dst[1] = src[1]; dst[2] = 0.0f; dst[3] = 0.0f;
+            dst[4] = src[2]; dst[5] = src[3]; dst[6] = 0.0f; dst[7] = 0.0f;
         }
         ctx->backend->ops->write_uniform(ctx->backend, ub->offset, std140_data, dataSize);
 
@@ -1040,6 +1033,13 @@ GL_APICALL void GL_APIENTRY glUniformMatrix2fv(GLint location, GLsizei count, GL
 GL_APICALL void GL_APIENTRY glUniformMatrix3fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx || !ctx->backend) return;
+
+    /* GLES2 spec: transpose must be GL_FALSE */
+    if (transpose != GL_FALSE) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
     if (location == -1 || count <= 0 || !value) return;
 
     sgl_program_t *prog = GET_PROGRAM(ctx->current_program);
@@ -1058,15 +1058,9 @@ GL_APICALL void GL_APIENTRY glUniformMatrix3fv(GLint location, GLsizei count, GL
         for (GLsizei m = 0; m < count; m++) {
             const float *src = value + m * 9;
             float *dst = (float *)(packed->data + offset + m * 48);
-            if (transpose == GL_FALSE) {
-                dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2]; dst[3] = 0.0f;
-                dst[4] = src[3]; dst[5] = src[4]; dst[6] = src[5]; dst[7] = 0.0f;
-                dst[8] = src[6]; dst[9] = src[7]; dst[10] = src[8]; dst[11] = 0.0f;
-            } else {
-                dst[0] = src[0]; dst[1] = src[3]; dst[2] = src[6]; dst[3] = 0.0f;
-                dst[4] = src[1]; dst[5] = src[4]; dst[6] = src[7]; dst[7] = 0.0f;
-                dst[8] = src[2]; dst[9] = src[5]; dst[10] = src[8]; dst[11] = 0.0f;
-            }
+            dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2]; dst[3] = 0.0f;
+            dst[4] = src[3]; dst[5] = src[4]; dst[6] = src[5]; dst[7] = 0.0f;
+            dst[8] = src[6]; dst[9] = src[7]; dst[10] = src[8]; dst[11] = 0.0f;
         }
         packed->dirty = true;
         SGL_TRACE_UNIFORM("glUniformMatrix3fv(packed loc=0x%X, count=%d)", location, count);
@@ -1101,20 +1095,9 @@ GL_APICALL void GL_APIENTRY glUniformMatrix3fv(GLint location, GLsizei count, GL
         for (GLsizei m = 0; m < count; m++) {
             const float *src = value + m * 9;
             float *dst = std140_data + m * 12;
-
-            if (transpose == GL_FALSE) {
-                /* Column 0 */
-                dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2]; dst[3] = 0.0f;
-                /* Column 1 */
-                dst[4] = src[3]; dst[5] = src[4]; dst[6] = src[5]; dst[7] = 0.0f;
-                /* Column 2 */
-                dst[8] = src[6]; dst[9] = src[7]; dst[10] = src[8]; dst[11] = 0.0f;
-            } else {
-                /* Transposed */
-                dst[0] = src[0]; dst[1] = src[3]; dst[2] = src[6]; dst[3] = 0.0f;
-                dst[4] = src[1]; dst[5] = src[4]; dst[6] = src[7]; dst[7] = 0.0f;
-                dst[8] = src[2]; dst[9] = src[5]; dst[10] = src[8]; dst[11] = 0.0f;
-            }
+            dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2]; dst[3] = 0.0f;
+            dst[4] = src[3]; dst[5] = src[4]; dst[6] = src[5]; dst[7] = 0.0f;
+            dst[8] = src[6]; dst[9] = src[7]; dst[10] = src[8]; dst[11] = 0.0f;
         }
         ctx->backend->ops->write_uniform(ctx->backend, ub->offset, std140_data, dataSize);
 
@@ -1132,6 +1115,13 @@ GL_APICALL void GL_APIENTRY glUniformMatrix3fv(GLint location, GLsizei count, GL
 GL_APICALL void GL_APIENTRY glUniformMatrix4fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx || !ctx->backend) return;
+
+    /* GLES2 spec: transpose must be GL_FALSE */
+    if (transpose != GL_FALSE) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+
     if (location == -1 || count <= 0 || !value) return;
 
     sgl_program_t *prog = GET_PROGRAM(ctx->current_program);
@@ -1147,17 +1137,7 @@ GL_APICALL void GL_APIENTRY glUniformMatrix4fv(GLint location, GLsizei count, GL
             : &prog->packed_fragment[binding];
         uint32_t dataSize = 64 * count; /* mat4 std140: 4 vec4 = 64 bytes */
         if (!packed->valid || offset + dataSize > packed->size) return;
-        if (transpose == GL_FALSE) {
-            memcpy(packed->data + offset, value, dataSize);
-        } else {
-            for (GLsizei m = 0; m < count; m++) {
-                const float *src = value + m * 16;
-                float *dst = (float *)(packed->data + offset + m * 64);
-                for (int i = 0; i < 4; i++)
-                    for (int j = 0; j < 4; j++)
-                        dst[i * 4 + j] = src[j * 4 + i];
-            }
-        }
+        memcpy(packed->data + offset, value, dataSize);
         packed->dirty = true;
         SGL_TRACE_UNIFORM("glUniformMatrix4fv(packed loc=0x%X, count=%d)", location, count);
         return;
@@ -1184,29 +1164,9 @@ GL_APICALL void GL_APIENTRY glUniformMatrix4fv(GLint location, GLsizei count, GL
 
     if (!ub->valid) return;
 
-    /* Handle transpose if needed, then write via backend */
     if (ub->valid && ctx->backend->ops->write_uniform) {
-        if (transpose == GL_FALSE) {
-            ctx->backend->ops->write_uniform(ctx->backend, ub->offset, value, data_size);
-            /* Save shadow copy (first matrix = 64 bytes) */
-            memcpy(ub->shadow, value, 64);
-        } else {
-            /* Transpose the matrix before writing */
-            float transposed[16 * 4]; /* Support up to 4 matrices */
-            if (count > 4) count = 4; /* Clamp to avoid overflow */
-            data_size = 64 * count;  /* Recompute after clamping to avoid buffer over-read */
-            for (GLsizei m = 0; m < count; m++) {
-                const float *src = value + m * 16;
-                float *d = transposed + m * 16;
-                for (int i = 0; i < 4; i++) {
-                    for (int j = 0; j < 4; j++) {
-                        d[i * 4 + j] = src[j * 4 + i];
-                    }
-                }
-            }
-            ctx->backend->ops->write_uniform(ctx->backend, ub->offset, transposed, data_size);
-            memcpy(ub->shadow, transposed, 64);
-        }
+        ctx->backend->ops->write_uniform(ctx->backend, ub->offset, value, data_size);
+        memcpy(ub->shadow, value, 64);
         ub->shadow_size = 64;
         ub->shadow_components = 16;
         ub->shadow_type = GL_FLOAT;

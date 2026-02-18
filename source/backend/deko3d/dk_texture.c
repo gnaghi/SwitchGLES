@@ -362,7 +362,6 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
                              GLint xoffset, GLint yoffset,
                              GLsizei width, GLsizei height,
                              GLenum format, GLenum type, const void *pixels) {
-    (void)target;
     (void)level;
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
@@ -424,6 +423,12 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     DkImageView imageView;
     dkImageViewDefaults(&imageView, texImage);
 
+    /* For cubemap face targets, select the specific face layer */
+    uint32_t dst_z = 0;
+    if (dk_is_cubemap_face(target) && dk->texture_is_cubemap[handle]) {
+        dst_z = (uint32_t)dk_cubemap_face_index(target);
+    }
+
     /* Copy staging to texture at the specified offset.
      * Since glTexImage2D stores GL row 0 at storage row 0 (no flip),
      * GL yoffset maps directly to storage row offset. */
@@ -433,7 +438,7 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
                             + dk->client_array_base + stagingOffset;
     DkCopyBuf srcBuf = { stagingAddr, aligned_row_size, (uint32_t)height };
     /* Note: DkImageRect is { x, y, z, width, height, depth } */
-    DkImageRect dstRect = { (uint32_t)xoffset, dk_yoffset, 0, (uint32_t)width, (uint32_t)height, 1 };
+    DkImageRect dstRect = { (uint32_t)xoffset, dk_yoffset, dst_z, (uint32_t)width, (uint32_t)height, 1 };
 
     dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &imageView, &dstRect, 0);
 
@@ -451,8 +456,8 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
     dk_rebind_render_target(dk);
 
-    SGL_TRACE_TEXTURE("texture_sub_image_2d handle=%u offset=(%d,%d) %dx%d",
-                      handle, xoffset, yoffset, width, height);
+    SGL_TRACE_TEXTURE("texture_sub_image_2d handle=%u target=0x%X offset=(%d,%d) %dx%d",
+                      handle, target, xoffset, yoffset, width, height);
 }
 
 /* ============================================================================
