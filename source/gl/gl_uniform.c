@@ -1395,7 +1395,17 @@ static bool sgl_validate_matrix_uniform(sgl_program_t *prog, GLint location,
  * use the same address, later draws overwrite earlier ones before the
  * GPU executes them.
  */
-static void set_float_uniform(GLint location, int num_components, GLsizei count, const GLfloat *values) {
+/*
+ * Unified scalar/vector uniform setter for float and int (is_int selects).
+ * Float and int share the same std140 layout (4 bytes/component, padded to
+ * vec4) and packing logic; only the sampler handling, validation function,
+ * bool comparison and shadow type differ. glUniform{1..4}{f,i}{,v} go through
+ * the set_float_uniform / set_int_uniform wrappers below.
+ */
+static void set_scalar_uniform(GLint location, int num_components, GLsizei count,
+                               const void *values, bool is_int) {
+    const GLfloat *fv = (const GLfloat *)values;
+    const GLint   *iv = (const GLint *)values;
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx || !ctx->backend) return;
 
@@ -1420,20 +1430,42 @@ static void set_float_uniform(GLint location, int num_components, GLsizei count,
         return;
     }
 
-    /* Sampler locations: float writes are GL_INVALID_OPERATION per spec */
-    if (location & SGL_LOC_SAMPLER_FLAG) {
-        sgl_set_error(ctx, GL_INVALID_OPERATION);
-        return;
-    }
-
     sgl_program_t *prog = GET_PROGRAM(ctx->current_program);
     if (!prog) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
         return;
     }
 
+    /* Sampler locations: int writes (glUniform1i/1iv) set the texture unit;
+     * float writes are GL_INVALID_OPERATION per spec. */
+    if (location & SGL_LOC_SAMPLER_FLAG) {
+        if (!is_int) {
+            sgl_set_error(ctx, GL_INVALID_OPERATION);
+            return;
+        }
+        if (num_components != 1) {
+            sgl_set_error(ctx, GL_INVALID_OPERATION);
+            return;
+        }
+        int sampler_idx = location & 0xFFFF;
+        /* Set tex_unit for each element (count=1 single, count>1 sampler array) */
+        for (GLsizei e = 0; e < count; e++) {
+            int si = sampler_idx + e;
+            if (si >= 0 && si < prog->num_samplers) {
+                prog->samplers[si].tex_unit = iv[e];
+                SGL_TRACE_UNIFORM("sampler[%d] '%s': binding=%d -> tex_unit=%d",
+                                  si, prog->samplers[si].name,
+                                  prog->samplers[si].shader_binding, iv[e]);
+            }
+        }
+        return;
+    }
+
     /* Validate type/count against declared uniform metadata (if available) */
-    if (!sgl_validate_float_uniform(prog, location, num_components, count)) {
+    bool valid_uniform = is_int
+        ? sgl_validate_int_uniform(prog, location, num_components, count)
+        : sgl_validate_float_uniform(prog, location, num_components, count);
+    if (!valid_uniform) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
         return;
     }
@@ -1466,12 +1498,13 @@ static void set_float_uniform(GLint location, int num_components, GLsizei count,
 
         if (count == 1) {
             /* Single value: write exact bytes (no array padding) */
-            uint32_t dataSize = num_components * sizeof(float);
+            uint32_t dataSize = num_components * 4u;
             if (offset + dataSize > packed->size) return;
             if (is_bool) {
                 uint32_t bvals[4];
                 for (int j = 0; j < num_components; j++)
-                    bvals[j] = (values[j] != 0.0f) ? 0xFFFFFFFFu : 0x00000000u;
+                    bvals[j] = (is_int ? (iv[j] != 0) : (fv[j] != 0.0f))
+                                   ? 0xFFFFFFFFu : 0x00000000u;
                 memcpy(packed->data + offset, bvals, dataSize);
             } else {
                 memcpy(packed->data + offset, values, dataSize);
@@ -1486,18 +1519,20 @@ static void set_float_uniform(GLint location, int num_components, GLsizei count,
             if ((uint32_t)offset > packed->size) return;
             if ((uint64_t)count * (uint32_t)stride >
                 (uint64_t)(packed->size - offset)) return;
-            uint32_t elemBytes = num_components * sizeof(float);
+            uint32_t elemBytes = num_components * 4u;
             for (GLsizei e = 0; e < count; e++) {
                 uint32_t eoff = offset + e * stride;
                 memset(packed->data + eoff, 0, stride);
                 if (is_bool) {
                     uint32_t bvals[4];
                     for (int j = 0; j < num_components; j++)
-                        bvals[j] = (values[e * num_components + j] != 0.0f) ? 0xFFFFFFFFu : 0x00000000u;
+                        bvals[j] = (is_int ? (iv[e * num_components + j] != 0)
+                                           : (fv[e * num_components + j] != 0.0f))
+                                       ? 0xFFFFFFFFu : 0x00000000u;
                     memcpy(packed->data + eoff, bvals, num_components * sizeof(uint32_t));
                 } else {
                     memcpy(packed->data + eoff,
-                           values + e * num_components,
+                           (const uint8_t *)values + (size_t)e * num_components * 4u,
                            elemBytes);
                 }
             }
@@ -1506,7 +1541,7 @@ static void set_float_uniform(GLint location, int num_components, GLsizei count,
         {
             int stride = lookup_element_stride(prog, location);
             uint32_t writtenSize = (count == 1)
-                ? num_components * sizeof(float)
+                ? num_components * 4u
                 : (uint32_t)count * stride;
             apply_packed_mirror(prog, location, packed->data + offset, writtenSize);
         }
@@ -1538,27 +1573,38 @@ static void set_float_uniform(GLint location, int num_components, GLsizei count,
         ub->valid = true;
     }
 
-    /* Write data via backend - pad each element to vec4 */
+    /* Write data via backend - pad each element to vec4 (std140) */
     if (ub->valid && ctx->backend->ops->write_uniform) {
-        float array_data[4 * 64]; /* support up to 64 elements on stack */
+        uint32_t array_data[4 * 64]; /* support up to 64 elements on stack */
+        const uint32_t *vw = (const uint32_t *)values;
         memset(array_data, 0, clampedCount * 16);
         for (GLsizei e = 0; e < clampedCount; e++) {
             for (int j = 0; j < num_components && j < 4; j++) {
-                array_data[e * 4 + j] = values[e * num_components + j];
+                array_data[e * 4 + j] = vw[e * num_components + j];
             }
         }
         ctx->backend->ops->write_uniform(ctx->backend, ub->offset, array_data, clampedCount * 16);
 
-        /* Save shadow copy for glGetUniformfv readback (first element only) */
-        uint32_t shadow_bytes = (uint32_t)num_components * sizeof(float);
+        /* Save shadow copy for glGetUniform*v readback (first element only) */
+        uint32_t shadow_bytes = (uint32_t)num_components * 4u;
         if (shadow_bytes > 64) shadow_bytes = 64;
         memcpy(ub->shadow, values, shadow_bytes);
         ub->shadow_size = shadow_bytes;
         ub->shadow_components = num_components;
-        ub->shadow_type = GL_FLOAT;
+        ub->shadow_type = is_int ? GL_INT : GL_FLOAT;
     }
 
     ub->dirty = true;
+}
+
+static void set_float_uniform(GLint location, int num_components, GLsizei count,
+                              const GLfloat *values) {
+    set_scalar_uniform(location, num_components, count, values, false);
+}
+
+static void set_int_uniform(GLint location, int num_components, GLsizei count,
+                            const GLint *values) {
+    set_scalar_uniform(location, num_components, count, values, true);
 }
 
 GL_APICALL void GL_APIENTRY glUniform1f(GLint location, GLfloat v0) {
@@ -1583,195 +1629,6 @@ GL_APICALL void GL_APIENTRY glUniform4f(GLint location, GLfloat v0, GLfloat v1, 
     GLfloat values[4] = { v0, v1, v2, v3 };
     set_float_uniform(location, 4, 1, values);
     SGL_TRACE_UNIFORM("glUniform4f(loc=%d, %.2f, %.2f, %.2f, %.2f)", location, v0, v1, v2, v3);
-}
-
-/*
- * Helper to set an integer uniform (1-4 components)
- * std140 layout: integers are also 4 bytes each, padded to 16 bytes
- * Note: For samplers (glUniform1i), the value is the texture unit index
- *
- * IMPORTANT: We allocate a NEW offset for each glUniform call to avoid
- * data races when multiple draws use different values in the same frame.
- */
-static void set_int_uniform(GLint location, int num_components, GLsizei count, const GLint *values) {
-    sgl_context_t *ctx = sgl_get_current_context();
-    if (!ctx || !ctx->backend) return;
-
-    /* GLES2: count < 0 → GL_INVALID_VALUE */
-    if (count < 0) {
-        sgl_set_error(ctx, GL_INVALID_VALUE);
-        return;
-    }
-
-    /* No program in use → GL_INVALID_OPERATION (must check BEFORE location == -1) */
-    if (ctx->current_program == 0) {
-        sgl_set_error(ctx, GL_INVALID_OPERATION);
-        return;
-    }
-
-    if (location == -1) return;
-
-    /* Reject invalid locations: both packed+sampler flags set is impossible
-     * for real locations (catches -2, -3, etc. from dEQP negative tests). */
-    if ((location & SGL_LOC_PACKED_FLAG) && (location & SGL_LOC_SAMPLER_FLAG)) {
-        sgl_set_error(ctx, GL_INVALID_OPERATION);
-        return;
-    }
-
-    sgl_program_t *prog = GET_PROGRAM(ctx->current_program);
-    if (!prog) {
-        sgl_set_error(ctx, GL_INVALID_OPERATION);
-        return;
-    }
-
-    /* Sampler mode: glUniform1i/1iv sets texture unit (num_components must be 1) */
-    if (location & SGL_LOC_SAMPLER_FLAG) {
-        if (num_components != 1) {
-            sgl_set_error(ctx, GL_INVALID_OPERATION);
-            return;
-        }
-        int sampler_idx = location & 0xFFFF;
-        /* Set tex_unit for each element (count=1 for single, count>1 for sampler arrays) */
-        for (GLsizei e = 0; e < count; e++) {
-            int si = sampler_idx + e;
-            if (si >= 0 && si < prog->num_samplers) {
-                prog->samplers[si].tex_unit = values[e];
-                SGL_TRACE_UNIFORM("sampler[%d] '%s': binding=%d -> tex_unit=%d",
-                                  si, prog->samplers[si].name,
-                                  prog->samplers[si].shader_binding, values[e]);
-            }
-        }
-        return;
-    }
-
-    /* Validate type/count against declared uniform metadata (if available) */
-    if (!sgl_validate_int_uniform(prog, location, num_components, count)) {
-        sgl_set_error(ctx, GL_INVALID_OPERATION);
-        return;
-    }
-
-    /* Packed mode: write directly to shadow buffer */
-    if (location & SGL_LOC_PACKED_FLAG) {
-        int stage = (location >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
-        int binding = (location >> SGL_LOC_BINDING_SHIFT) & SGL_LOC_BINDING_MASK;
-        int offset = location & SGL_LOC_OFFSET_MASK;
-
-        if (binding >= SGL_MAX_PACKED_UBOS) return;  /* Bounds check */
-
-        sgl_packed_ubo_t *packed = (stage == 0)
-            ? &prog->packed_vertex[binding]
-            : &prog->packed_fragment[binding];
-
-        if (!packed->valid) return;
-
-        /* Bool uniforms: convert to Mesa's native boolean representation.
-         * Mesa sets UniformBooleanTrue = ~0U (0xFFFFFFFF), so compiled shaders
-         * expect true = 0xFFFFFFFF, false = 0x00000000 in the constant buffer.
-         * The shader's `bool == bool` comparison uses integer equality (ISETP.EQ),
-         * so the exact bit pattern matters — 1.0f (0x3F800000) would fail.
-         * Writing raw int 1 (0x00000001) is also wrong (Maxwell flushes denormals).
-         * Use two lookup methods for robustness: active_uniforms (primary)
-         * and program_uniforms (fallback). */
-        const sgl_active_uniform_info_t *ainfo = find_active_uniform_by_location(prog, location);
-        bool is_bool = ainfo && sgl_is_bool_uniform_type(ainfo->type);
-        if (!is_bool) {
-            /* Fallback: search program_uniforms[] directly */
-            GLenum ptype = find_packed_uniform_type(prog, location);
-            if (sgl_is_bool_uniform_type(ptype))
-                is_bool = true;
-        }
-
-        if (count == 1) {
-            /* Single value: write exact bytes (no array padding) */
-            uint32_t dataSize = num_components * sizeof(int32_t);
-            if (offset + dataSize > packed->size) return;
-            if (is_bool) {
-                uint32_t bvals[4];
-                for (int j = 0; j < num_components; j++)
-                    bvals[j] = (values[j] != 0) ? 0xFFFFFFFFu : 0x00000000u;
-                memcpy(packed->data + offset, bvals, dataSize);
-            } else {
-                memcpy(packed->data + offset, values, dataSize);
-            }
-        } else {
-            /* Array: stride depends on compilation path (Mesa constbuf vs std140 UBO) */
-            int stride = lookup_element_stride(prog, location);
-            if (stride <= 0) return;
-            /* Bound the write to the shadow buffer (64-bit, see set_float). */
-            if ((uint32_t)offset > packed->size) return;
-            if ((uint64_t)count * (uint32_t)stride >
-                (uint64_t)(packed->size - offset)) return;
-            uint32_t elemBytes = num_components * sizeof(int32_t);
-            for (GLsizei e = 0; e < count; e++) {
-                uint32_t eoff = offset + e * stride;
-                memset(packed->data + eoff, 0, stride);
-                if (is_bool) {
-                    uint32_t bvals[4];
-                    for (int j = 0; j < num_components; j++)
-                        bvals[j] = (values[e * num_components + j] != 0) ? 0xFFFFFFFFu : 0x00000000u;
-                    memcpy(packed->data + eoff, bvals, num_components * sizeof(uint32_t));
-                } else {
-                    memcpy(packed->data + eoff,
-                           values + e * num_components,
-                           elemBytes);
-                }
-            }
-        }
-        packed->dirty = true;
-        {
-            int stride = lookup_element_stride(prog, location);
-            uint32_t writtenSize = (count == 1)
-                ? num_components * sizeof(int32_t)
-                : (uint32_t)count * stride;
-            apply_packed_mirror(prog, location, packed->data + offset, writtenSize);
-        }
-        return;
-    }
-
-    int stage = (location >> 16) & 0xFFFF;
-    int binding = location & 0xFFFF;
-
-    if (binding >= SGL_MAX_UNIFORMS) return;
-
-    sgl_uniform_binding_t *uniforms = (stage == 0) ? prog->vertex_uniforms : prog->fragment_uniforms;
-    sgl_uniform_binding_t *ub = &uniforms[binding];
-
-    /* Clamp count to stack buffer limit */
-    GLsizei clampedCount = count > 64 ? 64 : count;
-
-    /* std140: each array element padded to 16 bytes (ivec4) */
-    uint32_t dataSize = clampedCount * 16;
-    uint32_t alignedSize = SGL_ALIGN_UP(dataSize, SGL_UNIFORM_ALIGNMENT);
-
-    /* ALWAYS allocate new offset to avoid data races between draws */
-    if (ctx->backend->ops->alloc_uniform) {
-        ub->offset = ctx->backend->ops->alloc_uniform(ctx->backend, alignedSize);
-        ub->size = alignedSize;
-        ub->data_size = dataSize;
-        ub->valid = true;
-    }
-
-    /* Write data via backend - pad each element to ivec4 */
-    if (ub->valid && ctx->backend->ops->write_uniform) {
-        int32_t array_data[4 * 64]; /* support up to 64 elements on stack */
-        memset(array_data, 0, clampedCount * 16);
-        for (GLsizei e = 0; e < clampedCount; e++) {
-            for (int j = 0; j < num_components && j < 4; j++) {
-                array_data[e * 4 + j] = values[e * num_components + j];
-            }
-        }
-        ctx->backend->ops->write_uniform(ctx->backend, ub->offset, array_data, clampedCount * 16);
-
-        /* Save shadow copy for glGetUniformiv readback (first element only) */
-        uint32_t shadow_bytes = (uint32_t)num_components * sizeof(int32_t);
-        if (shadow_bytes > 64) shadow_bytes = 64;
-        memcpy(ub->shadow, values, shadow_bytes);
-        ub->shadow_size = shadow_bytes;
-        ub->shadow_components = num_components;
-        ub->shadow_type = GL_INT;
-    }
-
-    ub->dirty = true;
 }
 
 GL_APICALL void GL_APIENTRY glUniform1i(GLint location, GLint v0) {
