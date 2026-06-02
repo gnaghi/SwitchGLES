@@ -50,26 +50,7 @@ GL_APICALL void GL_APIENTRY glClear(GLbitfield mask) {
      * render pass setup. We only restore for stencil to avoid write mask issues. */
     if ((mask & GL_STENCIL_BUFFER_BIT) && ctx->backend->ops->apply_depth_stencil) {
         sgl_depth_stencil_state_t dss;
-        dss.depth_test_enabled = ctx->depth_state.depth_test_enabled;
-        dss.depth_write_enabled = ctx->depth_state.depth_write_enabled;
-        dss.depth_func = ctx->depth_state.depth_func;
-        dss.depth_clear_value = ctx->depth_state.clear_depth;
-        dss.stencil_test_enabled = ctx->depth_state.stencil_test_enabled;
-        dss.stencil_front.func = ctx->depth_state.front.func;
-        dss.stencil_front.ref = ctx->depth_state.front.ref;
-        dss.stencil_front.func_mask = ctx->depth_state.front.func_mask;
-        dss.stencil_front.write_mask = ctx->depth_state.front.write_mask;
-        dss.stencil_front.fail_op = ctx->depth_state.front.fail_op;
-        dss.stencil_front.zfail_op = ctx->depth_state.front.zfail_op;
-        dss.stencil_front.zpass_op = ctx->depth_state.front.zpass_op;
-        dss.stencil_back.func = ctx->depth_state.back.func;
-        dss.stencil_back.ref = ctx->depth_state.back.ref;
-        dss.stencil_back.func_mask = ctx->depth_state.back.func_mask;
-        dss.stencil_back.write_mask = ctx->depth_state.back.write_mask;
-        dss.stencil_back.fail_op = ctx->depth_state.back.fail_op;
-        dss.stencil_back.zfail_op = ctx->depth_state.back.zfail_op;
-        dss.stencil_back.zpass_op = ctx->depth_state.back.zpass_op;
-        dss.stencil_clear_value = ctx->depth_state.clear_stencil;
+        sgl_build_depth_stencil(ctx, &dss);
         ctx->backend->ops->apply_depth_stencil(ctx->backend, &dss);
     }
 }
