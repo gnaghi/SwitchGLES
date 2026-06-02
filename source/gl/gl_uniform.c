@@ -1479,8 +1479,13 @@ static void set_float_uniform(GLint location, int num_components, GLsizei count,
         } else {
             /* Array: stride depends on compilation path (Mesa constbuf vs std140 UBO) */
             int stride = lookup_element_stride(prog, location);
-            uint32_t totalSize = count * stride;
-            if (offset + totalSize > packed->size) return;
+            if (stride <= 0) return;
+            /* Bound the write to the shadow buffer. Compute in 64-bit so a
+             * hostile/erroneous count cannot overflow count*stride and slip
+             * past the guard, then overrun packed->data in the loop below. */
+            if ((uint32_t)offset > packed->size) return;
+            if ((uint64_t)count * (uint32_t)stride >
+                (uint64_t)(packed->size - offset)) return;
             uint32_t elemBytes = num_components * sizeof(float);
             for (GLsizei e = 0; e < count; e++) {
                 uint32_t eoff = offset + e * stride;
@@ -1691,8 +1696,11 @@ static void set_int_uniform(GLint location, int num_components, GLsizei count, c
         } else {
             /* Array: stride depends on compilation path (Mesa constbuf vs std140 UBO) */
             int stride = lookup_element_stride(prog, location);
-            uint32_t totalSize = count * stride;
-            if (offset + totalSize > packed->size) return;
+            if (stride <= 0) return;
+            /* Bound the write to the shadow buffer (64-bit, see set_float). */
+            if ((uint32_t)offset > packed->size) return;
+            if ((uint64_t)count * (uint32_t)stride >
+                (uint64_t)(packed->size - offset)) return;
             uint32_t elemBytes = num_components * sizeof(int32_t);
             for (GLsizei e = 0; e < count; e++) {
                 uint32_t eoff = offset + e * stride;
@@ -1893,11 +1901,14 @@ GL_APICALL void GL_APIENTRY glUniformMatrix2fv(GLint location, GLsizei count, GL
         int stage = (location >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
         int binding = (location >> SGL_LOC_BINDING_SHIFT) & SGL_LOC_BINDING_MASK;
         int offset = location & SGL_LOC_OFFSET_MASK;
+        if (binding >= SGL_MAX_PACKED_UBOS) return;  /* Bounds check */
         sgl_packed_ubo_t *packed = (stage == 0)
             ? &prog->packed_vertex[binding]
             : &prog->packed_fragment[binding];
         uint32_t dataSize = 32 * count; /* mat2 std140: 2 vec4 = 32 bytes */
-        if (!packed->valid || offset + dataSize > packed->size) return;
+        if (!packed->valid || (uint32_t)offset > packed->size ||
+            (uint64_t)32 * (uint32_t)count > (uint64_t)(packed->size - offset))
+            return;
         for (GLsizei m = 0; m < count; m++) {
             const float *src = value + m * 4;
             float *dst = (float *)(packed->data + offset + m * 32);
@@ -1995,11 +2006,14 @@ GL_APICALL void GL_APIENTRY glUniformMatrix3fv(GLint location, GLsizei count, GL
         int stage = (location >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
         int binding = (location >> SGL_LOC_BINDING_SHIFT) & SGL_LOC_BINDING_MASK;
         int offset = location & SGL_LOC_OFFSET_MASK;
+        if (binding >= SGL_MAX_PACKED_UBOS) return;  /* Bounds check */
         sgl_packed_ubo_t *packed = (stage == 0)
             ? &prog->packed_vertex[binding]
             : &prog->packed_fragment[binding];
         uint32_t dataSize = 48 * count; /* mat3 std140: 3 vec4 = 48 bytes */
-        if (!packed->valid || offset + dataSize > packed->size) return;
+        if (!packed->valid || (uint32_t)offset > packed->size ||
+            (uint64_t)48 * (uint32_t)count > (uint64_t)(packed->size - offset))
+            return;
         for (GLsizei m = 0; m < count; m++) {
             const float *src = value + m * 9;
             float *dst = (float *)(packed->data + offset + m * 48);
@@ -2099,11 +2113,14 @@ GL_APICALL void GL_APIENTRY glUniformMatrix4fv(GLint location, GLsizei count, GL
         int stage = (location >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
         int binding = (location >> SGL_LOC_BINDING_SHIFT) & SGL_LOC_BINDING_MASK;
         int offset = location & SGL_LOC_OFFSET_MASK;
+        if (binding >= SGL_MAX_PACKED_UBOS) return;  /* Bounds check */
         sgl_packed_ubo_t *packed = (stage == 0)
             ? &prog->packed_vertex[binding]
             : &prog->packed_fragment[binding];
         uint32_t dataSize = 64 * count; /* mat4 std140: 4 vec4 = 64 bytes */
-        if (!packed->valid || offset + dataSize > packed->size) return;
+        if (!packed->valid || (uint32_t)offset > packed->size ||
+            (uint64_t)64 * (uint32_t)count > (uint64_t)(packed->size - offset))
+            return;
         memcpy(packed->data + offset, value, dataSize);
         packed->dirty = true;
         apply_packed_mirror(prog, location, value, dataSize);

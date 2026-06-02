@@ -679,6 +679,9 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
     if (handle == 0 || handle >= SGL_MAX_TEXTURES) return;
 
+    /* Drain a still-in-flight submitted frame before recording into cmdbuf */
+    dk_ensure_recordable(dk);
+
     /* Handle cubemap faces separately */
     if (dk_is_cubemap_face(target)) {
         if (level == 0) {
@@ -1274,6 +1277,9 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     }
     if (!pixels) return;
 
+    /* Drain a still-in-flight submitted frame before recording into cmdbuf */
+    dk_ensure_recordable(dk);
+
     /* Get the existing DkImage */
     DkImage *texImage = &dk->textures[handle];
 
@@ -1679,6 +1685,9 @@ void dk_generate_mipmap(sgl_backend_t *be, sgl_handle_t handle) {
         return;
     }
 
+    /* Drain a still-in-flight submitted frame before recording into cmdbuf */
+    dk_ensure_recordable(dk);
+
     uint32_t width = dk->texture_width[handle];
     uint32_t height = dk->texture_height[handle];
     uint32_t mip_levels = dk->texture_mip_levels[handle];
@@ -1768,6 +1777,9 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
     if (handle == 0 || handle >= SGL_MAX_TEXTURES) return;
     if (width <= 0 || height <= 0) return;
+
+    /* Drain a still-in-flight submitted frame before recording into cmdbuf */
+    dk_ensure_recordable(dk);
 
     /* Get current render target - check FBO binding (like dk_read_pixels).
      * Use type flag to pick correct array (avoids renderbuffer/texture ID collision). */
@@ -2137,6 +2149,9 @@ void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     }
     if (width <= 0 || height <= 0) return;
 
+    /* Drain a still-in-flight submitted frame before recording into cmdbuf */
+    dk_ensure_recordable(dk);
+
     /* Get current render target - check FBO binding (like dk_read_pixels).
      * Use type flag to pick correct array (avoids renderbuffer/texture ID collision). */
     DkImage *srcImage = NULL;
@@ -2343,6 +2358,9 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
     if (handle == 0 || handle >= SGL_MAX_TEXTURES) return;
+
+    /* Drain a still-in-flight submitted frame before recording into cmdbuf */
+    dk_ensure_recordable(dk);
 
     /* Convert GL compressed format to deko3d format */
     DkImageFormat dkFormat = dk_convert_compressed_format(internalformat);
@@ -2704,6 +2722,9 @@ void dk_compressed_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     if (handle == 0 || handle >= SGL_MAX_TEXTURES) return;
     if (!dk->texture_initialized[handle]) return;
     if (!data || imageSize <= 0) return;
+
+    /* Drain a still-in-flight submitted frame before recording into cmdbuf */
+    dk_ensure_recordable(dk);
 
     DkImage *texImage = &dk->textures[handle];
 

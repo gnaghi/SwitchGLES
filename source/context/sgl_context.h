@@ -73,6 +73,7 @@ typedef struct sgl_context {
     bool                    initialized;
     bool                    used;
     int                     client_version;  /* 2 for GLES2 */
+    int                     config_id;        /* EGLConfig id this context was created with */
 } sgl_context_t;
 
 /* Context lifecycle */

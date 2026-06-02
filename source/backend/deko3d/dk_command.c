@@ -253,6 +253,37 @@ void dk_submit_and_reset(dk_backend_data_t *dk) {
                     DkInvalidateFlags_Zcull);
 }
 
+/*
+ * Bring dk->cmdbuf back to a clean, recordable state if a frame was already
+ * submitted (eglSwapBuffers -> dk_end_frame) but not yet reset by the next
+ * dk_wait_fence. Must be called before any synchronous mid-stream operation
+ * that records into dk->cmdbuf and then calls dkCmdBufFinishList itself
+ * (texture uploads, glReadPixels, blits). See header for rationale.
+ */
+void dk_ensure_recordable(dk_backend_data_t *dk) {
+    if (!dk->cmdbuf_submitted) {
+        return;
+    }
+
+    if (!dkQueueIsInErrorState(dk->queue)) {
+        dkQueueWaitIdle(dk->queue);
+    }
+
+    dkCmdBufClear(dk->cmdbuf);
+    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0,
+                      SGL_CMD_MEM_SIZE);
+
+    dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr,
+                                   SGL_MAX_TEXTURES);
+    dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr,
+                                     SGL_MAX_TEXTURES);
+    dk->descriptors_bound = true;
+
+    dk_rebind_render_target(dk);
+
+    dk->cmdbuf_submitted = false;
+}
+
 /* ============================================================================
  * Frame Management
  * ============================================================================ */

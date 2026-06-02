@@ -27,25 +27,41 @@ typedef struct {
     char *buf;
     int   len;
     int   cap;
+    int   failed;   /* set on allocation failure; appends become no-ops */
 } strbuf_t;
 
 static void sb_init(strbuf_t *sb) {
     sb->cap = 4096;
     sb->buf = (char *)malloc(sb->cap);
     sb->len = 0;
-    if (sb->buf) sb->buf[0] = '\0';
+    sb->failed = 0;
+    if (sb->buf) {
+        sb->buf[0] = '\0';
+    } else {
+        sb->cap = 0;
+        sb->failed = 1;
+    }
 }
 
 static void sb_ensure(strbuf_t *sb, int extra) {
+    if (sb->failed) return;
     while (sb->len + extra + 1 > sb->cap) {
-        sb->cap *= 2;
-        sb->buf = (char *)realloc(sb->buf, sb->cap);
+        int new_cap = sb->cap * 2;
+        char *new_buf = (char *)realloc(sb->buf, new_cap);
+        if (!new_buf) {
+            /* Keep the original buffer (still freed later) and stop growing. */
+            sb->failed = 1;
+            return;
+        }
+        sb->buf = new_buf;
+        sb->cap = new_cap;
     }
 }
 
 static void sb_append(strbuf_t *sb, const char *str) {
     int slen = (int)strlen(str);
     sb_ensure(sb, slen);
+    if (sb->failed) return;
     memcpy(sb->buf + sb->len, str, slen + 1);
     sb->len += slen;
 }
@@ -2168,6 +2184,11 @@ int glslt_validate_es100(const char *source, glslt_stage_t stage,
         ok = validate_texture_functions(norm, stage, error, error_size);
     }
     free(norm);
+    /* collect_struct_defs above populated the module-global struct table;
+     * clear it so it cannot leak into a later transpile/validate call. */
+    s_num_structs = 0;
+    s_num_replacements = 0;
+    s_num_struct_array_uniforms = 0;
     return ok;
 }
 
@@ -2179,6 +2200,12 @@ glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
                                const glslt_options_t *opts) {
     glslt_result_t result;
     memset(&result, 0, sizeof(result));
+
+    /* Reset module-global parse state up front so a prior call that bailed
+     * on an error path cannot leak stale structs/replacements into this one. */
+    s_num_structs = 0;
+    s_num_replacements = 0;
+    s_num_struct_array_uniforms = 0;
 
     if (!source) {
         snprintf(result.error, sizeof(result.error), "source is NULL");
@@ -2207,6 +2234,12 @@ glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
                  * natively — no shader-level z transform needed. */
                 int src_len = (int)strlen(source);
                 result.output = (char *)malloc(src_len + 1);
+                if (!result.output) {
+                    snprintf(result.error, sizeof(result.error),
+                             "out of memory (passthrough)");
+                    s_current_defines = NULL;
+                    return result;  /* result.success = 0 (from memset) */
+                }
                 memcpy(result.output, source, src_len + 1);
                 result.output_len = src_len;
 
@@ -2715,6 +2748,20 @@ glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
      * No shader-level z transform needed. */
 
     /* ---- Fill result ---- */
+
+    if (sb.failed) {
+        /* Output buffer ran out of memory mid-emit: fail instead of
+         * returning a silently-truncated (broken) shader. */
+        snprintf(result.error, sizeof(result.error),
+                 "out of memory building transpiled output");
+        free(sb.buf);
+        s_current_defines = NULL;
+        s_num_structs = 0;
+        s_num_replacements = 0;
+        s_num_struct_array_uniforms = 0;
+        free(norm_source);
+        return result;  /* result.success = 0 (from memset) */
+    }
 
     result.output = sb.buf;
     result.output_len = sb.len;

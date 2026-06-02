@@ -525,7 +525,9 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint xo
         level_w = level_w > 1 ? level_w >> 1 : 1;
         level_h = level_h > 1 ? level_h >> 1 : 1;
     }
-    if (xoffset + width > level_w || yoffset + height > level_h) {
+    /* Range check without computing offset+size (avoids signed overflow). */
+    if (xoffset > level_w || width > level_w - xoffset ||
+        yoffset > level_h || height > level_h - yoffset) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }

@@ -11,6 +11,23 @@ void sgl_res_mgr_init(sgl_resource_manager_t *mgr) {
     memset(mgr, 0, sizeof(sgl_resource_manager_t));
 }
 
+void sgl_res_mgr_destroy(sgl_resource_manager_t *mgr) {
+    /* Release heap buffers owned by live shaders/programs before the
+     * containing context is wiped. Without this, every eglDestroyContext /
+     * eglTerminate leaks each shader's source/info_log/mesa_meta and each
+     * program's info_log (cumulative across dEQP batches). */
+    for (GLuint i = 1; i < SGL_MAX_SHADERS; i++) {
+        if (mgr->shaders[i].used) {
+            sgl_res_mgr_free_shader(mgr, i);
+        }
+    }
+    for (GLuint i = 1; i < SGL_MAX_PROGRAMS; i++) {
+        if (mgr->programs[i].used) {
+            sgl_res_mgr_free_program(mgr, i);
+        }
+    }
+}
+
 /* ============================================================================
  * Buffer Operations
  * ============================================================================ */
@@ -104,6 +121,10 @@ GLuint sgl_res_mgr_alloc_program(sgl_resource_manager_t *mgr) {
 
 void sgl_res_mgr_free_program(sgl_resource_manager_t *mgr, GLuint id) {
     if (id > 0 && id < SGL_MAX_PROGRAMS && mgr->programs[id].used) {
+        if (mgr->programs[id].info_log) {
+            free(mgr->programs[id].info_log);
+            mgr->programs[id].info_log = NULL;
+        }
         mgr->programs[id].used = false;
         mgr->gl_name_type[id] = SGL_NAME_FREE;
     }

@@ -45,6 +45,10 @@ typedef struct sgl_resource_manager {
 /* Initialize resource manager */
 void sgl_res_mgr_init(sgl_resource_manager_t *mgr);
 
+/* Release all heap-allocated resources owned by live objects (shader
+ * source/info_log/mesa_meta, program info_log). Call before wiping. */
+void sgl_res_mgr_destroy(sgl_resource_manager_t *mgr);
+
 /* Buffer operations */
 GLuint sgl_res_mgr_alloc_buffer(sgl_resource_manager_t *mgr);
 void sgl_res_mgr_free_buffer(sgl_resource_manager_t *mgr, GLuint id);

@@ -77,6 +77,9 @@ void sgl_context_init(sgl_context_t *ctx) {
 void sgl_context_destroy(sgl_context_t *ctx) {
     if (!ctx) return;
 
+    /* Free heap owned by shaders/programs before wiping the manager */
+    sgl_res_mgr_destroy(&ctx->res_mgr);
+
     /* Backend will be destroyed separately */
     ctx->backend = NULL;
 

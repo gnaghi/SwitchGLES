@@ -51,6 +51,7 @@ typedef struct sgl_surface {
     bool used;
     EGLint width;
     EGLint height;
+    EGLint config_id;   /* config the surface was created with (for EGL_CONFIG_ID) */
 
     /* deko3d swapchain */
     DkSwapchain swapchain;

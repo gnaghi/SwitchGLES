@@ -139,11 +139,29 @@ uint32_t dk_buffer_data(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
             uint32_t remaining = block_size - alignment_waste - (uint32_t)size;
 
             if (remaining >= SGL_UNIFORM_ALIGNMENT * 2) {
-                /* Split: keep remainder in free list */
-                dk->vbo_free_list[i].offset = aligned + (uint32_t)size;
-                dk->vbo_free_list[i].size = remaining;
-                /* If there was alignment waste at the start, add it as a separate block
-                 * (only if significant enough) */
+                /* Split: keep the tail remainder free. If there is alignment
+                 * waste at the head (the block offset was not 256-aligned),
+                 * keep it as its own free block instead of leaking it — it
+                 * coalesces with neighbours on a later free. */
+                if (alignment_waste > 0 &&
+                    dk->vbo_free_count < SGL_VBO_FREE_LIST_MAX) {
+                    memmove(&dk->vbo_free_list[i + 2],
+                            &dk->vbo_free_list[i + 1],
+                            (dk->vbo_free_count - i - 1) * sizeof(sgl_vbo_free_block_t));
+                    dk->vbo_free_list[i].offset = block_offset;
+                    dk->vbo_free_list[i].size = alignment_waste;
+                    dk->vbo_free_list[i + 1].offset = aligned + (uint32_t)size;
+                    dk->vbo_free_list[i + 1].size = remaining;
+                    dk->vbo_free_count++;
+                } else {
+                    dk->vbo_free_list[i].offset = aligned + (uint32_t)size;
+                    dk->vbo_free_list[i].size = remaining;
+                }
+            } else if (alignment_waste > 0) {
+                /* Allocation consumes the block (tiny tail over-allocated).
+                 * Preserve the head alignment waste rather than leaking it. */
+                dk->vbo_free_list[i].offset = block_offset;
+                dk->vbo_free_list[i].size = alignment_waste;
             } else {
                 /* Remove entire block */
                 memmove(&dk->vbo_free_list[i],

@@ -177,6 +177,21 @@ void dk_rebind_default_render_target(dk_backend_data_t *dk);
  */
 void dk_rebind_render_target(dk_backend_data_t *dk);
 
+/**
+ * Ensure dk->cmdbuf is safe to record into for a synchronous mid-stream
+ * operation (texture upload, readback, blit).
+ *
+ * After eglSwapBuffers, dk_end_frame has already FinishList'd + submitted the
+ * slot's cmdbuf and the frame may still be in flight. Recording new commands
+ * and calling dkCmdBufFinishList again without an intervening clear would
+ * corrupt the in-flight frame and double-finish the list (a documented crash).
+ * If cmdbuf_submitted is set, this drains the GPU and resets the cmdbuf to a
+ * clean recordable state. No-op otherwise.
+ *
+ * @param dk    Backend data pointer (not sgl_backend_t)
+ */
+void dk_ensure_recordable(dk_backend_data_t *dk);
+
 /* ============================================================================
  * State Application (dk_state.c)
  * ============================================================================ */

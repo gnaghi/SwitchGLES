@@ -233,7 +233,8 @@ GL_APICALL void GL_APIENTRY glBufferSubData(GLenum target, GLintptr offset, GLsi
         return;
     }
 
-    if (offset < 0 || size < 0 || (size_t)(offset + size) > (size_t)buf->size) {
+    /* Range check without computing offset+size (avoids signed overflow). */
+    if (offset < 0 || size < 0 || offset > buf->size || size > buf->size - offset) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }

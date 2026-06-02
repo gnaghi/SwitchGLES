@@ -70,6 +70,12 @@ static void apply_raster(sgl_context_t *ctx) {
         rs.cull_enabled = ctx->raster_state.cull_enabled;
         rs.cull_mode = ctx->raster_state.cull_mode;
         rs.front_face = ctx->raster_state.front_face;
+        /* Polygon offset must be copied too: leaving these uninitialized
+         * pushes garbage stack values to the backend (see gl_draw.c). */
+        rs.polygon_offset_fill_enabled =
+            ctx->raster_state.polygon_offset_fill_enabled;
+        rs.polygon_offset_factor = ctx->raster_state.polygon_offset_factor;
+        rs.polygon_offset_units = ctx->raster_state.polygon_offset_units;
         ctx->backend->ops->apply_raster(ctx->backend, &rs);
     }
 }

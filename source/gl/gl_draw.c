@@ -502,7 +502,10 @@ GL_APICALL void GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum ty
                 if (idx32[i] > max_idx) max_idx = idx32[i];
             }
         }
-        vertex_count = (GLsizei)(max_idx + 1);
+        /* Guard against max_idx+1 wrapping to 0 (would under-allocate) */
+        if (max_idx < (GLuint)0x7FFFFFFF) {
+            vertex_count = (GLsizei)(max_idx + 1);
+        }
     } else if (ctx->bound_element_buffer > 0 && ctx->backend->ops->get_data_cpu_ptr) {
         /* EBO-bound indices: scan EBO data for max vertex index.
          * Needed when vertex attributes are client pointers (not VBOs) —
@@ -512,25 +515,32 @@ GL_APICALL void GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum ty
             uint32_t ebo_byte_offset = ebo_buf->data_offset + (uint32_t)(uintptr_t)indices;
             const uint8_t *ebo_data = (const uint8_t *)ctx->backend->ops->get_data_cpu_ptr(
                 ctx->backend, ebo_byte_offset);
-            GLuint max_idx = 0;
-            if (type == GL_UNSIGNED_BYTE) {
-                for (GLsizei i = 0; i < count; i++) {
-                    if (ebo_data[i] > max_idx) max_idx = ebo_data[i];
+            /* get_data_cpu_ptr returns NULL for an out-of-range offset — do
+             * not dereference it (would crash the scan loop below). */
+            if (ebo_data) {
+                GLuint max_idx = 0;
+                if (type == GL_UNSIGNED_BYTE) {
+                    for (GLsizei i = 0; i < count; i++) {
+                        if (ebo_data[i] > max_idx) max_idx = ebo_data[i];
+                    }
+                } else if (type == GL_UNSIGNED_SHORT) {
+                    const GLushort *idx16 = (const GLushort *)ebo_data;
+                    for (GLsizei i = 0; i < count; i++) {
+                        if (idx16[i] > max_idx) max_idx = idx16[i];
+                    }
+                } else if (type == GL_UNSIGNED_INT) {
+                    const GLuint *idx32 = (const GLuint *)ebo_data;
+                    for (GLsizei i = 0; i < count; i++) {
+                        if (idx32[i] > max_idx) max_idx = idx32[i];
+                    }
                 }
-            } else if (type == GL_UNSIGNED_SHORT) {
-                const GLushort *idx16 = (const GLushort *)ebo_data;
-                for (GLsizei i = 0; i < count; i++) {
-                    if (idx16[i] > max_idx) max_idx = idx16[i];
+                /* Guard against max_idx+1 wrapping to 0 (would under-allocate) */
+                if (max_idx < (GLuint)0x7FFFFFFF) {
+                    vertex_count = (GLsizei)(max_idx + 1);
                 }
-            } else if (type == GL_UNSIGNED_INT) {
-                const GLuint *idx32 = (const GLuint *)ebo_data;
-                for (GLsizei i = 0; i < count; i++) {
-                    if (idx32[i] > max_idx) max_idx = idx32[i];
-                }
+                SGL_TRACE_DRAW("EBO_SCAN ebo=%u off=%u count=%d max_idx=%u vtx_count=%d",
+                       ctx->bound_element_buffer, (uint32_t)(uintptr_t)indices, count, max_idx, vertex_count);
             }
-            vertex_count = (GLsizei)(max_idx + 1);
-            SGL_TRACE_DRAW("EBO_SCAN ebo=%u off=%u count=%d max_idx=%u vtx_count=%d",
-                   ctx->bound_element_buffer, (uint32_t)(uintptr_t)indices, count, max_idx, vertex_count);
         }
     }
 

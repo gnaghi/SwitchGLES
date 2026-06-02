@@ -163,6 +163,9 @@ void dk_blit_framebuffer(sgl_backend_t *be,
         return;
     }
 
+    /* Drain a still-in-flight submitted frame before recording into cmdbuf */
+    dk_ensure_recordable(dk);
+
     /* Resolve source image */
     DkImage *srcImage = NULL;
     if (read_fbo == 0) {
@@ -259,6 +262,9 @@ void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y,
     if (!pixels || width <= 0 || height <= 0 || x < 0 || y < 0) {
         return;
     }
+
+    /* Drain a still-in-flight submitted frame before recording into cmdbuf */
+    dk_ensure_recordable(dk);
 
     /* Get current render target - check if FBO is bound.
      * Use type flag to pick correct array (avoids renderbuffer/texture ID collision). */

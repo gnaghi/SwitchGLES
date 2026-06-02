@@ -527,6 +527,28 @@ EGLAPI EGLBoolean EGLAPIENTRY eglGetConfigAttrib(EGLDisplay dpy, EGLConfig confi
  * EGL Surface Functions
  * ============================================================================ */
 
+/* Validate an EGLConfig handle: it must point at one of our predefined
+ * configs. Returns the config, or NULL (caller should set EGL_BAD_CONFIG). */
+static sgl_config *sgl_egl_get_config(EGLConfig config) {
+    for (int i = 0; i < g_sgl.num_configs; i++) {
+        if ((sgl_config *)config == &g_sgl.configs[i]) {
+            return &g_sgl.configs[i];
+        }
+    }
+    return NULL;
+}
+
+/* Validate an EGLSurface handle: must point at a live surface in the pool.
+ * Returns the surface, or NULL (caller should set EGL_BAD_SURFACE). */
+static sgl_surface *sgl_egl_get_surface(EGLSurface surface) {
+    for (int i = 0; i < SGL_MAX_SURFACES; i++) {
+        if ((sgl_surface *)surface == &g_sgl.surfaces[i]) {
+            return g_sgl.surfaces[i].used ? &g_sgl.surfaces[i] : NULL;
+        }
+    }
+    return NULL;
+}
+
 EGLAPI EGLSurface EGLAPIENTRY eglCreateWindowSurface(EGLDisplay dpy, EGLConfig config,
                                                       EGLNativeWindowType win,
                                                       const EGLint *attrib_list) {
@@ -537,6 +559,13 @@ EGLAPI EGLSurface EGLAPIENTRY eglCreateWindowSurface(EGLDisplay dpy, EGLConfig c
 
     if (display != &g_sgl.display || !display->initialized) {
         sgl_egl_set_error(EGL_BAD_DISPLAY);
+        return EGL_NO_SURFACE;
+    }
+
+    /* Validate config before dereferencing it (cfg->depth_size below). */
+    cfg = sgl_egl_get_config(config);
+    if (!cfg) {
+        sgl_egl_set_error(EGL_BAD_CONFIG);
         return EGL_NO_SURFACE;
     }
 
@@ -655,6 +684,7 @@ EGLAPI EGLSurface EGLAPIENTRY eglCreateWindowSurface(EGLDisplay dpy, EGLConfig c
     surf->used = true;
     surf->current_slot = -1;
     surf->need_acquire = true;
+    surf->config_id = cfg->config_id;
 
     return (EGLSurface)surf;
 }
@@ -680,6 +710,15 @@ EGLAPI EGLBoolean EGLAPIENTRY eglDestroySurface(EGLDisplay dpy, EGLSurface surfa
         if (dk && dk->queue) {
             dkQueueWaitIdle(dk->queue);
         }
+    }
+
+    /* Detach this surface from any context still referencing it so the
+     * memset below cannot leave a dangling draw_surface/read_surface. */
+    for (int i = 0; i < SGL_MAX_CONTEXTS; i++) {
+        sgl_context_t *c = &g_sgl.contexts[i];
+        if (!c->used) continue;
+        if (c->draw_surface == surf) c->draw_surface = NULL;
+        if (c->read_surface == surf) c->read_surface = NULL;
     }
 
     if (surf->swapchain) dkSwapchainDestroy(surf->swapchain);
@@ -710,7 +749,7 @@ EGLAPI EGLBoolean EGLAPIENTRY eglQuerySurface(EGLDisplay dpy, EGLSurface surface
     switch (attribute) {
         case EGL_WIDTH:  *value = surf->width; break;
         case EGL_HEIGHT: *value = surf->height; break;
-        case EGL_CONFIG_ID: *value = 1; break;
+        case EGL_CONFIG_ID: *value = surf->config_id; break;
         case EGL_LARGEST_PBUFFER: *value = EGL_FALSE; break;
         case EGL_RENDER_BUFFER: *value = EGL_BACK_BUFFER; break;
         case EGL_SWAP_BEHAVIOR: *value = EGL_BUFFER_DESTROYED; break;
@@ -731,11 +770,16 @@ EGLAPI EGLContext EGLAPIENTRY eglCreateContext(EGLDisplay dpy, EGLConfig config,
                                                 const EGLint *attrib_list) {
     SGL_EGL_VTRACE("eglCreateContext(%p, %p)", dpy, config);
     sgl_display *display = (sgl_display *)dpy;
-    (void)config;
     (void)share_context;
 
     if (display != &g_sgl.display || !display->initialized) {
         sgl_egl_set_error(EGL_BAD_DISPLAY);
+        return EGL_NO_CONTEXT;
+    }
+
+    sgl_config *cfg = sgl_egl_get_config(config);
+    if (!cfg) {
+        sgl_egl_set_error(EGL_BAD_CONFIG);
         return EGL_NO_CONTEXT;
     }
 
@@ -772,6 +816,7 @@ EGLAPI EGLContext EGLAPIENTRY eglCreateContext(EGLDisplay dpy, EGLConfig config,
     /* Initialize context */
     sgl_context_init(ctx);
     ctx->client_version = client_version;
+    ctx->config_id = cfg->config_id;
 
     /* Create backend */
     sgl_backend_t *backend = dk_backend_create(display->device);
@@ -843,7 +888,13 @@ EGLAPI EGLBoolean EGLAPIENTRY eglMakeCurrent(EGLDisplay dpy, EGLSurface draw,
         return EGL_FALSE;
     }
 
+    /* Release case: a NULL context requires both surfaces to be EGL_NO_SURFACE
+     * (EGL 1.4 §3.7.3), otherwise it is a mismatch. */
     if (context == EGL_NO_CONTEXT) {
+        if (draw != EGL_NO_SURFACE || read != EGL_NO_SURFACE) {
+            sgl_egl_set_error(EGL_BAD_MATCH);
+            return EGL_FALSE;
+        }
         sgl_set_current_context(NULL);
         g_sgl.current_context = NULL;
         g_sgl.current_display = NULL;
@@ -852,6 +903,21 @@ EGLAPI EGLBoolean EGLAPIENTRY eglMakeCurrent(EGLDisplay dpy, EGLSurface draw,
 
     if (!ctx || !ctx->used) {
         sgl_egl_set_error(EGL_BAD_CONTEXT);
+        return EGL_FALSE;
+    }
+
+    /* No surfaceless-context support: a non-NULL context requires both a draw
+     * and a read surface (EGL 1.4 §3.7.3 → EGL_BAD_MATCH if either is absent). */
+    if (draw == EGL_NO_SURFACE || read == EGL_NO_SURFACE) {
+        sgl_egl_set_error(EGL_BAD_MATCH);
+        return EGL_FALSE;
+    }
+
+    /* The surface handles must reference live surfaces. */
+    draw_surf = sgl_egl_get_surface(draw);
+    read_surf = sgl_egl_get_surface(read);
+    if (!draw_surf || !read_surf) {
+        sgl_egl_set_error(EGL_BAD_SURFACE);
         return EGL_FALSE;
     }
 
@@ -962,6 +1028,11 @@ EGLAPI EGLBoolean EGLAPIENTRY eglSwapInterval(EGLDisplay dpy, EGLint interval) {
         return EGL_FALSE;
     }
 
+    /* Clamp to [EGL_MIN_SWAP_INTERVAL, EGL_MAX_SWAP_INTERVAL] (0..4 here);
+     * a negative interval would otherwise wrap to a huge uint32_t. */
+    if (interval < 0) interval = 0;
+    if (interval > 4) interval = 4;
+
     sgl_surface *surf = ctx->draw_surface;
     if (surf->swapchain) {
         dkSwapchainSetSwapInterval(surf->swapchain, (uint32_t)interval);
@@ -1061,7 +1132,7 @@ EGLAPI EGLBoolean EGLAPIENTRY eglQueryContext(EGLDisplay dpy, EGLContext ctx, EG
     }
 
     switch (attribute) {
-        case EGL_CONFIG_ID: *value = 1; break;
+        case EGL_CONFIG_ID: *value = context->config_id; break;
         case EGL_CONTEXT_CLIENT_TYPE: *value = EGL_OPENGL_ES_API; break;
         case EGL_CONTEXT_CLIENT_VERSION: *value = context->client_version; break;
         case EGL_RENDER_BUFFER: *value = EGL_BACK_BUFFER; break;
