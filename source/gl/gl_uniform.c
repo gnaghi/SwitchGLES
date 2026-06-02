@@ -1717,7 +1717,14 @@ GL_APICALL void GL_APIENTRY glUniform4iv(GLint location, GLsizei count, const GL
  * Matrix uniforms
  * std140 layout: mat2 = 2 vec4 (32 bytes), mat3 = 3 vec4 (48 bytes), mat4 = 4 vec4 (64 bytes)
  */
-GL_APICALL void GL_APIENTRY glUniformMatrix2fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {
+/*
+ * Unified matrix uniform setter for mat2/mat3/mat4 (cols = 2/3/4). The three
+ * differ only in the std140 element size (cols*16 bytes), the source component
+ * count (cols*cols floats) and the per-column vec4 padding (mat4 needs none).
+ * glUniformMatrix{2,3,4}fv are thin wrappers below.
+ */
+static void set_matrix_uniform(GLint location, int cols, GLsizei count,
+                               GLboolean transpose, const GLfloat *value) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx || !ctx->backend) return;
 
@@ -1748,12 +1755,16 @@ GL_APICALL void GL_APIENTRY glUniformMatrix2fv(GLint location, GLsizei count, GL
     if (!prog || !prog->linked) { sgl_set_error(ctx, GL_INVALID_OPERATION); return; }
 
     /* Validate type/count against declared uniform metadata */
-    if (!sgl_validate_matrix_uniform(prog, location, GL_FLOAT_MAT2, count)) {
+    GLenum mat_type = (cols == 2) ? GL_FLOAT_MAT2
+                    : (cols == 3) ? GL_FLOAT_MAT3 : GL_FLOAT_MAT4;
+    if (!sgl_validate_matrix_uniform(prog, location, mat_type, count)) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
         return;
     }
 
-    /* Packed mode: write std140 mat2 to shadow buffer */
+    uint32_t elem = (uint32_t)cols * 16u; /* std140 bytes per matrix */
+
+    /* Packed mode: write std140 matrix to shadow buffer */
     if (location & SGL_LOC_PACKED_FLAG) {
         int stage = (location >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
         int binding = (location >> SGL_LOC_BINDING_SHIFT) & SGL_LOC_BINDING_MASK;
@@ -1762,19 +1773,22 @@ GL_APICALL void GL_APIENTRY glUniformMatrix2fv(GLint location, GLsizei count, GL
         sgl_packed_ubo_t *packed = (stage == 0)
             ? &prog->packed_vertex[binding]
             : &prog->packed_fragment[binding];
-        uint32_t dataSize = 32 * count; /* mat2 std140: 2 vec4 = 32 bytes */
+        uint32_t dataSize = elem * (uint32_t)count;
         if (!packed->valid || (uint32_t)offset > packed->size ||
-            (uint64_t)32 * (uint32_t)count > (uint64_t)(packed->size - offset))
+            (uint64_t)elem * (uint32_t)count > (uint64_t)(packed->size - offset))
             return;
+        /* Each column: cols floats then zero-pad to a full vec4 (mat4: no pad) */
         for (GLsizei m = 0; m < count; m++) {
-            const float *src = value + m * 4;
-            float *dst = (float *)(packed->data + offset + m * 32);
-            dst[0] = src[0]; dst[1] = src[1]; dst[2] = 0.0f; dst[3] = 0.0f;
-            dst[4] = src[2]; dst[5] = src[3]; dst[6] = 0.0f; dst[7] = 0.0f;
+            const float *src = value + (size_t)m * cols * cols;
+            float *dst = (float *)(packed->data + offset + (size_t)m * elem);
+            for (int c = 0; c < cols; c++) {
+                for (int r = 0; r < cols; r++) dst[c * 4 + r] = src[c * cols + r];
+                for (int r = cols; r < 4; r++) dst[c * 4 + r] = 0.0f;
+            }
         }
         packed->dirty = true;
         apply_packed_mirror(prog, location, packed->data + offset, dataSize);
-        SGL_TRACE_UNIFORM("glUniformMatrix2fv(packed loc=0x%X, count=%d)", location, count);
+        SGL_TRACE_UNIFORM("glUniformMatrix%dfv(packed loc=0x%X, count=%d)", cols, location, count);
         return;
     }
 
@@ -1785,215 +1799,7 @@ GL_APICALL void GL_APIENTRY glUniformMatrix2fv(GLint location, GLsizei count, GL
     sgl_uniform_binding_t *uniforms = (stage == 0) ? prog->vertex_uniforms : prog->fragment_uniforms;
     sgl_uniform_binding_t *ub = &uniforms[binding];
 
-    /* mat2 in std140: 2 columns of vec4 (padded from vec2) = 32 bytes */
-    uint32_t dataSize = 32 * count;
-    uint32_t alignedSize = SGL_ALIGN_UP(dataSize, SGL_UNIFORM_ALIGNMENT);
-
-    /* ALWAYS allocate new offset to avoid data races between draws */
-    if (ctx->backend->ops->alloc_uniform) {
-        ub->offset = ctx->backend->ops->alloc_uniform(ctx->backend, alignedSize);
-        ub->size = alignedSize;
-        ub->data_size = dataSize;
-        ub->valid = true;
-    }
-
-    if (ub->valid && ctx->backend->ops->write_uniform) {
-        /* Convert mat2 (4 floats) to std140 layout (2 vec4 = 8 floats) */
-        float std140_data[8 * 4]; /* Support up to 4 matrices */
-        if (count > 4) count = 4;
-        dataSize = 32 * count;  /* Recompute after clamping to avoid buffer over-read */
-
-        for (GLsizei m = 0; m < count; m++) {
-            const float *src = value + m * 4;
-            float *dst = std140_data + m * 8;
-            dst[0] = src[0]; dst[1] = src[1]; dst[2] = 0.0f; dst[3] = 0.0f;
-            dst[4] = src[2]; dst[5] = src[3]; dst[6] = 0.0f; dst[7] = 0.0f;
-        }
-        ctx->backend->ops->write_uniform(ctx->backend, ub->offset, std140_data, dataSize);
-
-        /* Save shadow copy (first matrix = 32 bytes std140) */
-        memcpy(ub->shadow, std140_data, 32);
-        ub->shadow_size = 32;
-        ub->shadow_components = 4;
-        ub->shadow_type = GL_FLOAT;
-    }
-
-    ub->dirty = true;
-    SGL_TRACE_UNIFORM("glUniformMatrix2fv(loc=%d, count=%d)", location, count);
-}
-
-GL_APICALL void GL_APIENTRY glUniformMatrix3fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {
-    sgl_context_t *ctx = sgl_get_current_context();
-    if (!ctx || !ctx->backend) return;
-
-    /* GLES2 spec: transpose must be GL_FALSE */
-    if (transpose != GL_FALSE) {
-        sgl_set_error(ctx, GL_INVALID_VALUE);
-        return;
-    }
-
-    if (count < 0) { sgl_set_error(ctx, GL_INVALID_VALUE); return; }
-
-    /* Program check BEFORE location == -1 early return (dEQP requires this) */
-    if (ctx->current_program == 0) { sgl_set_error(ctx, GL_INVALID_OPERATION); return; }
-
-    if (location == -1 || count == 0 || !value) return;
-
-    /* Reject invalid locations (both flags set = impossible for real locations) */
-    if ((location & SGL_LOC_PACKED_FLAG) && (location & SGL_LOC_SAMPLER_FLAG)) {
-        sgl_set_error(ctx, GL_INVALID_OPERATION);
-        return;
-    }
-    if (location & SGL_LOC_SAMPLER_FLAG) {
-        sgl_set_error(ctx, GL_INVALID_OPERATION);
-        return;
-    }
-
-    sgl_program_t *prog = GET_PROGRAM(ctx->current_program);
-    if (!prog || !prog->linked) { sgl_set_error(ctx, GL_INVALID_OPERATION); return; }
-
-    /* Validate type/count against declared uniform metadata */
-    if (!sgl_validate_matrix_uniform(prog, location, GL_FLOAT_MAT3, count)) {
-        sgl_set_error(ctx, GL_INVALID_OPERATION);
-        return;
-    }
-
-    /* Packed mode: write std140 mat3 to shadow buffer */
-    if (location & SGL_LOC_PACKED_FLAG) {
-        int stage = (location >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
-        int binding = (location >> SGL_LOC_BINDING_SHIFT) & SGL_LOC_BINDING_MASK;
-        int offset = location & SGL_LOC_OFFSET_MASK;
-        if (binding >= SGL_MAX_PACKED_UBOS) return;  /* Bounds check */
-        sgl_packed_ubo_t *packed = (stage == 0)
-            ? &prog->packed_vertex[binding]
-            : &prog->packed_fragment[binding];
-        uint32_t dataSize = 48 * count; /* mat3 std140: 3 vec4 = 48 bytes */
-        if (!packed->valid || (uint32_t)offset > packed->size ||
-            (uint64_t)48 * (uint32_t)count > (uint64_t)(packed->size - offset))
-            return;
-        for (GLsizei m = 0; m < count; m++) {
-            const float *src = value + m * 9;
-            float *dst = (float *)(packed->data + offset + m * 48);
-            dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2]; dst[3] = 0.0f;
-            dst[4] = src[3]; dst[5] = src[4]; dst[6] = src[5]; dst[7] = 0.0f;
-            dst[8] = src[6]; dst[9] = src[7]; dst[10] = src[8]; dst[11] = 0.0f;
-        }
-        packed->dirty = true;
-        apply_packed_mirror(prog, location, packed->data + offset, dataSize);
-        SGL_TRACE_UNIFORM("glUniformMatrix3fv(packed loc=0x%X, count=%d)", location, count);
-        return;
-    }
-
-    int stage = (location >> 16) & 0xFFFF;
-    int binding = location & 0xFFFF;
-    if (binding >= SGL_MAX_UNIFORMS) return;
-
-    sgl_uniform_binding_t *uniforms = (stage == 0) ? prog->vertex_uniforms : prog->fragment_uniforms;
-    sgl_uniform_binding_t *ub = &uniforms[binding];
-
-    /* mat3 in std140: 3 columns of vec4 (padded from vec3) = 48 bytes */
-    uint32_t dataSize = 48 * count;
-    uint32_t alignedSize = SGL_ALIGN_UP(dataSize, SGL_UNIFORM_ALIGNMENT);
-
-    /* ALWAYS allocate new offset to avoid data races between draws */
-    if (ctx->backend->ops->alloc_uniform) {
-        ub->offset = ctx->backend->ops->alloc_uniform(ctx->backend, alignedSize);
-        ub->size = alignedSize;
-        ub->data_size = dataSize;
-        ub->valid = true;
-    }
-
-    if (ub->valid && ctx->backend->ops->write_uniform) {
-        /* Convert mat3 (9 floats) to std140 layout (3 vec4 = 12 floats) */
-        float std140_data[12 * 4]; /* Support up to 4 matrices */
-        if (count > 4) count = 4;
-        dataSize = 48 * count;  /* Recompute after clamping to avoid buffer over-read */
-
-        for (GLsizei m = 0; m < count; m++) {
-            const float *src = value + m * 9;
-            float *dst = std140_data + m * 12;
-            dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2]; dst[3] = 0.0f;
-            dst[4] = src[3]; dst[5] = src[4]; dst[6] = src[5]; dst[7] = 0.0f;
-            dst[8] = src[6]; dst[9] = src[7]; dst[10] = src[8]; dst[11] = 0.0f;
-        }
-        ctx->backend->ops->write_uniform(ctx->backend, ub->offset, std140_data, dataSize);
-
-        /* Save shadow copy (first matrix = 48 bytes std140) */
-        memcpy(ub->shadow, std140_data, 48);
-        ub->shadow_size = 48;
-        ub->shadow_components = 9;
-        ub->shadow_type = GL_FLOAT;
-    }
-
-    ub->dirty = true;
-    SGL_TRACE_UNIFORM("glUniformMatrix3fv(loc=%d, count=%d)", location, count);
-}
-
-GL_APICALL void GL_APIENTRY glUniformMatrix4fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {
-    sgl_context_t *ctx = sgl_get_current_context();
-    if (!ctx || !ctx->backend) return;
-
-    /* GLES2 spec: transpose must be GL_FALSE */
-    if (transpose != GL_FALSE) {
-        sgl_set_error(ctx, GL_INVALID_VALUE);
-        return;
-    }
-
-    if (count < 0) { sgl_set_error(ctx, GL_INVALID_VALUE); return; }
-
-    /* Program check BEFORE location == -1 early return (dEQP requires this) */
-    if (ctx->current_program == 0) { sgl_set_error(ctx, GL_INVALID_OPERATION); return; }
-
-    if (location == -1 || count == 0 || !value) return;
-
-    /* Reject invalid locations (both flags set = impossible for real locations) */
-    if ((location & SGL_LOC_PACKED_FLAG) && (location & SGL_LOC_SAMPLER_FLAG)) {
-        sgl_set_error(ctx, GL_INVALID_OPERATION);
-        return;
-    }
-    if (location & SGL_LOC_SAMPLER_FLAG) {
-        sgl_set_error(ctx, GL_INVALID_OPERATION);
-        return;
-    }
-
-    sgl_program_t *prog = GET_PROGRAM(ctx->current_program);
-    if (!prog || !prog->linked) { sgl_set_error(ctx, GL_INVALID_OPERATION); return; }
-
-    /* Validate type/count against declared uniform metadata */
-    if (!sgl_validate_matrix_uniform(prog, location, GL_FLOAT_MAT4, count)) {
-        sgl_set_error(ctx, GL_INVALID_OPERATION);
-        return;
-    }
-
-    /* Packed mode: write std140 mat4 to shadow buffer */
-    if (location & SGL_LOC_PACKED_FLAG) {
-        int stage = (location >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
-        int binding = (location >> SGL_LOC_BINDING_SHIFT) & SGL_LOC_BINDING_MASK;
-        int offset = location & SGL_LOC_OFFSET_MASK;
-        if (binding >= SGL_MAX_PACKED_UBOS) return;  /* Bounds check */
-        sgl_packed_ubo_t *packed = (stage == 0)
-            ? &prog->packed_vertex[binding]
-            : &prog->packed_fragment[binding];
-        uint32_t dataSize = 64 * count; /* mat4 std140: 4 vec4 = 64 bytes */
-        if (!packed->valid || (uint32_t)offset > packed->size ||
-            (uint64_t)64 * (uint32_t)count > (uint64_t)(packed->size - offset))
-            return;
-        memcpy(packed->data + offset, value, dataSize);
-        packed->dirty = true;
-        apply_packed_mirror(prog, location, value, dataSize);
-        SGL_TRACE_UNIFORM("glUniformMatrix4fv(packed loc=0x%X, count=%d)", location, count);
-        return;
-    }
-
-    int stage = (location >> 16) & 0xFFFF;
-    int binding = location & 0xFFFF;
-    if (binding >= SGL_MAX_UNIFORMS) return;
-
-    sgl_uniform_binding_t *uniforms = (stage == 0) ? prog->vertex_uniforms : prog->fragment_uniforms;
-    sgl_uniform_binding_t *ub = &uniforms[binding];
-
-    /* mat4 in std140: 4 columns of vec4 = 64 bytes */
-    uint32_t data_size = 64 * count;
+    uint32_t data_size = elem * (uint32_t)count;
     uint32_t aligned_size = SGL_ALIGN_UP(data_size, SGL_UNIFORM_ALIGNMENT);
 
     /* ALWAYS allocate new offset to avoid data races between draws */
@@ -2004,17 +1810,47 @@ GL_APICALL void GL_APIENTRY glUniformMatrix4fv(GLint location, GLsizei count, GL
         ub->valid = true;
     }
 
-    if (!ub->valid) return;
-
     if (ub->valid && ctx->backend->ops->write_uniform) {
-        ctx->backend->ops->write_uniform(ctx->backend, ub->offset, value, data_size);
-        memcpy(ub->shadow, value, 64);
-        ub->shadow_size = 64;
-        ub->shadow_components = 16;
+        const float *payload;
+        float std140_data[12 * 4]; /* up to 4 matrices; mat3 (48 floats) worst case */
+        if (cols == 4) {
+            /* mat4 is already std140 (4 vec4): write directly, no count clamp. */
+            payload = value;
+        } else {
+            /* mat2/mat3: pad each column to vec4 in a bounded stack buffer. */
+            if (count > 4) count = 4;
+            data_size = elem * (uint32_t)count; /* recompute after clamp */
+            for (GLsizei m = 0; m < count; m++) {
+                const float *src = value + (size_t)m * cols * cols;
+                float *dst = std140_data + (size_t)m * cols * 4;
+                for (int c = 0; c < cols; c++) {
+                    for (int r = 0; r < cols; r++) dst[c * 4 + r] = src[c * cols + r];
+                    for (int r = cols; r < 4; r++) dst[c * 4 + r] = 0.0f;
+                }
+            }
+            payload = std140_data;
+        }
+        ctx->backend->ops->write_uniform(ctx->backend, ub->offset, payload, data_size);
+
+        /* Save shadow copy (first matrix, std140) */
+        memcpy(ub->shadow, payload, elem);
+        ub->shadow_size = elem;
+        ub->shadow_components = cols * cols;
         ub->shadow_type = GL_FLOAT;
     }
 
     ub->dirty = true;
+    SGL_TRACE_UNIFORM("glUniformMatrix%dfv(loc=%d, count=%d)", cols, location, count);
+}
 
-    SGL_TRACE_UNIFORM("glUniformMatrix4fv(loc=%d, count=%d)", location, count);
+GL_APICALL void GL_APIENTRY glUniformMatrix2fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {
+    set_matrix_uniform(location, 2, count, transpose, value);
+}
+
+GL_APICALL void GL_APIENTRY glUniformMatrix3fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {
+    set_matrix_uniform(location, 3, count, transpose, value);
+}
+
+GL_APICALL void GL_APIENTRY glUniformMatrix4fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {
+    set_matrix_uniform(location, 4, count, transpose, value);
 }
