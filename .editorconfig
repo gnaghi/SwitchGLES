@@ -1,0 +1,25 @@
+# EditorConfig — https://editorconfig.org
+# Mirrors .clang-format so editors that don't run clang-format still match.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# C / C++ / headers: 4-space indent, no tabs (matches source/).
+[*.{c,h,cpp,hpp,cc}]
+indent_style = space
+indent_size = 4
+
+# Makefiles require real tabs.
+[Makefile]
+indent_style = tab
+
+[{Makefile.*,*.mk}]
+indent_style = tab
+
+# Markdown: keep trailing whitespace (hard line breaks).
+[*.md]
+trim_trailing_whitespace = false

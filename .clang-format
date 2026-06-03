@@ -1,0 +1,42 @@
+# SwitchGLES code style.
+#
+# Codifies the conventions already in use across source/ (pragmatic choice:
+# match the existing code, not kernel 8-wide tabs). Running clang-format with
+# this config should be close to a no-op on conformant files.
+---
+Language:        Cpp
+BasedOnStyle:    LLVM
+
+# Indentation: 4 spaces, never tabs.
+IndentWidth:     4
+TabWidth:        4
+UseTab:          Never
+ContinuationIndentWidth: 4
+
+# Braces attached to the statement (K&R), as used throughout source/.
+BreakBeforeBraces: Attach
+
+# switch/case: case labels are indented one level under switch.
+IndentCaseLabels: true
+
+# Pointers bind to the name: `sgl_context_t *ctx`.
+PointerAlignment: Right
+DerivePointerAlignment: false
+
+# Control statements get a space before the paren; calls do not.
+SpaceBeforeParens: ControlStatements
+
+# Wider than kernel 80 — existing code routinely uses long descriptive names.
+ColumnLimit:     100
+
+# Misc: keep behaviour predictable and low-churn.
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+AlignAfterOpenBracket: Align
+AlignTrailingComments: true
+SortIncludes:    false
+KeepEmptyLinesAtTheStartOfBlocks: false
+SpaceAfterCStyleCast: false
+Cpp11BracedListStyle: true
