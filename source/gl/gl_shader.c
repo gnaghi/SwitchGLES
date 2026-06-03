@@ -889,6 +889,899 @@ GL_APICALL void GL_APIENTRY glDetachShader(GLuint program, GLuint shader) {
     sgl_shader_try_deferred_delete(ctx, shader);
 }
 
+#ifdef SGL_ENABLE_RUNTIME_COMPILER
+/* Populate program metadata from Mesa-compiled shader reflection:
+ * uniforms, samplers, sampler arrays, attribs, packed UBOs and dual-stage
+ * mirrors. Extracted verbatim from glLinkProgram's Mesa link path. */
+static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog,
+                                  sgl_shader_t *vs_sh, sgl_shader_t *fs_sh,
+                                  bool vs_mesa, bool fs_mesa) {
+    SGL_TRACE_SHADER("linking Mesa-compiled shaders for program %u", program);
+
+    prog->num_program_uniforms = 0;
+    memset(prog->packed_ubo_sizes, 0, sizeof(prog->packed_ubo_sizes));
+    prog->num_samplers = 0;
+
+    /* Process each stage's Mesa metadata */
+    for (int stage_idx = 0; stage_idx < 2; stage_idx++) {
+        sgl_shader_t *sh = (stage_idx == 0) ? vs_sh : fs_sh;
+        bool is_mesa = (stage_idx == 0) ? vs_mesa : fs_mesa;
+        if (!is_mesa || !sh->mesa_meta) continue;
+
+        sgl_mesa_metadata_t *meta = sh->mesa_meta;
+
+        /* Set packed UBO size for this stage at binding 0.
+         * Must cover the FULL constbuf including embedded shader constants
+         * (literal values used in compare functions, etc.), not just user
+         * uniforms.  initial_data_size reflects the total ParameterValues
+         * buffer from Mesa which the GPU shader reads via constbuf. */
+        {
+            uint32_t cb_size = meta->constbuf_size;
+            if (meta->initial_data_size > cb_size)
+                cb_size = meta->initial_data_size;
+            if (cb_size > 0)
+                prog->packed_ubo_sizes[stage_idx][0] = cb_size;
+        }
+
+        /* Store uniforms */
+        for (int i = 0; i < meta->num_uniforms && i < SGL_MESA_MAX_UNIFORMS; i++) {
+            if (prog->num_program_uniforms >= SGL_MAX_PROGRAM_UNIFORMS) break;
+            int slot = prog->num_program_uniforms++;
+            strncpy(prog->program_uniforms[slot].name,
+                    meta->uniforms[i].name, SGL_ATTRIB_NAME_MAX - 1);
+            prog->program_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+            /* For Mesa, GLES name = uniform name (no transpiler renaming) */
+            strncpy(prog->program_uniforms[slot].gles_name,
+                    meta->uniforms[i].name, SGL_ATTRIB_NAME_MAX - 1);
+            prog->program_uniforms[slot].gles_name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+            prog->program_uniforms[slot].location = (GLint)(
+                SGL_LOC_PACKED_FLAG |
+                ((unsigned)stage_idx << SGL_LOC_STAGE_SHIFT) |
+                ((unsigned)0 << SGL_LOC_BINDING_SHIFT) |
+                (unsigned)meta->uniforms[i].offset);
+            prog->program_uniforms[slot].gl_type = meta->uniforms[i].gl_type;
+            prog->program_uniforms[slot].array_size =
+                meta->uniforms[i].array_elements > 0 ? meta->uniforms[i].array_elements : 0;
+            /* Mesa constbuf stride: size_bytes / array_elements (NOT std140).
+             * Mesa packs float arrays at 4-byte stride, not 16-byte. */
+            if (meta->uniforms[i].array_elements > 1 && meta->uniforms[i].size_bytes > 0)
+                prog->program_uniforms[slot].element_stride =
+                    (uint16_t)(meta->uniforms[i].size_bytes / meta->uniforms[i].array_elements);
+            else
+                prog->program_uniforms[slot].element_stride = 0;
+            prog->program_uniforms[slot].used = true;
+        }
+
+        /* Store samplers */
+        for (int i = 0; i < meta->num_samplers && i < SGL_MESA_MAX_SAMPLERS; i++) {
+            /* Deduplicate: check if same-named sampler exists from other stage */
+            bool already = false;
+            for (int j = 0; j < prog->num_samplers; j++) {
+                if (prog->samplers[j].used &&
+                    strcmp(prog->samplers[j].name, meta->samplers[i].name) == 0) {
+                    /* Same sampler in both stages — store each stage's binding.
+                     * VS is processed first (stage_idx=0), FS second (stage_idx=1).
+                     * shader_binding = FS binding, vs_shader_binding = VS binding. */
+                    if (stage_idx == 0)
+                        prog->samplers[j].vs_shader_binding = meta->samplers[i].binding;
+                    else
+                        prog->samplers[j].shader_binding = meta->samplers[i].binding;
+                    already = true;
+                    break;
+                }
+            }
+            if (already) continue;
+            if (prog->num_samplers >= SGL_MAX_PROGRAM_SAMPLERS) break;
+            int slot = prog->num_samplers++;
+            strncpy(prog->samplers[slot].name,
+                    meta->samplers[i].name, SGL_ATTRIB_NAME_MAX - 1);
+            prog->samplers[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+            strncpy(prog->samplers[slot].gles_name,
+                    meta->samplers[i].name, SGL_ATTRIB_NAME_MAX - 1);
+            prog->samplers[slot].gles_name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+            prog->samplers[slot].shader_binding = meta->samplers[i].binding;
+            if (stage_idx == 0)
+                prog->samplers[slot].vs_shader_binding = meta->samplers[i].binding;
+            else
+                prog->samplers[slot].vs_shader_binding = -1;
+            prog->samplers[slot].tex_unit = 0; /* GLES2 spec default */
+            prog->samplers[slot].array_index = -1; /* set below if array */
+            prog->samplers[slot].array_total = 0;
+            prog->samplers[slot].gl_type = meta->samplers[i].gl_type;
+            prog->samplers[slot].used = true;
+        }
+    }
+
+    /* Detect sampler arrays from Mesa bracket notation.
+     * Mesa reports sampler array elements as "u_var[0]", "u_var[1]", etc.
+     * Parse bracket to set array_index/array_total for each element.
+     * This enables glGetUniformLocation("u_var") → first element,
+     * and glGetUniformLocation("u_var[N]") → Nth element. */
+    for (int i = 0; i < prog->num_samplers; i++) {
+        if (!prog->samplers[i].used) continue;
+        const char *sn = prog->samplers[i].gles_name[0]
+            ? prog->samplers[i].gles_name : prog->samplers[i].name;
+        /* Use strrchr to find LAST bracket — avoids confusing struct
+         * array subscripts (u_var[0].m0) with sampler arrays (u_arr[0]).
+         * A terminal bracket (no dot after) means sampler array element. */
+        const char *br = strrchr(sn, '[');
+        if (!br || strchr(br, '.') != NULL) {
+            prog->samplers[i].array_index = 0;
+            continue;
+        }
+        int idx = atoi(br + 1);
+        prog->samplers[i].array_index = idx;
+        /* Count total elements with same base name */
+        size_t base_len = br - sn;
+        int total = 0;
+        for (int j = 0; j < prog->num_samplers; j++) {
+            if (!prog->samplers[j].used) continue;
+            const char *jn = prog->samplers[j].gles_name[0]
+                ? prog->samplers[j].gles_name : prog->samplers[j].name;
+            const char *jbr = strrchr(jn, '[');
+            if (!jbr || strchr(jbr, '.') != NULL) continue;
+            size_t jbase_len = jbr - jn;
+            if (jbase_len == base_len && strncmp(sn, jn, base_len) == 0)
+                total++;
+        }
+        prog->samplers[i].array_total = total;
+    }
+
+    /* Populate attrib bindings from VS input metadata */
+    if (vs_mesa && vs_sh->mesa_meta) {
+        sgl_mesa_metadata_t *meta = vs_sh->mesa_meta;
+        /* GL_ACTIVE_ATTRIBUTES = count of attributes in the compiled shader,
+         * NOT the total num_attrib_bindings (which includes inactive user-bound). */
+        prog->num_active_attribs = (meta->num_inputs < SGL_MESA_MAX_INPUTS)
+            ? meta->num_inputs : SGL_MESA_MAX_INPUTS;
+        /* Clear in_shader flag and linked_location for all existing bindings */
+        for (int j = 0; j < prog->num_attrib_bindings; j++) {
+            prog->attrib_bindings[j].in_shader = false;
+            prog->attrib_bindings[j].linked_location = -1;
+        }
+        for (int i = 0; i < meta->num_inputs && i < SGL_MESA_MAX_INPUTS; i++) {
+            bool found = false;
+            for (int j = 0; j < prog->num_attrib_bindings; j++) {
+                if (strcmp(prog->attrib_bindings[j].name,
+                           meta->inputs[i].name) == 0) {
+                    prog->attrib_bindings[j].index = meta->inputs[i].location;
+                    prog->attrib_bindings[j].linked_location = (GLint)meta->inputs[i].location;
+                    prog->attrib_bindings[j].gl_type = meta->inputs[i].gl_type;
+                    prog->attrib_bindings[j].in_shader = true;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found && prog->num_attrib_bindings < SGL_MAX_ATTRIB_BINDINGS) {
+                int slot = prog->num_attrib_bindings++;
+                strncpy(prog->attrib_bindings[slot].name,
+                        meta->inputs[i].name, SGL_ATTRIB_NAME_MAX - 1);
+                prog->attrib_bindings[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+                prog->attrib_bindings[slot].index = meta->inputs[i].location;
+                prog->attrib_bindings[slot].linked_location = (GLint)meta->inputs[i].location;
+                prog->attrib_bindings[slot].gl_type = meta->inputs[i].gl_type;
+                prog->attrib_bindings[slot].used = true;
+                prog->attrib_bindings[slot].user_bound = false; /* linker-added */
+                prog->attrib_bindings[slot].in_shader = true;
+            }
+        }
+        /* Count active attribs — count ALL attributes with in_shader=true.
+         * Aliased attributes (same location via glBindAttribLocation) are each
+         * individually active per GLES2 spec and must all appear in
+         * glGetActiveAttrib enumeration. */
+        {
+            int active_count = 0;
+            for (int j = 0; j < prog->num_attrib_bindings; j++) {
+                if (prog->attrib_bindings[j].in_shader) active_count++;
+            }
+            prog->num_active_attribs = active_count;
+        }
+    }
+
+    /* Pre-configure packed UBOs and load initial constbuf data from Mesa */
+    for (int stage = 0; stage < 2; stage++) {
+        for (int binding = 0; binding < SGL_MAX_PACKED_UBOS; binding++) {
+            int ubo_size = prog->packed_ubo_sizes[stage][binding];
+            if (ubo_size > 0 && ubo_size <= SGL_MAX_PACKED_UBO_SIZE) {
+                sgl_packed_ubo_t *packed = (stage == 0)
+                    ? &prog->packed_vertex[binding]
+                    : &prog->packed_fragment[binding];
+                if (!packed->valid) {
+                    packed->size = ubo_size;
+                    packed->valid = true;
+                    packed->dirty = false;
+                    memset(packed->data, 0, ubo_size);
+                    /* Load initial constbuf data (Mesa-embedded literals/constants).
+                     * Only for binding 0 (the driver constbuf). */
+                    if (binding == 0) {
+                        sgl_shader_t *sh = (stage == 0) ? vs_sh : fs_sh;
+                        if (sh && sh->mesa_meta && sh->mesa_meta->initial_data) {
+                            uint32_t copy = sh->mesa_meta->initial_data_size;
+                            if (copy > (uint32_t)ubo_size) copy = (uint32_t)ubo_size;
+                            memcpy(packed->data, sh->mesa_meta->initial_data, copy);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /* Set up dual-stage mirrors for uniforms present in both VS and FS */
+    prog->num_packed_mirrors = 0;
+    for (int i = 0; i < prog->num_program_uniforms; i++) {
+        if (!prog->program_uniforms[i].used) continue;
+        GLint iloc = prog->program_uniforms[i].location;
+        if (!(iloc & SGL_LOC_PACKED_FLAG)) continue;
+        int i_stage = (iloc >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
+        if (i_stage != 0) continue;
+        for (int j = 0; j < prog->num_program_uniforms; j++) {
+            if (j == i || !prog->program_uniforms[j].used) continue;
+            GLint jloc = prog->program_uniforms[j].location;
+            if (!(jloc & SGL_LOC_PACKED_FLAG)) continue;
+            int j_stage = (jloc >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
+            if (j_stage == 0) continue;
+            if (strcmp(prog->program_uniforms[j].name,
+                      prog->program_uniforms[i].name) == 0) {
+                if (prog->num_packed_mirrors < SGL_MAX_PACKED_MIRRORS) {
+                    prog->packed_mirrors[prog->num_packed_mirrors].primary = iloc;
+                    prog->packed_mirrors[prog->num_packed_mirrors].mirror = jloc;
+                    prog->num_packed_mirrors++;
+                }
+                break;
+            }
+        }
+    }
+
+    /* Debug: dump link-time state */
+    /* gl_DepthRange: check if either VS or FS uses it (Mesa state variable).
+     * Build packed UBO locations so draw-time code can update near/far/diff. */
+    prog->has_depth_range = false;
+    prog->depth_range_loc[0] = 0;
+    prog->depth_range_loc[1] = 0;
+    prog->depth_range_loc[2] = 0;
+    prog->depth_range_loc_fs[0] = 0;
+    prog->depth_range_loc_fs[1] = 0;
+    prog->depth_range_loc_fs[2] = 0;
+    for (int stage_idx = 0; stage_idx < 2; stage_idx++) {
+        sgl_shader_t *sh = (stage_idx == 0) ? vs_sh : fs_sh;
+        bool is_mesa = (stage_idx == 0) ? vs_mesa : fs_mesa;
+        if (!is_mesa || !sh->mesa_meta) continue;
+        int dr_off = sh->mesa_meta->depth_range_offset;
+        if (dr_off < 0) continue;
+        prog->has_depth_range = true;
+        /* Build packed location: stage | binding 0 | byte offset */
+        GLint *dr_locs = (stage_idx == 0) ? prog->depth_range_loc : prog->depth_range_loc_fs;
+        for (int d = 0; d < 3; d++) {
+            dr_locs[d] = (GLint)(SGL_LOC_PACKED_FLAG
+                | ((uint32_t)stage_idx << SGL_LOC_STAGE_SHIFT)
+                | (0u << SGL_LOC_BINDING_SHIFT)
+                | (uint32_t)(dr_off + d * 4));
+        }
+    }
+
+    /* Link-time varying type check for Mesa-compiled shaders.
+     * Mesa compiles each stage independently — cross-stage type mismatches
+     * (e.g. VS "varying float var" vs FS "varying vec2 var") are not caught. */
+    if (vs_mesa && fs_mesa && vs_sh->source && fs_sh->source) {
+        typedef struct { char name[64]; char type[32]; } vdecl_t;
+        vdecl_t vs_v[64], fs_v[64];
+        int vs_nv = 0, fs_nv = 0;
+        for (int pass = 0; pass < 2; pass++) {
+            const char *src = (pass == 0) ? vs_sh->source : fs_sh->source;
+            vdecl_t *v = (pass == 0) ? vs_v : fs_v;
+            int *nv = (pass == 0) ? &vs_nv : &fs_nv;
+            const char *ln = src;
+            while (ln && *ln && *nv < 64) {
+                while (*ln == ' ' || *ln == '\t') ln++;
+                const char *p = ln;
+                if (strncmp(p, "varying", 7) == 0 && (p[7] == ' ' || p[7] == '\t')) {
+                    p += 7;
+                    while (*p == ' ' || *p == '\t') p++;
+                    if (strncmp(p, "lowp ", 5) == 0 || strncmp(p, "mediump ", 8) == 0 || strncmp(p, "highp ", 6) == 0) {
+                        while (*p && *p != ' ' && *p != '\t') p++;
+                        while (*p == ' ' || *p == '\t') p++;
+                    }
+                    const char *ts = p;
+                    while (*p && *p != ' ' && *p != '\t' && *p != ';') p++;
+                    size_t tl = p - ts;
+                    while (*p == ' ' || *p == '\t') p++;
+                    const char *ns = p;
+                    while (*p && *p != ' ' && *p != '\t' && *p != ';' && *p != '[') p++;
+                    size_t nl = p - ns;
+                    if (tl > 0 && tl < 32 && nl > 0 && nl < 64) {
+                        memcpy(v[*nv].type, ts, tl); v[*nv].type[tl] = '\0';
+                        memcpy(v[*nv].name, ns, nl); v[*nv].name[nl] = '\0';
+                        (*nv)++;
+                    }
+                }
+                const char *nl = strchr(ln, '\n');
+                ln = nl ? nl + 1 : NULL;
+            }
+        }
+        for (int i = 0; i < vs_nv; i++) {
+            for (int j = 0; j < fs_nv; j++) {
+                if (strcmp(vs_v[i].name, fs_v[j].name) == 0 &&
+                    strcmp(vs_v[i].type, fs_v[j].type) != 0) {
+                    prog->linked = false;
+                    if (prog->info_log) free(prog->info_log);
+                    char msg[256];
+                    snprintf(msg, sizeof(msg), "varying '%s' type mismatch: VS=%s, FS=%s",
+                             vs_v[i].name, vs_v[i].type, fs_v[j].type);
+                    prog->info_log = strdup(msg);
+                    return;
+                }
+            }
+        }
+    }
+
+    /* Populate active_uniforms[] */
+    prog->num_active_uniforms = 0;
+    for (int i = 0; i < prog->num_program_uniforms; i++) {
+        if (!prog->program_uniforms[i].used) continue;
+        const char *uni_name = prog->program_uniforms[i].gles_name[0]
+            ? prog->program_uniforms[i].gles_name
+            : prog->program_uniforms[i].name;
+        int arr = prog->program_uniforms[i].array_size;
+        /* Deduplicate — Mesa stores array names with [0] suffix already */
+        bool already = false;
+        char uni_name_arr[SGL_ATTRIB_NAME_MAX];
+        if (arr > 1) {
+            if (strchr(uni_name, '['))
+                strncpy(uni_name_arr, uni_name, SGL_ATTRIB_NAME_MAX - 1);
+            else
+                snprintf(uni_name_arr, SGL_ATTRIB_NAME_MAX, "%s[0]", uni_name);
+            uni_name_arr[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+        }
+        for (int j = 0; j < prog->num_active_uniforms; j++) {
+            if (strcmp(prog->active_uniforms[j].name, uni_name) == 0 ||
+                (arr > 1 && strcmp(prog->active_uniforms[j].name, uni_name_arr) == 0)) {
+                already = true; break;
+            }
+        }
+        if (already) continue;
+        if (prog->num_active_uniforms >= SGL_MAX_UNIFORMS * 2) break;
+        int slot = prog->num_active_uniforms++;
+        if (arr > 1) {
+            if (strchr(uni_name, '['))
+                strncpy(prog->active_uniforms[slot].name, uni_name, SGL_ATTRIB_NAME_MAX - 1);
+            else
+                snprintf(prog->active_uniforms[slot].name, SGL_ATTRIB_NAME_MAX,
+                         "%s[0]", uni_name);
+            prog->active_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+        } else {
+            strncpy(prog->active_uniforms[slot].name, uni_name, SGL_ATTRIB_NAME_MAX - 1);
+            prog->active_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+        }
+        prog->active_uniforms[slot].type = prog->program_uniforms[i].gl_type
+            ? prog->program_uniforms[i].gl_type : GL_FLOAT_VEC4;
+        prog->active_uniforms[slot].size = (arr > 1) ? arr : 1;
+        prog->active_uniforms[slot].location = prog->program_uniforms[i].location;
+        prog->active_uniforms[slot].element_stride = prog->program_uniforms[i].element_stride;
+        prog->active_uniforms[slot].active = true;
+    }
+    /* Add samplers as active uniforms.
+     * For sampler arrays, add only one entry (first element) with size = array_total.
+     * Per GLES spec, glGetActiveUniform returns "s[0]" with size=N for sampler arrays. */
+    for (int i = 0; i < prog->num_samplers; i++) {
+        if (!prog->samplers[i].used) continue;
+        if (prog->num_active_uniforms >= SGL_MAX_UNIFORMS * 2) break;
+        /* Skip non-first elements of sampler arrays */
+        if (prog->samplers[i].array_total > 0 && prog->samplers[i].array_index > 0)
+            continue;
+        const char *samp_name = prog->samplers[i].gles_name[0]
+            ? prog->samplers[i].gles_name : prog->samplers[i].name;
+        /* For arrays, ensure the name has [0] suffix */
+        char name_buf[SGL_ATTRIB_NAME_MAX];
+        if (prog->samplers[i].array_total > 0 && !strchr(samp_name, '[')) {
+            snprintf(name_buf, SGL_ATTRIB_NAME_MAX, "%s[0]", samp_name);
+            samp_name = name_buf;
+        }
+        bool already = false;
+        for (int j = 0; j < prog->num_active_uniforms; j++) {
+            if (strcmp(prog->active_uniforms[j].name, samp_name) == 0) {
+                already = true; break;
+            }
+        }
+        if (already) continue;
+        int slot = prog->num_active_uniforms++;
+        strncpy(prog->active_uniforms[slot].name, samp_name, SGL_ATTRIB_NAME_MAX - 1);
+        prog->active_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+        prog->active_uniforms[slot].type = prog->samplers[i].gl_type
+            ? prog->samplers[i].gl_type : GL_SAMPLER_2D;
+        prog->active_uniforms[slot].size = prog->samplers[i].array_total > 0
+            ? prog->samplers[i].array_total : 1;
+        prog->active_uniforms[slot].location = (GLint)(SGL_LOC_SAMPLER_FLAG | (unsigned)i);
+        prog->active_uniforms[slot].active = true;
+    }
+
+    SGL_TRACE_SHADER("Mesa link: %d uniforms, %d samplers, %d active, %d mirrors",
+                     prog->num_program_uniforms, prog->num_samplers,
+                     prog->num_active_uniforms, prog->num_packed_mirrors);
+}
+
+/* Transpile attached GLSL ES 1.00 shaders to 4.60, compile via uam, and store
+ * the resulting uniform/sampler/attrib reflection. Extracted verbatim from
+ * glLinkProgram's transpiler link path. */
+static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
+                                       sgl_program_t *prog, sgl_shader_t *vs_sh,
+                                       sgl_shader_t *fs_sh) {
+    SGL_TRACE_SHADER("transpiling ES 1.00 shaders for program %u", program);
+
+    /* 1. Set up transpiler options with attrib bindings from glBindAttribLocation */
+    glslt_options_t vs_opts;
+    glslt_options_init(&vs_opts);
+
+    for (int i = 0; i < prog->num_attrib_bindings; i++) {
+        if (prog->attrib_bindings[i].used) {
+            glslt_set_attrib_location(&vs_opts,
+                prog->attrib_bindings[i].name,
+                (int)prog->attrib_bindings[i].index);
+        }
+    }
+
+    /* 2. Transpile vertex shader */
+    glslt_result_t vs_result;
+    memset(&vs_result, 0, sizeof(vs_result));
+    vs_result.success = 1; /* default to success if no VS to transpile */
+
+    if (vs_sh && vs_sh->needs_transpile && vs_sh->source) {
+        vs_result = glslt_transpile(vs_sh->source, GLSLT_VERTEX, &vs_opts);
+        if (!vs_result.success) {
+            SGL_TRACE_SHADER("VS transpile failed: %s", vs_result.error);
+            if (vs_sh->info_log) free(vs_sh->info_log);
+            vs_sh->info_log = strdup(vs_result.error);
+            vs_sh->compiled = false;
+            prog->linked = false;
+            if (prog->info_log) free(prog->info_log);
+            prog->info_log = strdup(vs_result.error[0] ? vs_result.error : "VS transpile failed");
+            glslt_result_free(&vs_result);
+            SGL_TRACE_SHADER("glLinkProgram(%u) - VS transpile FAILED", program);
+            return;
+        }
+        SGL_TRACE_SHADER("VS transpiled: %d uniforms, %d samplers, %d attribs, %d varyings",
+                         vs_result.num_uniforms, vs_result.num_samplers,
+                         vs_result.num_attributes, vs_result.num_varyings);
+    }
+
+    /* 3. Transpile fragment shader (pass VS varying locations for consistency) */
+    glslt_result_t fs_result;
+    memset(&fs_result, 0, sizeof(fs_result));
+    fs_result.success = 1;
+
+    if (fs_sh && fs_sh->needs_transpile && fs_sh->source) {
+        glslt_options_t fs_opts;
+        glslt_options_init(&fs_opts);
+
+        /* Pass VS varying locations so FS uses matching locations */
+        for (int i = 0; i < vs_result.num_varyings; i++) {
+            glslt_set_varying_location(&fs_opts,
+                vs_result.varyings[i].name,
+                vs_result.varyings[i].location);
+        }
+
+        fs_result = glslt_transpile(fs_sh->source, GLSLT_FRAGMENT, &fs_opts);
+        if (!fs_result.success) {
+            SGL_TRACE_SHADER("FS transpile failed: %s", fs_result.error);
+            if (fs_sh->info_log) free(fs_sh->info_log);
+            fs_sh->info_log = strdup(fs_result.error);
+            fs_sh->compiled = false;
+            prog->linked = false;
+            if (prog->info_log) free(prog->info_log);
+            prog->info_log = strdup(fs_result.error[0] ? fs_result.error : "FS transpile failed");
+            glslt_result_free(&vs_result);
+            glslt_result_free(&fs_result);
+            SGL_TRACE_SHADER("glLinkProgram(%u) - FS transpile FAILED", program);
+            return;
+        }
+        SGL_TRACE_SHADER("FS transpiled: %d uniforms, %d samplers, %d varyings",
+                         fs_result.num_uniforms, fs_result.num_samplers, fs_result.num_varyings);
+    }
+
+    /* 3b. Link-time varying type check: VS outputs must match FS inputs */
+    if (vs_result.success && fs_result.success) {
+        for (int i = 0; i < vs_result.num_varyings; i++) {
+            for (int j = 0; j < fs_result.num_varyings; j++) {
+                if (strcmp(vs_result.varyings[i].name,
+                          fs_result.varyings[j].name) == 0) {
+                    if (vs_result.varyings[i].type != fs_result.varyings[j].type ||
+                        vs_result.varyings[i].array_size != fs_result.varyings[j].array_size) {
+                        prog->linked = false;
+                        if (prog->info_log) free(prog->info_log);
+                        char msg[256];
+                        snprintf(msg, sizeof(msg),
+                                 "varying '%s' type mismatch between VS and FS",
+                                 vs_result.varyings[i].name);
+                        prog->info_log = strdup(msg);
+                        glslt_result_free(&vs_result);
+                        glslt_result_free(&fs_result);
+                        SGL_TRACE_SHADER("glLinkProgram(%u) - %s", program, msg);
+                        return;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    /* 4. Compile transpiled GLSL 4.60 → DKSH via libuam */
+    if (vs_sh && vs_sh->needs_transpile && vs_result.output) {
+        if (vs_sh->info_log) { free(vs_sh->info_log); vs_sh->info_log = NULL; }
+        vs_sh->compiled = sgl_compile_glsl460(ctx, prog->vertex_shader,
+                                               vs_sh, vs_result.output);
+        if (!vs_sh->compiled) {
+            SGL_TRACE_SHADER("VS compile failed after transpile");
+            prog->linked = false;
+            if (prog->info_log) free(prog->info_log);
+            prog->info_log = vs_sh->info_log ? strdup(vs_sh->info_log) : strdup("VS compile failed");
+            glslt_result_free(&vs_result);
+            glslt_result_free(&fs_result);
+            SGL_TRACE_SHADER("glLinkProgram(%u) - VS compile FAILED", program);
+            return;
+        }
+        vs_sh->needs_transpile = false;
+    }
+
+    if (fs_sh && fs_sh->needs_transpile && fs_result.output) {
+        if (fs_sh->info_log) { free(fs_sh->info_log); fs_sh->info_log = NULL; }
+        fs_sh->compiled = sgl_compile_glsl460(ctx, prog->fragment_shader,
+                                               fs_sh, fs_result.output);
+        if (!fs_sh->compiled) {
+            SGL_TRACE_SHADER("FS compile failed after transpile");
+            prog->linked = false;
+            if (prog->info_log) free(prog->info_log);
+            prog->info_log = fs_sh->info_log ? strdup(fs_sh->info_log) : strdup("FS compile failed");
+            glslt_result_free(&vs_result);
+            glslt_result_free(&fs_result);
+            SGL_TRACE_SHADER("glLinkProgram(%u) - FS compile FAILED", program);
+            return;
+        }
+        fs_sh->needs_transpile = false;
+    }
+
+    /* 5. Store uniforms PER-PROGRAM from transpiler reflection data.
+     * Each program gets its own uniform name→location mapping, because
+     * different programs have different std140 layouts (uniforms sorted
+     * alphabetically per-shader → different offsets per program). */
+    prog->num_program_uniforms = 0;
+    memset(prog->packed_ubo_sizes, 0, sizeof(prog->packed_ubo_sizes));
+
+    /* VS uniforms → packed UBO at VS binding 0 */
+    if (vs_result.num_uniforms > 0) {
+        prog->packed_ubo_sizes[0][vs_opts.ubo_binding] = vs_result.ubo_total_size;
+        for (int i = 0; i < vs_result.num_uniforms; i++) {
+            if (prog->num_program_uniforms < SGL_MAX_PROGRAM_UNIFORMS) {
+                int slot = prog->num_program_uniforms++;
+                strncpy(prog->program_uniforms[slot].name,
+                        vs_result.uniforms[i].name, SGL_ATTRIB_NAME_MAX - 1);
+                prog->program_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+                /* Store GLES name (dot notation for structs) */
+                const char *gn = vs_result.uniforms[i].gles_name[0]
+                    ? vs_result.uniforms[i].gles_name : vs_result.uniforms[i].name;
+                strncpy(prog->program_uniforms[slot].gles_name, gn, SGL_ATTRIB_NAME_MAX - 1);
+                prog->program_uniforms[slot].gles_name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+                prog->program_uniforms[slot].location = (GLint)(
+                    SGL_LOC_PACKED_FLAG |
+                    ((unsigned)0 << SGL_LOC_STAGE_SHIFT) |
+                    ((unsigned)vs_opts.ubo_binding << SGL_LOC_BINDING_SHIFT) |
+                    (unsigned)vs_result.uniforms[i].offset);
+                prog->program_uniforms[slot].gl_type = glslt_to_gl_type(vs_result.uniforms[i].type);
+                prog->program_uniforms[slot].array_size = vs_result.uniforms[i].array_size;
+                /* Transpiler uses std140: arrays padded to 16-byte minimum */
+                prog->program_uniforms[slot].element_stride = 0; /* 0 = use std140 default */
+                prog->program_uniforms[slot].used = true;
+            }
+        }
+        SGL_TRACE_SHADER("stored %d VS uniforms in program (UBO size=%d)",
+                         vs_result.num_uniforms, vs_result.ubo_total_size);
+    }
+    /* FS uniforms → packed UBO at FS binding 0 */
+    if (fs_result.num_uniforms > 0) {
+        prog->packed_ubo_sizes[1][0] = fs_result.ubo_total_size;
+        for (int i = 0; i < fs_result.num_uniforms; i++) {
+            if (prog->num_program_uniforms < SGL_MAX_PROGRAM_UNIFORMS) {
+                int slot = prog->num_program_uniforms++;
+                strncpy(prog->program_uniforms[slot].name,
+                        fs_result.uniforms[i].name, SGL_ATTRIB_NAME_MAX - 1);
+                prog->program_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+                /* Store GLES name (dot notation for structs) */
+                const char *gn = fs_result.uniforms[i].gles_name[0]
+                    ? fs_result.uniforms[i].gles_name : fs_result.uniforms[i].name;
+                strncpy(prog->program_uniforms[slot].gles_name, gn, SGL_ATTRIB_NAME_MAX - 1);
+                prog->program_uniforms[slot].gles_name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+                prog->program_uniforms[slot].location = (GLint)(
+                    SGL_LOC_PACKED_FLAG |
+                    ((unsigned)1 << SGL_LOC_STAGE_SHIFT) |
+                    ((unsigned)0 << SGL_LOC_BINDING_SHIFT) |
+                    (unsigned)fs_result.uniforms[i].offset);
+                prog->program_uniforms[slot].gl_type = glslt_to_gl_type(fs_result.uniforms[i].type);
+                prog->program_uniforms[slot].array_size = fs_result.uniforms[i].array_size;
+                /* Transpiler uses std140: arrays padded to 16-byte minimum */
+                prog->program_uniforms[slot].element_stride = 0; /* 0 = use std140 default */
+                prog->program_uniforms[slot].used = true;
+            }
+        }
+        SGL_TRACE_SHADER("stored %d FS uniforms in program (UBO size=%d)",
+                         fs_result.num_uniforms, fs_result.ubo_total_size);
+    }
+
+    /* 5b. Pre-configure packed UBOs so they're valid at draw time.
+     * Without this, packed UBOs only become valid when glGetUniformLocation
+     * is called (which configures them lazily). If an app sets uniforms via
+     * cached locations without calling glGetUniformLocation first, the packed
+     * UBO stays invalid and draws get no uniform data. */
+    for (int stage = 0; stage < 2; stage++) {
+        for (int binding = 0; binding < SGL_MAX_PACKED_UBOS; binding++) {
+            int ubo_size = prog->packed_ubo_sizes[stage][binding];
+            if (ubo_size > 0 && ubo_size <= SGL_MAX_PACKED_UBO_SIZE) {
+                sgl_packed_ubo_t *packed = (stage == 0)
+                    ? &prog->packed_vertex[binding]
+                    : &prog->packed_fragment[binding];
+                if (!packed->valid) {
+                    packed->size = ubo_size;
+                    packed->valid = true;
+                    packed->dirty = false;
+                    memset(packed->data, 0, ubo_size);
+                }
+            }
+        }
+    }
+
+    /* 5c. Set up dual-stage mirrors for uniforms present in both VS and FS.
+     * This must happen at link time so that glUniform* writes go to both
+     * packed UBOs even if glGetUniformLocation wasn't called first.
+     * apply_packed_mirror uses relative offsets, so one mirror per base
+     * uniform covers all array elements. */
+    prog->num_packed_mirrors = 0;
+    for (int i = 0; i < prog->num_program_uniforms; i++) {
+        if (!prog->program_uniforms[i].used) continue;
+        GLint iloc = prog->program_uniforms[i].location;
+        if (!(iloc & SGL_LOC_PACKED_FLAG)) continue;
+        int i_stage = (iloc >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
+        if (i_stage != 0) continue; /* Only VS entries as primary */
+        /* Find matching FS entry with same name */
+        for (int j = 0; j < prog->num_program_uniforms; j++) {
+            if (j == i || !prog->program_uniforms[j].used) continue;
+            GLint jloc = prog->program_uniforms[j].location;
+            if (!(jloc & SGL_LOC_PACKED_FLAG)) continue;
+            int j_stage = (jloc >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
+            if (j_stage == 0) continue; /* Must be FS */
+            if (strcmp(prog->program_uniforms[j].name,
+                      prog->program_uniforms[i].name) == 0) {
+                if (prog->num_packed_mirrors < SGL_MAX_PACKED_MIRRORS) {
+                    prog->packed_mirrors[prog->num_packed_mirrors].primary = iloc;
+                    prog->packed_mirrors[prog->num_packed_mirrors].mirror = jloc;
+                    prog->num_packed_mirrors++;
+                }
+                break;
+            }
+        }
+    }
+
+    /* 5d. Detect gl_DepthRange usage — store packed locations for near/far/diff
+     * so the runtime can populate them from viewport state before each draw. */
+    prog->has_depth_range = (vs_result.has_depth_range || fs_result.has_depth_range);
+    prog->depth_range_loc[0] = 0;
+    prog->depth_range_loc[1] = 0;
+    prog->depth_range_loc[2] = 0;
+    prog->depth_range_loc_fs[0] = 0;
+    prog->depth_range_loc_fs[1] = 0;
+    prog->depth_range_loc_fs[2] = 0;
+    if (prog->has_depth_range) {
+        static const char *dr_names[] = { "sgl_dr_near", "sgl_dr_far", "sgl_dr_diff" };
+        for (int d = 0; d < 3; d++) {
+            for (int u = 0; u < prog->num_program_uniforms; u++) {
+                if (strcmp(prog->program_uniforms[u].name, dr_names[d]) == 0) {
+                    prog->depth_range_loc[d] = prog->program_uniforms[u].location;
+                    break;
+                }
+            }
+        }
+    }
+
+    /* 6. Store sampler bindings from FS transpiler result.
+     * Samplers are separate from UBO uniforms — they stay as
+     * layout(binding=N) uniform sampler2D and need special handling
+     * so glGetUniformLocation returns a valid location and
+     * glUniform1i can remap texture units to shader bindings. */
+    prog->num_samplers = 0;
+    if (fs_result.num_samplers > 0) {
+        for (int i = 0; i < fs_result.num_samplers && i < SGL_MAX_PROGRAM_SAMPLERS; i++) {
+            int slot = prog->num_samplers++;
+            strncpy(prog->samplers[slot].name,
+                    fs_result.samplers[i].name, SGL_ATTRIB_NAME_MAX - 1);
+            prog->samplers[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+            /* Store GLES name (e.g. "s[0]" for sampler arrays) */
+            const char *sgn = fs_result.samplers[i].gles_name[0]
+                ? fs_result.samplers[i].gles_name : fs_result.samplers[i].name;
+            strncpy(prog->samplers[slot].gles_name, sgn, SGL_ATTRIB_NAME_MAX - 1);
+            prog->samplers[slot].gles_name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+            prog->samplers[slot].shader_binding = fs_result.samplers[i].binding;
+            prog->samplers[slot].vs_shader_binding = -1; /* Will be set if VS also has this sampler */
+            prog->samplers[slot].tex_unit = 0; /* GLES2 spec: initial sampler value = 0 */
+            prog->samplers[slot].array_index = fs_result.samplers[i].array_index;
+            prog->samplers[slot].array_total = fs_result.samplers[i].array_total;
+            prog->samplers[slot].gl_type = glslt_to_gl_type(fs_result.samplers[i].type);
+            prog->samplers[slot].used = true;
+        }
+        SGL_TRACE_SHADER("stored %d FS samplers in program", fs_result.num_samplers);
+    }
+    /* Also check VS samplers — deduplicate same-name entries but store VS binding.
+     * Per GLES2 spec, a uniform sampler used in both stages has a single location.
+     * We store vs_shader_binding so draw code can bind to each stage independently. */
+    if (vs_result.num_samplers > 0) {
+        for (int i = 0; i < vs_result.num_samplers && prog->num_samplers < SGL_MAX_PROGRAM_SAMPLERS; i++) {
+            /* Deduplicate: if same name exists from FS, store VS binding in that entry */
+            bool already = false;
+            for (int j = 0; j < prog->num_samplers; j++) {
+                if (prog->samplers[j].used &&
+                    strcmp(prog->samplers[j].name, vs_result.samplers[i].name) == 0) {
+                    /* Store VS binding for per-stage texture binding at draw time */
+                    prog->samplers[j].vs_shader_binding = vs_result.samplers[i].binding;
+                    already = true;
+                    break;
+                }
+            }
+            if (already) continue;
+            /* VS-only sampler (not in FS) */
+            int slot = prog->num_samplers++;
+            strncpy(prog->samplers[slot].name,
+                    vs_result.samplers[i].name, SGL_ATTRIB_NAME_MAX - 1);
+            prog->samplers[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+            const char *sgn = vs_result.samplers[i].gles_name[0]
+                ? vs_result.samplers[i].gles_name : vs_result.samplers[i].name;
+            strncpy(prog->samplers[slot].gles_name, sgn, SGL_ATTRIB_NAME_MAX - 1);
+            prog->samplers[slot].gles_name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+            prog->samplers[slot].shader_binding = vs_result.samplers[i].binding;
+            prog->samplers[slot].vs_shader_binding = vs_result.samplers[i].binding;
+            prog->samplers[slot].tex_unit = 0; /* GLES2 spec: initial sampler value = 0 */
+            prog->samplers[slot].array_index = vs_result.samplers[i].array_index;
+            prog->samplers[slot].array_total = vs_result.samplers[i].array_total;
+            prog->samplers[slot].gl_type = glslt_to_gl_type(vs_result.samplers[i].type);
+            prog->samplers[slot].used = true;
+        }
+    }
+
+    /* 7. Populate active_uniforms[] at link time for glGetActiveUniform/GL_ACTIVE_UNIFORMS.
+     * dEQP calls glGetActiveUniform(index) WITHOUT prior glGetUniformLocation(),
+     * so active_uniforms must be populated here, not lazily. */
+    prog->num_active_uniforms = 0;
+
+    /* Add non-sampler uniforms (deduplicate VS/FS copies with same name) */
+    for (int i = 0; i < prog->num_program_uniforms; i++) {
+        if (!prog->program_uniforms[i].used) continue;
+        /* Deduplicate: same name in both VS and FS → one active uniform.
+         * Must check both raw name and name[0] form since arrays are stored
+         * with [0] suffix per GLES2 spec. */
+        bool already = false;
+        const char *uni_name = prog->program_uniforms[i].gles_name[0]
+            ? prog->program_uniforms[i].gles_name
+            : prog->program_uniforms[i].name;
+        int arr = prog->program_uniforms[i].array_size;
+        char uni_name_arr[SGL_ATTRIB_NAME_MAX];
+        if (arr > 1) {
+            if (strchr(uni_name, '['))
+                strncpy(uni_name_arr, uni_name, SGL_ATTRIB_NAME_MAX - 1);
+            else
+                snprintf(uni_name_arr, SGL_ATTRIB_NAME_MAX, "%s[0]", uni_name);
+            uni_name_arr[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+        }
+        for (int j = 0; j < prog->num_active_uniforms; j++) {
+            if (strcmp(prog->active_uniforms[j].name, uni_name) == 0 ||
+                (arr > 1 && strcmp(prog->active_uniforms[j].name, uni_name_arr) == 0)) {
+                already = true; break;
+            }
+        }
+        if (already) continue;
+        if (prog->num_active_uniforms >= SGL_MAX_UNIFORMS * 2) break;
+        int slot = prog->num_active_uniforms++;
+        /* For arrays, GLES2 spec requires name = "name[0]", size = array_count */
+        if (arr > 1) {
+            if (strchr(uni_name, '['))
+                strncpy(prog->active_uniforms[slot].name, uni_name, SGL_ATTRIB_NAME_MAX - 1);
+            else
+                snprintf(prog->active_uniforms[slot].name, SGL_ATTRIB_NAME_MAX,
+                         "%s[0]", uni_name);
+            prog->active_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+        } else {
+            strncpy(prog->active_uniforms[slot].name, uni_name, SGL_ATTRIB_NAME_MAX - 1);
+            prog->active_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+        }
+        prog->active_uniforms[slot].type = prog->program_uniforms[i].gl_type
+            ? prog->program_uniforms[i].gl_type : GL_FLOAT_VEC4;
+        prog->active_uniforms[slot].size = (arr > 1) ? arr : 1;
+        prog->active_uniforms[slot].location = prog->program_uniforms[i].location;
+        prog->active_uniforms[slot].element_stride = prog->program_uniforms[i].element_stride;
+        prog->active_uniforms[slot].active = true;
+    }
+
+    /* Add samplers as active uniforms.
+     * For sampler arrays: report ONE active uniform with name "s[0]" and size=array_total.
+     * Skip subsequent array elements (array_index > 0). */
+    for (int i = 0; i < prog->num_samplers; i++) {
+        if (!prog->samplers[i].used) continue;
+        if (prog->num_active_uniforms >= SGL_MAX_UNIFORMS * 2) break;
+        /* Skip non-first array elements */
+        if (prog->samplers[i].array_index > 0) continue;
+        /* Use GLES name for API visibility */
+        const char *samp_name = prog->samplers[i].gles_name[0]
+            ? prog->samplers[i].gles_name : prog->samplers[i].name;
+        /* Deduplicate (VS+FS sampler with same name) */
+        bool already = false;
+        for (int j = 0; j < prog->num_active_uniforms; j++) {
+            if (strcmp(prog->active_uniforms[j].name, samp_name) == 0) {
+                already = true; break;
+            }
+        }
+        if (already) continue;
+        int slot = prog->num_active_uniforms++;
+        strncpy(prog->active_uniforms[slot].name, samp_name, SGL_ATTRIB_NAME_MAX - 1);
+        prog->active_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+        /* Determine sampler type from transpiler metadata */
+        GLenum samp_type = prog->samplers[i].gl_type ? prog->samplers[i].gl_type : GL_SAMPLER_2D;
+        if (prog->samplers[i].array_total > 0) {
+            /* Sampler array: size = array count */
+            prog->active_uniforms[slot].size = prog->samplers[i].array_total;
+        } else {
+            prog->active_uniforms[slot].size = 1;
+        }
+        prog->active_uniforms[slot].type = samp_type;
+        prog->active_uniforms[slot].location = (GLint)(SGL_LOC_SAMPLER_FLAG | (unsigned)i);
+        prog->active_uniforms[slot].active = true;
+    }
+
+    SGL_TRACE_SHADER("populated %d active uniforms at link time", prog->num_active_uniforms);
+
+    /* 8. Register attrib bindings from transpiler result into program */
+    prog->num_active_attribs = vs_result.num_attributes;
+    /* Clear in_shader flag and linked_location for all existing bindings */
+    for (int j = 0; j < prog->num_attrib_bindings; j++) {
+        prog->attrib_bindings[j].in_shader = false;
+        prog->attrib_bindings[j].linked_location = -1;
+    }
+    for (int i = 0; i < vs_result.num_attributes; i++) {
+        GLenum attr_gl_type = glslt_to_gl_type(vs_result.attributes[i].type);
+        bool found = false;
+        for (int j = 0; j < prog->num_attrib_bindings; j++) {
+            if (strcmp(prog->attrib_bindings[j].name,
+                       vs_result.attributes[i].name) == 0) {
+                prog->attrib_bindings[j].index = vs_result.attributes[i].location;
+                prog->attrib_bindings[j].linked_location = (GLint)vs_result.attributes[i].location;
+                prog->attrib_bindings[j].gl_type = attr_gl_type;
+                prog->attrib_bindings[j].in_shader = true;
+                found = true;
+                break;
+            }
+        }
+        if (!found && prog->num_attrib_bindings < SGL_MAX_ATTRIB_BINDINGS) {
+            int slot = prog->num_attrib_bindings++;
+            strncpy(prog->attrib_bindings[slot].name,
+                    vs_result.attributes[i].name, SGL_ATTRIB_NAME_MAX - 1);
+            prog->attrib_bindings[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+            prog->attrib_bindings[slot].index = vs_result.attributes[i].location;
+            prog->attrib_bindings[slot].linked_location = (GLint)vs_result.attributes[i].location;
+            prog->attrib_bindings[slot].gl_type = attr_gl_type;
+            prog->attrib_bindings[slot].used = true;
+            prog->attrib_bindings[slot].user_bound = false; /* linker-added */
+            prog->attrib_bindings[slot].in_shader = true;
+        }
+    }
+
+    /* Count active attribs — ALL attributes with in_shader=true (no dedup). */
+    {
+        int active_count = 0;
+        for (int j = 0; j < prog->num_attrib_bindings; j++) {
+            if (prog->attrib_bindings[j].in_shader) active_count++;
+        }
+        prog->num_active_attribs = active_count;
+    }
+
+    glslt_result_free(&vs_result);
+    glslt_result_free(&fs_result);
+
+    SGL_TRACE_SHADER("transpilation complete for program %u", program);
+}
+#endif /* SGL_ENABLE_RUNTIME_COMPILER */
+
 GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
@@ -1026,407 +1919,7 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
 
     /* If any shader is Mesa-compiled, populate program metadata from Mesa metadata. */
     if (any_mesa && !any_transpile) {
-        SGL_TRACE_SHADER("linking Mesa-compiled shaders for program %u", program);
-
-        prog->num_program_uniforms = 0;
-        memset(prog->packed_ubo_sizes, 0, sizeof(prog->packed_ubo_sizes));
-        prog->num_samplers = 0;
-
-        /* Process each stage's Mesa metadata */
-        for (int stage_idx = 0; stage_idx < 2; stage_idx++) {
-            sgl_shader_t *sh = (stage_idx == 0) ? vs_sh : fs_sh;
-            bool is_mesa = (stage_idx == 0) ? vs_mesa : fs_mesa;
-            if (!is_mesa || !sh->mesa_meta) continue;
-
-            sgl_mesa_metadata_t *meta = sh->mesa_meta;
-
-            /* Set packed UBO size for this stage at binding 0.
-             * Must cover the FULL constbuf including embedded shader constants
-             * (literal values used in compare functions, etc.), not just user
-             * uniforms.  initial_data_size reflects the total ParameterValues
-             * buffer from Mesa which the GPU shader reads via constbuf. */
-            {
-                uint32_t cb_size = meta->constbuf_size;
-                if (meta->initial_data_size > cb_size)
-                    cb_size = meta->initial_data_size;
-                if (cb_size > 0)
-                    prog->packed_ubo_sizes[stage_idx][0] = cb_size;
-            }
-
-            /* Store uniforms */
-            for (int i = 0; i < meta->num_uniforms && i < SGL_MESA_MAX_UNIFORMS; i++) {
-                if (prog->num_program_uniforms >= SGL_MAX_PROGRAM_UNIFORMS) break;
-                int slot = prog->num_program_uniforms++;
-                strncpy(prog->program_uniforms[slot].name,
-                        meta->uniforms[i].name, SGL_ATTRIB_NAME_MAX - 1);
-                prog->program_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-                /* For Mesa, GLES name = uniform name (no transpiler renaming) */
-                strncpy(prog->program_uniforms[slot].gles_name,
-                        meta->uniforms[i].name, SGL_ATTRIB_NAME_MAX - 1);
-                prog->program_uniforms[slot].gles_name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-                prog->program_uniforms[slot].location = (GLint)(
-                    SGL_LOC_PACKED_FLAG |
-                    ((unsigned)stage_idx << SGL_LOC_STAGE_SHIFT) |
-                    ((unsigned)0 << SGL_LOC_BINDING_SHIFT) |
-                    (unsigned)meta->uniforms[i].offset);
-                prog->program_uniforms[slot].gl_type = meta->uniforms[i].gl_type;
-                prog->program_uniforms[slot].array_size =
-                    meta->uniforms[i].array_elements > 0 ? meta->uniforms[i].array_elements : 0;
-                /* Mesa constbuf stride: size_bytes / array_elements (NOT std140).
-                 * Mesa packs float arrays at 4-byte stride, not 16-byte. */
-                if (meta->uniforms[i].array_elements > 1 && meta->uniforms[i].size_bytes > 0)
-                    prog->program_uniforms[slot].element_stride =
-                        (uint16_t)(meta->uniforms[i].size_bytes / meta->uniforms[i].array_elements);
-                else
-                    prog->program_uniforms[slot].element_stride = 0;
-                prog->program_uniforms[slot].used = true;
-            }
-
-            /* Store samplers */
-            for (int i = 0; i < meta->num_samplers && i < SGL_MESA_MAX_SAMPLERS; i++) {
-                /* Deduplicate: check if same-named sampler exists from other stage */
-                bool already = false;
-                for (int j = 0; j < prog->num_samplers; j++) {
-                    if (prog->samplers[j].used &&
-                        strcmp(prog->samplers[j].name, meta->samplers[i].name) == 0) {
-                        /* Same sampler in both stages — store each stage's binding.
-                         * VS is processed first (stage_idx=0), FS second (stage_idx=1).
-                         * shader_binding = FS binding, vs_shader_binding = VS binding. */
-                        if (stage_idx == 0)
-                            prog->samplers[j].vs_shader_binding = meta->samplers[i].binding;
-                        else
-                            prog->samplers[j].shader_binding = meta->samplers[i].binding;
-                        already = true;
-                        break;
-                    }
-                }
-                if (already) continue;
-                if (prog->num_samplers >= SGL_MAX_PROGRAM_SAMPLERS) break;
-                int slot = prog->num_samplers++;
-                strncpy(prog->samplers[slot].name,
-                        meta->samplers[i].name, SGL_ATTRIB_NAME_MAX - 1);
-                prog->samplers[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-                strncpy(prog->samplers[slot].gles_name,
-                        meta->samplers[i].name, SGL_ATTRIB_NAME_MAX - 1);
-                prog->samplers[slot].gles_name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-                prog->samplers[slot].shader_binding = meta->samplers[i].binding;
-                if (stage_idx == 0)
-                    prog->samplers[slot].vs_shader_binding = meta->samplers[i].binding;
-                else
-                    prog->samplers[slot].vs_shader_binding = -1;
-                prog->samplers[slot].tex_unit = 0; /* GLES2 spec default */
-                prog->samplers[slot].array_index = -1; /* set below if array */
-                prog->samplers[slot].array_total = 0;
-                prog->samplers[slot].gl_type = meta->samplers[i].gl_type;
-                prog->samplers[slot].used = true;
-            }
-        }
-
-        /* Detect sampler arrays from Mesa bracket notation.
-         * Mesa reports sampler array elements as "u_var[0]", "u_var[1]", etc.
-         * Parse bracket to set array_index/array_total for each element.
-         * This enables glGetUniformLocation("u_var") → first element,
-         * and glGetUniformLocation("u_var[N]") → Nth element. */
-        for (int i = 0; i < prog->num_samplers; i++) {
-            if (!prog->samplers[i].used) continue;
-            const char *sn = prog->samplers[i].gles_name[0]
-                ? prog->samplers[i].gles_name : prog->samplers[i].name;
-            /* Use strrchr to find LAST bracket — avoids confusing struct
-             * array subscripts (u_var[0].m0) with sampler arrays (u_arr[0]).
-             * A terminal bracket (no dot after) means sampler array element. */
-            const char *br = strrchr(sn, '[');
-            if (!br || strchr(br, '.') != NULL) {
-                prog->samplers[i].array_index = 0;
-                continue;
-            }
-            int idx = atoi(br + 1);
-            prog->samplers[i].array_index = idx;
-            /* Count total elements with same base name */
-            size_t base_len = br - sn;
-            int total = 0;
-            for (int j = 0; j < prog->num_samplers; j++) {
-                if (!prog->samplers[j].used) continue;
-                const char *jn = prog->samplers[j].gles_name[0]
-                    ? prog->samplers[j].gles_name : prog->samplers[j].name;
-                const char *jbr = strrchr(jn, '[');
-                if (!jbr || strchr(jbr, '.') != NULL) continue;
-                size_t jbase_len = jbr - jn;
-                if (jbase_len == base_len && strncmp(sn, jn, base_len) == 0)
-                    total++;
-            }
-            prog->samplers[i].array_total = total;
-        }
-
-        /* Populate attrib bindings from VS input metadata */
-        if (vs_mesa && vs_sh->mesa_meta) {
-            sgl_mesa_metadata_t *meta = vs_sh->mesa_meta;
-            /* GL_ACTIVE_ATTRIBUTES = count of attributes in the compiled shader,
-             * NOT the total num_attrib_bindings (which includes inactive user-bound). */
-            prog->num_active_attribs = (meta->num_inputs < SGL_MESA_MAX_INPUTS)
-                ? meta->num_inputs : SGL_MESA_MAX_INPUTS;
-            /* Clear in_shader flag and linked_location for all existing bindings */
-            for (int j = 0; j < prog->num_attrib_bindings; j++) {
-                prog->attrib_bindings[j].in_shader = false;
-                prog->attrib_bindings[j].linked_location = -1;
-            }
-            for (int i = 0; i < meta->num_inputs && i < SGL_MESA_MAX_INPUTS; i++) {
-                bool found = false;
-                for (int j = 0; j < prog->num_attrib_bindings; j++) {
-                    if (strcmp(prog->attrib_bindings[j].name,
-                               meta->inputs[i].name) == 0) {
-                        prog->attrib_bindings[j].index = meta->inputs[i].location;
-                        prog->attrib_bindings[j].linked_location = (GLint)meta->inputs[i].location;
-                        prog->attrib_bindings[j].gl_type = meta->inputs[i].gl_type;
-                        prog->attrib_bindings[j].in_shader = true;
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found && prog->num_attrib_bindings < SGL_MAX_ATTRIB_BINDINGS) {
-                    int slot = prog->num_attrib_bindings++;
-                    strncpy(prog->attrib_bindings[slot].name,
-                            meta->inputs[i].name, SGL_ATTRIB_NAME_MAX - 1);
-                    prog->attrib_bindings[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-                    prog->attrib_bindings[slot].index = meta->inputs[i].location;
-                    prog->attrib_bindings[slot].linked_location = (GLint)meta->inputs[i].location;
-                    prog->attrib_bindings[slot].gl_type = meta->inputs[i].gl_type;
-                    prog->attrib_bindings[slot].used = true;
-                    prog->attrib_bindings[slot].user_bound = false; /* linker-added */
-                    prog->attrib_bindings[slot].in_shader = true;
-                }
-            }
-            /* Count active attribs — count ALL attributes with in_shader=true.
-             * Aliased attributes (same location via glBindAttribLocation) are each
-             * individually active per GLES2 spec and must all appear in
-             * glGetActiveAttrib enumeration. */
-            {
-                int active_count = 0;
-                for (int j = 0; j < prog->num_attrib_bindings; j++) {
-                    if (prog->attrib_bindings[j].in_shader) active_count++;
-                }
-                prog->num_active_attribs = active_count;
-            }
-        }
-
-        /* Pre-configure packed UBOs and load initial constbuf data from Mesa */
-        for (int stage = 0; stage < 2; stage++) {
-            for (int binding = 0; binding < SGL_MAX_PACKED_UBOS; binding++) {
-                int ubo_size = prog->packed_ubo_sizes[stage][binding];
-                if (ubo_size > 0 && ubo_size <= SGL_MAX_PACKED_UBO_SIZE) {
-                    sgl_packed_ubo_t *packed = (stage == 0)
-                        ? &prog->packed_vertex[binding]
-                        : &prog->packed_fragment[binding];
-                    if (!packed->valid) {
-                        packed->size = ubo_size;
-                        packed->valid = true;
-                        packed->dirty = false;
-                        memset(packed->data, 0, ubo_size);
-                        /* Load initial constbuf data (Mesa-embedded literals/constants).
-                         * Only for binding 0 (the driver constbuf). */
-                        if (binding == 0) {
-                            sgl_shader_t *sh = (stage == 0) ? vs_sh : fs_sh;
-                            if (sh && sh->mesa_meta && sh->mesa_meta->initial_data) {
-                                uint32_t copy = sh->mesa_meta->initial_data_size;
-                                if (copy > (uint32_t)ubo_size) copy = (uint32_t)ubo_size;
-                                memcpy(packed->data, sh->mesa_meta->initial_data, copy);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        /* Set up dual-stage mirrors for uniforms present in both VS and FS */
-        prog->num_packed_mirrors = 0;
-        for (int i = 0; i < prog->num_program_uniforms; i++) {
-            if (!prog->program_uniforms[i].used) continue;
-            GLint iloc = prog->program_uniforms[i].location;
-            if (!(iloc & SGL_LOC_PACKED_FLAG)) continue;
-            int i_stage = (iloc >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
-            if (i_stage != 0) continue;
-            for (int j = 0; j < prog->num_program_uniforms; j++) {
-                if (j == i || !prog->program_uniforms[j].used) continue;
-                GLint jloc = prog->program_uniforms[j].location;
-                if (!(jloc & SGL_LOC_PACKED_FLAG)) continue;
-                int j_stage = (jloc >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
-                if (j_stage == 0) continue;
-                if (strcmp(prog->program_uniforms[j].name,
-                          prog->program_uniforms[i].name) == 0) {
-                    if (prog->num_packed_mirrors < SGL_MAX_PACKED_MIRRORS) {
-                        prog->packed_mirrors[prog->num_packed_mirrors].primary = iloc;
-                        prog->packed_mirrors[prog->num_packed_mirrors].mirror = jloc;
-                        prog->num_packed_mirrors++;
-                    }
-                    break;
-                }
-            }
-        }
-
-        /* Debug: dump link-time state */
-        /* gl_DepthRange: check if either VS or FS uses it (Mesa state variable).
-         * Build packed UBO locations so draw-time code can update near/far/diff. */
-        prog->has_depth_range = false;
-        prog->depth_range_loc[0] = 0;
-        prog->depth_range_loc[1] = 0;
-        prog->depth_range_loc[2] = 0;
-        prog->depth_range_loc_fs[0] = 0;
-        prog->depth_range_loc_fs[1] = 0;
-        prog->depth_range_loc_fs[2] = 0;
-        for (int stage_idx = 0; stage_idx < 2; stage_idx++) {
-            sgl_shader_t *sh = (stage_idx == 0) ? vs_sh : fs_sh;
-            bool is_mesa = (stage_idx == 0) ? vs_mesa : fs_mesa;
-            if (!is_mesa || !sh->mesa_meta) continue;
-            int dr_off = sh->mesa_meta->depth_range_offset;
-            if (dr_off < 0) continue;
-            prog->has_depth_range = true;
-            /* Build packed location: stage | binding 0 | byte offset */
-            GLint *dr_locs = (stage_idx == 0) ? prog->depth_range_loc : prog->depth_range_loc_fs;
-            for (int d = 0; d < 3; d++) {
-                dr_locs[d] = (GLint)(SGL_LOC_PACKED_FLAG
-                    | ((uint32_t)stage_idx << SGL_LOC_STAGE_SHIFT)
-                    | (0u << SGL_LOC_BINDING_SHIFT)
-                    | (uint32_t)(dr_off + d * 4));
-            }
-        }
-
-        /* Link-time varying type check for Mesa-compiled shaders.
-         * Mesa compiles each stage independently — cross-stage type mismatches
-         * (e.g. VS "varying float var" vs FS "varying vec2 var") are not caught. */
-        if (vs_mesa && fs_mesa && vs_sh->source && fs_sh->source) {
-            typedef struct { char name[64]; char type[32]; } vdecl_t;
-            vdecl_t vs_v[64], fs_v[64];
-            int vs_nv = 0, fs_nv = 0;
-            for (int pass = 0; pass < 2; pass++) {
-                const char *src = (pass == 0) ? vs_sh->source : fs_sh->source;
-                vdecl_t *v = (pass == 0) ? vs_v : fs_v;
-                int *nv = (pass == 0) ? &vs_nv : &fs_nv;
-                const char *ln = src;
-                while (ln && *ln && *nv < 64) {
-                    while (*ln == ' ' || *ln == '\t') ln++;
-                    const char *p = ln;
-                    if (strncmp(p, "varying", 7) == 0 && (p[7] == ' ' || p[7] == '\t')) {
-                        p += 7;
-                        while (*p == ' ' || *p == '\t') p++;
-                        if (strncmp(p, "lowp ", 5) == 0 || strncmp(p, "mediump ", 8) == 0 || strncmp(p, "highp ", 6) == 0) {
-                            while (*p && *p != ' ' && *p != '\t') p++;
-                            while (*p == ' ' || *p == '\t') p++;
-                        }
-                        const char *ts = p;
-                        while (*p && *p != ' ' && *p != '\t' && *p != ';') p++;
-                        size_t tl = p - ts;
-                        while (*p == ' ' || *p == '\t') p++;
-                        const char *ns = p;
-                        while (*p && *p != ' ' && *p != '\t' && *p != ';' && *p != '[') p++;
-                        size_t nl = p - ns;
-                        if (tl > 0 && tl < 32 && nl > 0 && nl < 64) {
-                            memcpy(v[*nv].type, ts, tl); v[*nv].type[tl] = '\0';
-                            memcpy(v[*nv].name, ns, nl); v[*nv].name[nl] = '\0';
-                            (*nv)++;
-                        }
-                    }
-                    const char *nl = strchr(ln, '\n');
-                    ln = nl ? nl + 1 : NULL;
-                }
-            }
-            for (int i = 0; i < vs_nv; i++) {
-                for (int j = 0; j < fs_nv; j++) {
-                    if (strcmp(vs_v[i].name, fs_v[j].name) == 0 &&
-                        strcmp(vs_v[i].type, fs_v[j].type) != 0) {
-                        prog->linked = false;
-                        if (prog->info_log) free(prog->info_log);
-                        char msg[256];
-                        snprintf(msg, sizeof(msg), "varying '%s' type mismatch: VS=%s, FS=%s",
-                                 vs_v[i].name, vs_v[i].type, fs_v[j].type);
-                        prog->info_log = strdup(msg);
-                        return;
-                    }
-                }
-            }
-        }
-
-        /* Populate active_uniforms[] */
-        prog->num_active_uniforms = 0;
-        for (int i = 0; i < prog->num_program_uniforms; i++) {
-            if (!prog->program_uniforms[i].used) continue;
-            const char *uni_name = prog->program_uniforms[i].gles_name[0]
-                ? prog->program_uniforms[i].gles_name
-                : prog->program_uniforms[i].name;
-            int arr = prog->program_uniforms[i].array_size;
-            /* Deduplicate — Mesa stores array names with [0] suffix already */
-            bool already = false;
-            char uni_name_arr[SGL_ATTRIB_NAME_MAX];
-            if (arr > 1) {
-                if (strchr(uni_name, '['))
-                    strncpy(uni_name_arr, uni_name, SGL_ATTRIB_NAME_MAX - 1);
-                else
-                    snprintf(uni_name_arr, SGL_ATTRIB_NAME_MAX, "%s[0]", uni_name);
-                uni_name_arr[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-            }
-            for (int j = 0; j < prog->num_active_uniforms; j++) {
-                if (strcmp(prog->active_uniforms[j].name, uni_name) == 0 ||
-                    (arr > 1 && strcmp(prog->active_uniforms[j].name, uni_name_arr) == 0)) {
-                    already = true; break;
-                }
-            }
-            if (already) continue;
-            if (prog->num_active_uniforms >= SGL_MAX_UNIFORMS * 2) break;
-            int slot = prog->num_active_uniforms++;
-            if (arr > 1) {
-                if (strchr(uni_name, '['))
-                    strncpy(prog->active_uniforms[slot].name, uni_name, SGL_ATTRIB_NAME_MAX - 1);
-                else
-                    snprintf(prog->active_uniforms[slot].name, SGL_ATTRIB_NAME_MAX,
-                             "%s[0]", uni_name);
-                prog->active_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-            } else {
-                strncpy(prog->active_uniforms[slot].name, uni_name, SGL_ATTRIB_NAME_MAX - 1);
-                prog->active_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-            }
-            prog->active_uniforms[slot].type = prog->program_uniforms[i].gl_type
-                ? prog->program_uniforms[i].gl_type : GL_FLOAT_VEC4;
-            prog->active_uniforms[slot].size = (arr > 1) ? arr : 1;
-            prog->active_uniforms[slot].location = prog->program_uniforms[i].location;
-            prog->active_uniforms[slot].element_stride = prog->program_uniforms[i].element_stride;
-            prog->active_uniforms[slot].active = true;
-        }
-        /* Add samplers as active uniforms.
-         * For sampler arrays, add only one entry (first element) with size = array_total.
-         * Per GLES spec, glGetActiveUniform returns "s[0]" with size=N for sampler arrays. */
-        for (int i = 0; i < prog->num_samplers; i++) {
-            if (!prog->samplers[i].used) continue;
-            if (prog->num_active_uniforms >= SGL_MAX_UNIFORMS * 2) break;
-            /* Skip non-first elements of sampler arrays */
-            if (prog->samplers[i].array_total > 0 && prog->samplers[i].array_index > 0)
-                continue;
-            const char *samp_name = prog->samplers[i].gles_name[0]
-                ? prog->samplers[i].gles_name : prog->samplers[i].name;
-            /* For arrays, ensure the name has [0] suffix */
-            char name_buf[SGL_ATTRIB_NAME_MAX];
-            if (prog->samplers[i].array_total > 0 && !strchr(samp_name, '[')) {
-                snprintf(name_buf, SGL_ATTRIB_NAME_MAX, "%s[0]", samp_name);
-                samp_name = name_buf;
-            }
-            bool already = false;
-            for (int j = 0; j < prog->num_active_uniforms; j++) {
-                if (strcmp(prog->active_uniforms[j].name, samp_name) == 0) {
-                    already = true; break;
-                }
-            }
-            if (already) continue;
-            int slot = prog->num_active_uniforms++;
-            strncpy(prog->active_uniforms[slot].name, samp_name, SGL_ATTRIB_NAME_MAX - 1);
-            prog->active_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-            prog->active_uniforms[slot].type = prog->samplers[i].gl_type
-                ? prog->samplers[i].gl_type : GL_SAMPLER_2D;
-            prog->active_uniforms[slot].size = prog->samplers[i].array_total > 0
-                ? prog->samplers[i].array_total : 1;
-            prog->active_uniforms[slot].location = (GLint)(SGL_LOC_SAMPLER_FLAG | (unsigned)i);
-            prog->active_uniforms[slot].active = true;
-        }
-
-        SGL_TRACE_SHADER("Mesa link: %d uniforms, %d samplers, %d active, %d mirrors",
-                         prog->num_program_uniforms, prog->num_samplers,
-                         prog->num_active_uniforms, prog->num_packed_mirrors);
+        sgl_link_program_mesa(program, prog, vs_sh, fs_sh, vs_mesa, fs_mesa);
     }
 
     /* Check if any attached shader needs transpilation (GLSL ES 1.00 → 4.60) */
@@ -1434,480 +1927,7 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
                            (fs_sh && fs_sh->needs_transpile);
 
     if (needs_transpile) {
-        SGL_TRACE_SHADER("transpiling ES 1.00 shaders for program %u", program);
-
-        /* 1. Set up transpiler options with attrib bindings from glBindAttribLocation */
-        glslt_options_t vs_opts;
-        glslt_options_init(&vs_opts);
-
-        for (int i = 0; i < prog->num_attrib_bindings; i++) {
-            if (prog->attrib_bindings[i].used) {
-                glslt_set_attrib_location(&vs_opts,
-                    prog->attrib_bindings[i].name,
-                    (int)prog->attrib_bindings[i].index);
-            }
-        }
-
-        /* 2. Transpile vertex shader */
-        glslt_result_t vs_result;
-        memset(&vs_result, 0, sizeof(vs_result));
-        vs_result.success = 1; /* default to success if no VS to transpile */
-
-        if (vs_sh && vs_sh->needs_transpile && vs_sh->source) {
-            vs_result = glslt_transpile(vs_sh->source, GLSLT_VERTEX, &vs_opts);
-            if (!vs_result.success) {
-                SGL_TRACE_SHADER("VS transpile failed: %s", vs_result.error);
-                if (vs_sh->info_log) free(vs_sh->info_log);
-                vs_sh->info_log = strdup(vs_result.error);
-                vs_sh->compiled = false;
-                prog->linked = false;
-                if (prog->info_log) free(prog->info_log);
-                prog->info_log = strdup(vs_result.error[0] ? vs_result.error : "VS transpile failed");
-                glslt_result_free(&vs_result);
-                SGL_TRACE_SHADER("glLinkProgram(%u) - VS transpile FAILED", program);
-                return;
-            }
-            SGL_TRACE_SHADER("VS transpiled: %d uniforms, %d samplers, %d attribs, %d varyings",
-                             vs_result.num_uniforms, vs_result.num_samplers,
-                             vs_result.num_attributes, vs_result.num_varyings);
-        }
-
-        /* 3. Transpile fragment shader (pass VS varying locations for consistency) */
-        glslt_result_t fs_result;
-        memset(&fs_result, 0, sizeof(fs_result));
-        fs_result.success = 1;
-
-        if (fs_sh && fs_sh->needs_transpile && fs_sh->source) {
-            glslt_options_t fs_opts;
-            glslt_options_init(&fs_opts);
-
-            /* Pass VS varying locations so FS uses matching locations */
-            for (int i = 0; i < vs_result.num_varyings; i++) {
-                glslt_set_varying_location(&fs_opts,
-                    vs_result.varyings[i].name,
-                    vs_result.varyings[i].location);
-            }
-
-            fs_result = glslt_transpile(fs_sh->source, GLSLT_FRAGMENT, &fs_opts);
-            if (!fs_result.success) {
-                SGL_TRACE_SHADER("FS transpile failed: %s", fs_result.error);
-                if (fs_sh->info_log) free(fs_sh->info_log);
-                fs_sh->info_log = strdup(fs_result.error);
-                fs_sh->compiled = false;
-                prog->linked = false;
-                if (prog->info_log) free(prog->info_log);
-                prog->info_log = strdup(fs_result.error[0] ? fs_result.error : "FS transpile failed");
-                glslt_result_free(&vs_result);
-                glslt_result_free(&fs_result);
-                SGL_TRACE_SHADER("glLinkProgram(%u) - FS transpile FAILED", program);
-                return;
-            }
-            SGL_TRACE_SHADER("FS transpiled: %d uniforms, %d samplers, %d varyings",
-                             fs_result.num_uniforms, fs_result.num_samplers, fs_result.num_varyings);
-        }
-
-        /* 3b. Link-time varying type check: VS outputs must match FS inputs */
-        if (vs_result.success && fs_result.success) {
-            for (int i = 0; i < vs_result.num_varyings; i++) {
-                for (int j = 0; j < fs_result.num_varyings; j++) {
-                    if (strcmp(vs_result.varyings[i].name,
-                              fs_result.varyings[j].name) == 0) {
-                        if (vs_result.varyings[i].type != fs_result.varyings[j].type ||
-                            vs_result.varyings[i].array_size != fs_result.varyings[j].array_size) {
-                            prog->linked = false;
-                            if (prog->info_log) free(prog->info_log);
-                            char msg[256];
-                            snprintf(msg, sizeof(msg),
-                                     "varying '%s' type mismatch between VS and FS",
-                                     vs_result.varyings[i].name);
-                            prog->info_log = strdup(msg);
-                            glslt_result_free(&vs_result);
-                            glslt_result_free(&fs_result);
-                            SGL_TRACE_SHADER("glLinkProgram(%u) - %s", program, msg);
-                            return;
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-
-        /* 4. Compile transpiled GLSL 4.60 → DKSH via libuam */
-        if (vs_sh && vs_sh->needs_transpile && vs_result.output) {
-            if (vs_sh->info_log) { free(vs_sh->info_log); vs_sh->info_log = NULL; }
-            vs_sh->compiled = sgl_compile_glsl460(ctx, prog->vertex_shader,
-                                                   vs_sh, vs_result.output);
-            if (!vs_sh->compiled) {
-                SGL_TRACE_SHADER("VS compile failed after transpile");
-                prog->linked = false;
-                if (prog->info_log) free(prog->info_log);
-                prog->info_log = vs_sh->info_log ? strdup(vs_sh->info_log) : strdup("VS compile failed");
-                glslt_result_free(&vs_result);
-                glslt_result_free(&fs_result);
-                SGL_TRACE_SHADER("glLinkProgram(%u) - VS compile FAILED", program);
-                return;
-            }
-            vs_sh->needs_transpile = false;
-        }
-
-        if (fs_sh && fs_sh->needs_transpile && fs_result.output) {
-            if (fs_sh->info_log) { free(fs_sh->info_log); fs_sh->info_log = NULL; }
-            fs_sh->compiled = sgl_compile_glsl460(ctx, prog->fragment_shader,
-                                                   fs_sh, fs_result.output);
-            if (!fs_sh->compiled) {
-                SGL_TRACE_SHADER("FS compile failed after transpile");
-                prog->linked = false;
-                if (prog->info_log) free(prog->info_log);
-                prog->info_log = fs_sh->info_log ? strdup(fs_sh->info_log) : strdup("FS compile failed");
-                glslt_result_free(&vs_result);
-                glslt_result_free(&fs_result);
-                SGL_TRACE_SHADER("glLinkProgram(%u) - FS compile FAILED", program);
-                return;
-            }
-            fs_sh->needs_transpile = false;
-        }
-
-        /* 5. Store uniforms PER-PROGRAM from transpiler reflection data.
-         * Each program gets its own uniform name→location mapping, because
-         * different programs have different std140 layouts (uniforms sorted
-         * alphabetically per-shader → different offsets per program). */
-        prog->num_program_uniforms = 0;
-        memset(prog->packed_ubo_sizes, 0, sizeof(prog->packed_ubo_sizes));
-
-        /* VS uniforms → packed UBO at VS binding 0 */
-        if (vs_result.num_uniforms > 0) {
-            prog->packed_ubo_sizes[0][vs_opts.ubo_binding] = vs_result.ubo_total_size;
-            for (int i = 0; i < vs_result.num_uniforms; i++) {
-                if (prog->num_program_uniforms < SGL_MAX_PROGRAM_UNIFORMS) {
-                    int slot = prog->num_program_uniforms++;
-                    strncpy(prog->program_uniforms[slot].name,
-                            vs_result.uniforms[i].name, SGL_ATTRIB_NAME_MAX - 1);
-                    prog->program_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-                    /* Store GLES name (dot notation for structs) */
-                    const char *gn = vs_result.uniforms[i].gles_name[0]
-                        ? vs_result.uniforms[i].gles_name : vs_result.uniforms[i].name;
-                    strncpy(prog->program_uniforms[slot].gles_name, gn, SGL_ATTRIB_NAME_MAX - 1);
-                    prog->program_uniforms[slot].gles_name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-                    prog->program_uniforms[slot].location = (GLint)(
-                        SGL_LOC_PACKED_FLAG |
-                        ((unsigned)0 << SGL_LOC_STAGE_SHIFT) |
-                        ((unsigned)vs_opts.ubo_binding << SGL_LOC_BINDING_SHIFT) |
-                        (unsigned)vs_result.uniforms[i].offset);
-                    prog->program_uniforms[slot].gl_type = glslt_to_gl_type(vs_result.uniforms[i].type);
-                    prog->program_uniforms[slot].array_size = vs_result.uniforms[i].array_size;
-                    /* Transpiler uses std140: arrays padded to 16-byte minimum */
-                    prog->program_uniforms[slot].element_stride = 0; /* 0 = use std140 default */
-                    prog->program_uniforms[slot].used = true;
-                }
-            }
-            SGL_TRACE_SHADER("stored %d VS uniforms in program (UBO size=%d)",
-                             vs_result.num_uniforms, vs_result.ubo_total_size);
-        }
-        /* FS uniforms → packed UBO at FS binding 0 */
-        if (fs_result.num_uniforms > 0) {
-            prog->packed_ubo_sizes[1][0] = fs_result.ubo_total_size;
-            for (int i = 0; i < fs_result.num_uniforms; i++) {
-                if (prog->num_program_uniforms < SGL_MAX_PROGRAM_UNIFORMS) {
-                    int slot = prog->num_program_uniforms++;
-                    strncpy(prog->program_uniforms[slot].name,
-                            fs_result.uniforms[i].name, SGL_ATTRIB_NAME_MAX - 1);
-                    prog->program_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-                    /* Store GLES name (dot notation for structs) */
-                    const char *gn = fs_result.uniforms[i].gles_name[0]
-                        ? fs_result.uniforms[i].gles_name : fs_result.uniforms[i].name;
-                    strncpy(prog->program_uniforms[slot].gles_name, gn, SGL_ATTRIB_NAME_MAX - 1);
-                    prog->program_uniforms[slot].gles_name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-                    prog->program_uniforms[slot].location = (GLint)(
-                        SGL_LOC_PACKED_FLAG |
-                        ((unsigned)1 << SGL_LOC_STAGE_SHIFT) |
-                        ((unsigned)0 << SGL_LOC_BINDING_SHIFT) |
-                        (unsigned)fs_result.uniforms[i].offset);
-                    prog->program_uniforms[slot].gl_type = glslt_to_gl_type(fs_result.uniforms[i].type);
-                    prog->program_uniforms[slot].array_size = fs_result.uniforms[i].array_size;
-                    /* Transpiler uses std140: arrays padded to 16-byte minimum */
-                    prog->program_uniforms[slot].element_stride = 0; /* 0 = use std140 default */
-                    prog->program_uniforms[slot].used = true;
-                }
-            }
-            SGL_TRACE_SHADER("stored %d FS uniforms in program (UBO size=%d)",
-                             fs_result.num_uniforms, fs_result.ubo_total_size);
-        }
-
-        /* 5b. Pre-configure packed UBOs so they're valid at draw time.
-         * Without this, packed UBOs only become valid when glGetUniformLocation
-         * is called (which configures them lazily). If an app sets uniforms via
-         * cached locations without calling glGetUniformLocation first, the packed
-         * UBO stays invalid and draws get no uniform data. */
-        for (int stage = 0; stage < 2; stage++) {
-            for (int binding = 0; binding < SGL_MAX_PACKED_UBOS; binding++) {
-                int ubo_size = prog->packed_ubo_sizes[stage][binding];
-                if (ubo_size > 0 && ubo_size <= SGL_MAX_PACKED_UBO_SIZE) {
-                    sgl_packed_ubo_t *packed = (stage == 0)
-                        ? &prog->packed_vertex[binding]
-                        : &prog->packed_fragment[binding];
-                    if (!packed->valid) {
-                        packed->size = ubo_size;
-                        packed->valid = true;
-                        packed->dirty = false;
-                        memset(packed->data, 0, ubo_size);
-                    }
-                }
-            }
-        }
-
-        /* 5c. Set up dual-stage mirrors for uniforms present in both VS and FS.
-         * This must happen at link time so that glUniform* writes go to both
-         * packed UBOs even if glGetUniformLocation wasn't called first.
-         * apply_packed_mirror uses relative offsets, so one mirror per base
-         * uniform covers all array elements. */
-        prog->num_packed_mirrors = 0;
-        for (int i = 0; i < prog->num_program_uniforms; i++) {
-            if (!prog->program_uniforms[i].used) continue;
-            GLint iloc = prog->program_uniforms[i].location;
-            if (!(iloc & SGL_LOC_PACKED_FLAG)) continue;
-            int i_stage = (iloc >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
-            if (i_stage != 0) continue; /* Only VS entries as primary */
-            /* Find matching FS entry with same name */
-            for (int j = 0; j < prog->num_program_uniforms; j++) {
-                if (j == i || !prog->program_uniforms[j].used) continue;
-                GLint jloc = prog->program_uniforms[j].location;
-                if (!(jloc & SGL_LOC_PACKED_FLAG)) continue;
-                int j_stage = (jloc >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
-                if (j_stage == 0) continue; /* Must be FS */
-                if (strcmp(prog->program_uniforms[j].name,
-                          prog->program_uniforms[i].name) == 0) {
-                    if (prog->num_packed_mirrors < SGL_MAX_PACKED_MIRRORS) {
-                        prog->packed_mirrors[prog->num_packed_mirrors].primary = iloc;
-                        prog->packed_mirrors[prog->num_packed_mirrors].mirror = jloc;
-                        prog->num_packed_mirrors++;
-                    }
-                    break;
-                }
-            }
-        }
-
-        /* 5d. Detect gl_DepthRange usage — store packed locations for near/far/diff
-         * so the runtime can populate them from viewport state before each draw. */
-        prog->has_depth_range = (vs_result.has_depth_range || fs_result.has_depth_range);
-        prog->depth_range_loc[0] = 0;
-        prog->depth_range_loc[1] = 0;
-        prog->depth_range_loc[2] = 0;
-        prog->depth_range_loc_fs[0] = 0;
-        prog->depth_range_loc_fs[1] = 0;
-        prog->depth_range_loc_fs[2] = 0;
-        if (prog->has_depth_range) {
-            static const char *dr_names[] = { "sgl_dr_near", "sgl_dr_far", "sgl_dr_diff" };
-            for (int d = 0; d < 3; d++) {
-                for (int u = 0; u < prog->num_program_uniforms; u++) {
-                    if (strcmp(prog->program_uniforms[u].name, dr_names[d]) == 0) {
-                        prog->depth_range_loc[d] = prog->program_uniforms[u].location;
-                        break;
-                    }
-                }
-            }
-        }
-
-        /* 6. Store sampler bindings from FS transpiler result.
-         * Samplers are separate from UBO uniforms — they stay as
-         * layout(binding=N) uniform sampler2D and need special handling
-         * so glGetUniformLocation returns a valid location and
-         * glUniform1i can remap texture units to shader bindings. */
-        prog->num_samplers = 0;
-        if (fs_result.num_samplers > 0) {
-            for (int i = 0; i < fs_result.num_samplers && i < SGL_MAX_PROGRAM_SAMPLERS; i++) {
-                int slot = prog->num_samplers++;
-                strncpy(prog->samplers[slot].name,
-                        fs_result.samplers[i].name, SGL_ATTRIB_NAME_MAX - 1);
-                prog->samplers[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-                /* Store GLES name (e.g. "s[0]" for sampler arrays) */
-                const char *sgn = fs_result.samplers[i].gles_name[0]
-                    ? fs_result.samplers[i].gles_name : fs_result.samplers[i].name;
-                strncpy(prog->samplers[slot].gles_name, sgn, SGL_ATTRIB_NAME_MAX - 1);
-                prog->samplers[slot].gles_name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-                prog->samplers[slot].shader_binding = fs_result.samplers[i].binding;
-                prog->samplers[slot].vs_shader_binding = -1; /* Will be set if VS also has this sampler */
-                prog->samplers[slot].tex_unit = 0; /* GLES2 spec: initial sampler value = 0 */
-                prog->samplers[slot].array_index = fs_result.samplers[i].array_index;
-                prog->samplers[slot].array_total = fs_result.samplers[i].array_total;
-                prog->samplers[slot].gl_type = glslt_to_gl_type(fs_result.samplers[i].type);
-                prog->samplers[slot].used = true;
-            }
-            SGL_TRACE_SHADER("stored %d FS samplers in program", fs_result.num_samplers);
-        }
-        /* Also check VS samplers — deduplicate same-name entries but store VS binding.
-         * Per GLES2 spec, a uniform sampler used in both stages has a single location.
-         * We store vs_shader_binding so draw code can bind to each stage independently. */
-        if (vs_result.num_samplers > 0) {
-            for (int i = 0; i < vs_result.num_samplers && prog->num_samplers < SGL_MAX_PROGRAM_SAMPLERS; i++) {
-                /* Deduplicate: if same name exists from FS, store VS binding in that entry */
-                bool already = false;
-                for (int j = 0; j < prog->num_samplers; j++) {
-                    if (prog->samplers[j].used &&
-                        strcmp(prog->samplers[j].name, vs_result.samplers[i].name) == 0) {
-                        /* Store VS binding for per-stage texture binding at draw time */
-                        prog->samplers[j].vs_shader_binding = vs_result.samplers[i].binding;
-                        already = true;
-                        break;
-                    }
-                }
-                if (already) continue;
-                /* VS-only sampler (not in FS) */
-                int slot = prog->num_samplers++;
-                strncpy(prog->samplers[slot].name,
-                        vs_result.samplers[i].name, SGL_ATTRIB_NAME_MAX - 1);
-                prog->samplers[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-                const char *sgn = vs_result.samplers[i].gles_name[0]
-                    ? vs_result.samplers[i].gles_name : vs_result.samplers[i].name;
-                strncpy(prog->samplers[slot].gles_name, sgn, SGL_ATTRIB_NAME_MAX - 1);
-                prog->samplers[slot].gles_name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-                prog->samplers[slot].shader_binding = vs_result.samplers[i].binding;
-                prog->samplers[slot].vs_shader_binding = vs_result.samplers[i].binding;
-                prog->samplers[slot].tex_unit = 0; /* GLES2 spec: initial sampler value = 0 */
-                prog->samplers[slot].array_index = vs_result.samplers[i].array_index;
-                prog->samplers[slot].array_total = vs_result.samplers[i].array_total;
-                prog->samplers[slot].gl_type = glslt_to_gl_type(vs_result.samplers[i].type);
-                prog->samplers[slot].used = true;
-            }
-        }
-
-        /* 7. Populate active_uniforms[] at link time for glGetActiveUniform/GL_ACTIVE_UNIFORMS.
-         * dEQP calls glGetActiveUniform(index) WITHOUT prior glGetUniformLocation(),
-         * so active_uniforms must be populated here, not lazily. */
-        prog->num_active_uniforms = 0;
-
-        /* Add non-sampler uniforms (deduplicate VS/FS copies with same name) */
-        for (int i = 0; i < prog->num_program_uniforms; i++) {
-            if (!prog->program_uniforms[i].used) continue;
-            /* Deduplicate: same name in both VS and FS → one active uniform.
-             * Must check both raw name and name[0] form since arrays are stored
-             * with [0] suffix per GLES2 spec. */
-            bool already = false;
-            const char *uni_name = prog->program_uniforms[i].gles_name[0]
-                ? prog->program_uniforms[i].gles_name
-                : prog->program_uniforms[i].name;
-            int arr = prog->program_uniforms[i].array_size;
-            char uni_name_arr[SGL_ATTRIB_NAME_MAX];
-            if (arr > 1) {
-                if (strchr(uni_name, '['))
-                    strncpy(uni_name_arr, uni_name, SGL_ATTRIB_NAME_MAX - 1);
-                else
-                    snprintf(uni_name_arr, SGL_ATTRIB_NAME_MAX, "%s[0]", uni_name);
-                uni_name_arr[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-            }
-            for (int j = 0; j < prog->num_active_uniforms; j++) {
-                if (strcmp(prog->active_uniforms[j].name, uni_name) == 0 ||
-                    (arr > 1 && strcmp(prog->active_uniforms[j].name, uni_name_arr) == 0)) {
-                    already = true; break;
-                }
-            }
-            if (already) continue;
-            if (prog->num_active_uniforms >= SGL_MAX_UNIFORMS * 2) break;
-            int slot = prog->num_active_uniforms++;
-            /* For arrays, GLES2 spec requires name = "name[0]", size = array_count */
-            if (arr > 1) {
-                if (strchr(uni_name, '['))
-                    strncpy(prog->active_uniforms[slot].name, uni_name, SGL_ATTRIB_NAME_MAX - 1);
-                else
-                    snprintf(prog->active_uniforms[slot].name, SGL_ATTRIB_NAME_MAX,
-                             "%s[0]", uni_name);
-                prog->active_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-            } else {
-                strncpy(prog->active_uniforms[slot].name, uni_name, SGL_ATTRIB_NAME_MAX - 1);
-                prog->active_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-            }
-            prog->active_uniforms[slot].type = prog->program_uniforms[i].gl_type
-                ? prog->program_uniforms[i].gl_type : GL_FLOAT_VEC4;
-            prog->active_uniforms[slot].size = (arr > 1) ? arr : 1;
-            prog->active_uniforms[slot].location = prog->program_uniforms[i].location;
-            prog->active_uniforms[slot].element_stride = prog->program_uniforms[i].element_stride;
-            prog->active_uniforms[slot].active = true;
-        }
-
-        /* Add samplers as active uniforms.
-         * For sampler arrays: report ONE active uniform with name "s[0]" and size=array_total.
-         * Skip subsequent array elements (array_index > 0). */
-        for (int i = 0; i < prog->num_samplers; i++) {
-            if (!prog->samplers[i].used) continue;
-            if (prog->num_active_uniforms >= SGL_MAX_UNIFORMS * 2) break;
-            /* Skip non-first array elements */
-            if (prog->samplers[i].array_index > 0) continue;
-            /* Use GLES name for API visibility */
-            const char *samp_name = prog->samplers[i].gles_name[0]
-                ? prog->samplers[i].gles_name : prog->samplers[i].name;
-            /* Deduplicate (VS+FS sampler with same name) */
-            bool already = false;
-            for (int j = 0; j < prog->num_active_uniforms; j++) {
-                if (strcmp(prog->active_uniforms[j].name, samp_name) == 0) {
-                    already = true; break;
-                }
-            }
-            if (already) continue;
-            int slot = prog->num_active_uniforms++;
-            strncpy(prog->active_uniforms[slot].name, samp_name, SGL_ATTRIB_NAME_MAX - 1);
-            prog->active_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-            /* Determine sampler type from transpiler metadata */
-            GLenum samp_type = prog->samplers[i].gl_type ? prog->samplers[i].gl_type : GL_SAMPLER_2D;
-            if (prog->samplers[i].array_total > 0) {
-                /* Sampler array: size = array count */
-                prog->active_uniforms[slot].size = prog->samplers[i].array_total;
-            } else {
-                prog->active_uniforms[slot].size = 1;
-            }
-            prog->active_uniforms[slot].type = samp_type;
-            prog->active_uniforms[slot].location = (GLint)(SGL_LOC_SAMPLER_FLAG | (unsigned)i);
-            prog->active_uniforms[slot].active = true;
-        }
-
-        SGL_TRACE_SHADER("populated %d active uniforms at link time", prog->num_active_uniforms);
-
-        /* 8. Register attrib bindings from transpiler result into program */
-        prog->num_active_attribs = vs_result.num_attributes;
-        /* Clear in_shader flag and linked_location for all existing bindings */
-        for (int j = 0; j < prog->num_attrib_bindings; j++) {
-            prog->attrib_bindings[j].in_shader = false;
-            prog->attrib_bindings[j].linked_location = -1;
-        }
-        for (int i = 0; i < vs_result.num_attributes; i++) {
-            GLenum attr_gl_type = glslt_to_gl_type(vs_result.attributes[i].type);
-            bool found = false;
-            for (int j = 0; j < prog->num_attrib_bindings; j++) {
-                if (strcmp(prog->attrib_bindings[j].name,
-                           vs_result.attributes[i].name) == 0) {
-                    prog->attrib_bindings[j].index = vs_result.attributes[i].location;
-                    prog->attrib_bindings[j].linked_location = (GLint)vs_result.attributes[i].location;
-                    prog->attrib_bindings[j].gl_type = attr_gl_type;
-                    prog->attrib_bindings[j].in_shader = true;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found && prog->num_attrib_bindings < SGL_MAX_ATTRIB_BINDINGS) {
-                int slot = prog->num_attrib_bindings++;
-                strncpy(prog->attrib_bindings[slot].name,
-                        vs_result.attributes[i].name, SGL_ATTRIB_NAME_MAX - 1);
-                prog->attrib_bindings[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-                prog->attrib_bindings[slot].index = vs_result.attributes[i].location;
-                prog->attrib_bindings[slot].linked_location = (GLint)vs_result.attributes[i].location;
-                prog->attrib_bindings[slot].gl_type = attr_gl_type;
-                prog->attrib_bindings[slot].used = true;
-                prog->attrib_bindings[slot].user_bound = false; /* linker-added */
-                prog->attrib_bindings[slot].in_shader = true;
-            }
-        }
-
-        /* Count active attribs — ALL attributes with in_shader=true (no dedup). */
-        {
-            int active_count = 0;
-            for (int j = 0; j < prog->num_attrib_bindings; j++) {
-                if (prog->attrib_bindings[j].in_shader) active_count++;
-            }
-            prog->num_active_attribs = active_count;
-        }
-
-        glslt_result_free(&vs_result);
-        glslt_result_free(&fs_result);
-
-        SGL_TRACE_SHADER("transpilation complete for program %u", program);
+        sgl_link_program_transpile(ctx, program, prog, vs_sh, fs_sh);
     }
 #endif /* SGL_ENABLE_RUNTIME_COMPILER */
 
