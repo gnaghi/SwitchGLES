@@ -2223,13 +2223,8 @@ static int glslt_validate_es100_impl(glslt_ctx_t *ctx, const char *source, glslt
 /* ---- Pass 1: scan the shader source into a glslt_decls_t ---- */
 static void collect_declarations(glslt_ctx_t *ctx, const char *source,
                                  glslt_stage_t stage, glslt_decls_t *d) {
-    glslt_uniform_t   *uniforms = d->uniforms;
-    glslt_sampler_t   *samplers = d->samplers;
-    glslt_attribute_t *attributes = d->attributes;
-    glslt_varying_t   *varyings = d->varyings;
-    int nu = 0, ns = 0, na = 0, nv = 0;
-    int has_frag_color = 0;
-    int max_frag_data = -1;
+    memset(d, 0, sizeof(*d));
+    d->max_frag_data = -1;
     int in_block_comment = 0;
 
     const char *lp = source;
@@ -2264,21 +2259,21 @@ static void collect_declarations(glslt_ctx_t *ctx, const char *source,
 
             switch (kind) {
             case DECL_ATTRIBUTE:
-                for (int i = 0; i < decl.num_names && na < GLSLT_MAX_ATTRIBUTES; i++) {
-                    strncpy(attributes[na].name, decl.names[i], GLSLT_MAX_NAME - 1);
-                    attributes[na].type = decl.type;
-                    attributes[na].location = -1;
-                    na++;
+                for (int i = 0; i < decl.num_names && d->na < GLSLT_MAX_ATTRIBUTES; i++) {
+                    strncpy(d->attributes[d->na].name, decl.names[i], GLSLT_MAX_NAME - 1);
+                    d->attributes[d->na].type = decl.type;
+                    d->attributes[d->na].location = -1;
+                    d->na++;
                 }
                 break;
 
             case DECL_VARYING:
-                for (int i = 0; i < decl.num_names && nv < GLSLT_MAX_VARYINGS; i++) {
-                    strncpy(varyings[nv].name, decl.names[i], GLSLT_MAX_NAME - 1);
-                    varyings[nv].type = decl.type;
-                    varyings[nv].location = -1;
-                    varyings[nv].array_size = decl.array_sizes[i];
-                    nv++;
+                for (int i = 0; i < decl.num_names && d->nv < GLSLT_MAX_VARYINGS; i++) {
+                    strncpy(d->varyings[d->nv].name, decl.names[i], GLSLT_MAX_NAME - 1);
+                    d->varyings[d->nv].type = decl.type;
+                    d->varyings[d->nv].location = -1;
+                    d->varyings[d->nv].array_size = decl.array_sizes[i];
+                    d->nv++;
                 }
                 break;
 
@@ -2288,14 +2283,14 @@ static void collect_declarations(glslt_ctx_t *ctx, const char *source,
                         int arr = decl.array_sizes[i];
                         if (arr > 0) {
                             /* Sampler array: expand into individual entries */
-                            for (int a = 0; a < arr && ns < GLSLT_MAX_SAMPLERS; a++) {
-                                snprintf(samplers[ns].name, GLSLT_MAX_NAME, "%s_%d", decl.names[i], a);
-                                snprintf(samplers[ns].gles_name, GLSLT_MAX_NAME, "%s[%d]", decl.names[i], a);
-                                samplers[ns].type = decl.type;
-                                samplers[ns].binding = -1;
-                                samplers[ns].array_index = a;
-                                samplers[ns].array_total = arr;
-                                ns++;
+                            for (int a = 0; a < arr && d->ns < GLSLT_MAX_SAMPLERS; a++) {
+                                snprintf(d->samplers[d->ns].name, GLSLT_MAX_NAME, "%s_%d", decl.names[i], a);
+                                snprintf(d->samplers[d->ns].gles_name, GLSLT_MAX_NAME, "%s[%d]", decl.names[i], a);
+                                d->samplers[d->ns].type = decl.type;
+                                d->samplers[d->ns].binding = -1;
+                                d->samplers[d->ns].array_index = a;
+                                d->samplers[d->ns].array_total = arr;
+                                d->ns++;
                             }
                             /* Add body replacements: s[0] → s_0, s[1] → s_1 */
                             for (int a = 0; a < arr && ctx->num_replacements < MAX_STRUCT_REPLS; a++) {
@@ -2311,27 +2306,27 @@ static void collect_declarations(glslt_ctx_t *ctx, const char *source,
                             }
                         } else {
                             /* Single sampler */
-                            if (ns < GLSLT_MAX_SAMPLERS) {
-                                strncpy(samplers[ns].name, decl.names[i], GLSLT_MAX_NAME - 1);
-                                strncpy(samplers[ns].gles_name, decl.names[i], GLSLT_MAX_NAME - 1);
-                                samplers[ns].type = decl.type;
-                                samplers[ns].binding = -1;
-                                samplers[ns].array_index = -1;
-                                samplers[ns].array_total = 0;
-                                ns++;
+                            if (d->ns < GLSLT_MAX_SAMPLERS) {
+                                strncpy(d->samplers[d->ns].name, decl.names[i], GLSLT_MAX_NAME - 1);
+                                strncpy(d->samplers[d->ns].gles_name, decl.names[i], GLSLT_MAX_NAME - 1);
+                                d->samplers[d->ns].type = decl.type;
+                                d->samplers[d->ns].binding = -1;
+                                d->samplers[d->ns].array_index = -1;
+                                d->samplers[d->ns].array_total = 0;
+                                d->ns++;
                             }
                         }
                     } else {
-                        if (nu < GLSLT_MAX_UNIFORMS) {
-                            strncpy(uniforms[nu].name, decl.names[i], GLSLT_MAX_NAME - 1);
-                            /* For non-struct uniforms, gles_name = name */
-                            strncpy(uniforms[nu].gles_name, decl.names[i], GLSLT_MAX_NAME - 1);
-                            uniforms[nu].type = decl.type;
-                            uniforms[nu].array_size = decl.array_sizes[i];
-                            uniforms[nu].binding = -1;
-                            uniforms[nu].offset = 0;
-                            uniforms[nu].size = 0;
-                            nu++;
+                        if (d->nu < GLSLT_MAX_UNIFORMS) {
+                            strncpy(d->uniforms[d->nu].name, decl.names[i], GLSLT_MAX_NAME - 1);
+                            /* For non-struct d->uniforms, gles_name = name */
+                            strncpy(d->uniforms[d->nu].gles_name, decl.names[i], GLSLT_MAX_NAME - 1);
+                            d->uniforms[d->nu].type = decl.type;
+                            d->uniforms[d->nu].array_size = decl.array_sizes[i];
+                            d->uniforms[d->nu].binding = -1;
+                            d->uniforms[d->nu].offset = 0;
+                            d->uniforms[d->nu].size = 0;
+                            d->nu++;
                         }
                     }
                 }
@@ -2358,8 +2353,8 @@ static void collect_declarations(glslt_ctx_t *ctx, const char *source,
                         /* Single struct instance */
                         flatten_struct_to_uniforms(ctx, decl.names[i],
                                                    decl.struct_type_name,
-                                                   uniforms, &nu,
-                                                   samplers, &ns);
+                                                   d->uniforms, &d->nu,
+                                                   d->samplers, &d->ns);
                     }
                 }
                 break;
@@ -2371,13 +2366,13 @@ static void collect_declarations(glslt_ctx_t *ctx, const char *source,
             /* Check for gl_FragColor / gl_FragData usage anywhere */
             if (stage == GLSLT_FRAGMENT) {
                 if (strstr(line, "gl_FragColor") || strstr(line, "gl_FragData"))
-                    has_frag_color = 1;
+                    d->has_frag_color = 1;
                 /* Track highest gl_FragData[N] index for MRT outputs */
                 const char *fd = line;
                 while ((fd = strstr(fd, "gl_FragData[")) != NULL) {
                     fd += 12; /* skip "gl_FragData[" */
                     int idx = atoi(fd);
-                    if (idx > max_frag_data) max_frag_data = idx;
+                    if (idx > d->max_frag_data) d->max_frag_data = idx;
                 }
             }
         }
@@ -2385,56 +2380,46 @@ static void collect_declarations(glslt_ctx_t *ctx, const char *source,
         lp = next_line(lp);
     }
 
-    d->nu = nu; d->ns = ns; d->na = na; d->nv = nv;
-    d->has_frag_color = has_frag_color;
-    d->max_frag_data = max_frag_data;
 }
 
 /* ---- Emit the GLSL 4.60 header: version, ins/outs, UBO block, samplers, outputs ---- */
 static void emit_header(strbuf_t *sb, glslt_ctx_t *ctx, const glslt_options_t *opts,
                         glslt_stage_t stage, const glslt_decls_t *d) {
-    const glslt_uniform_t   *uniforms = d->uniforms;    int nu = d->nu;
-    const glslt_sampler_t   *samplers = d->samplers;    int ns = d->ns;
-    const glslt_attribute_t *attributes = d->attributes; int na = d->na;
-    const glslt_varying_t   *varyings = d->varyings;    int nv = d->nv;
-    int has_frag_color = d->has_frag_color;
-    int max_frag_data = d->max_frag_data;
-
     /* Version */
     sb_printf(sb, "#version %d\n", opts->target_version);
 
     /* Attributes (vertex shader only) */
-    if (stage == GLSLT_VERTEX && na > 0) {
+    if (stage == GLSLT_VERTEX && d->na > 0) {
         sb_append(sb, "\n");
-        for (int i = 0; i < na; i++) {
+        for (int i = 0; i < d->na; i++) {
             sb_printf(sb, "layout(location = %d) in %s %s;\n",
-                      attributes[i].location,
-                      glslt_type_name(attributes[i].type),
-                      attributes[i].name);
+                      d->attributes[i].location,
+                      glslt_type_name(d->attributes[i].type),
+                      d->attributes[i].name);
         }
     }
 
     /* Varyings */
-    if (nv > 0) {
+    if (d->nv > 0) {
         sb_append(sb, "\n");
         const char *dir = (stage == GLSLT_VERTEX) ? "out" : "in";
-        for (int i = 0; i < nv; i++) {
-            if (varyings[i].array_size > 0) {
+        for (int i = 0; i < d->nv; i++) {
+            if (d->varyings[i].array_size > 0) {
                 sb_printf(sb, "layout(location = %d) %s %s %s[%d];\n",
-                          varyings[i].location, dir,
-                          glslt_type_name(varyings[i].type),
-                          varyings[i].name,
-                          varyings[i].array_size);
+                          d->varyings[i].location, dir,
+                          glslt_type_name(d->varyings[i].type),
+                          d->varyings[i].name,
+                          d->varyings[i].array_size);
             } else {
                 sb_printf(sb, "layout(location = %d) %s %s %s;\n",
-                          varyings[i].location, dir,
-                          glslt_type_name(varyings[i].type),
-                          varyings[i].name);
+                          d->varyings[i].location, dir,
+                          glslt_type_name(d->varyings[i].type),
+                          d->varyings[i].name);
             }
         }
     }
 
-    /* Emit struct definitions needed by struct array uniforms (before UBO block) */
+    /* Emit struct definitions needed by struct array d->uniforms (before UBO block) */
     for (int sa = 0; sa < ctx->num_struct_array_uniforms; sa++) {
         struct_def_t *sd = find_struct_def(ctx, ctx->struct_array_uniforms[sa].struct_type);
         if (!sd) continue;
@@ -2452,25 +2437,25 @@ static void emit_header(strbuf_t *sb, glslt_ctx_t *ctx, const glslt_options_t *o
         sb_append(sb, "};\n");
     }
 
-    /* UBO block (includes flattened scalar uniforms + struct array uniforms) */
-    if (nu > 0 || ctx->num_struct_array_uniforms > 0) {
+    /* UBO block (includes flattened scalar d->uniforms + struct array d->uniforms) */
+    if (d->nu > 0 || ctx->num_struct_array_uniforms > 0) {
         sb_append(sb, "\n");
         sb_printf(sb, "layout(std140, binding = %d) uniform %sUniforms {\n",
                   opts->ubo_binding,
                   (stage == GLSLT_VERTEX) ? "Vertex" : "Fragment");
-        for (int i = 0; i < nu; i++) {
-            if (uniforms[i].array_size > 0) {
+        for (int i = 0; i < d->nu; i++) {
+            if (d->uniforms[i].array_size > 0) {
                 sb_printf(sb, "    %s %s[%d];\n",
-                          glslt_type_name(uniforms[i].type),
-                          uniforms[i].name,
-                          uniforms[i].array_size);
+                          glslt_type_name(d->uniforms[i].type),
+                          d->uniforms[i].name,
+                          d->uniforms[i].array_size);
             } else {
                 sb_printf(sb, "    %s %s;\n",
-                          glslt_type_name(uniforms[i].type),
-                          uniforms[i].name);
+                          glslt_type_name(d->uniforms[i].type),
+                          d->uniforms[i].name);
             }
         }
-        /* Struct array uniforms (kept as whole structs) */
+        /* Struct array d->uniforms (kept as whole structs) */
         for (int i = 0; i < ctx->num_struct_array_uniforms; i++) {
             sb_printf(sb, "    %s %s[%d];\n",
                       ctx->struct_array_uniforms[i].struct_type,
@@ -2481,22 +2466,22 @@ static void emit_header(strbuf_t *sb, glslt_ctx_t *ctx, const glslt_options_t *o
     }
 
     /* Samplers */
-    if (ns > 0) {
+    if (d->ns > 0) {
         sb_append(sb, "\n");
-        for (int i = 0; i < ns; i++) {
+        for (int i = 0; i < d->ns; i++) {
             sb_printf(sb, "layout(binding = %d) uniform %s %s;\n",
-                      samplers[i].binding,
-                      glslt_type_name(samplers[i].type),
-                      samplers[i].name);
+                      d->samplers[i].binding,
+                      glslt_type_name(d->samplers[i].type),
+                      d->samplers[i].name);
         }
     }
 
     /* Fragment output(s) */
-    if (stage == GLSLT_FRAGMENT && has_frag_color) {
-        if (max_frag_data > 0) {
+    if (stage == GLSLT_FRAGMENT && d->has_frag_color) {
+        if (d->max_frag_data > 0) {
             /* Multiple render targets: gl_FragData[0]..gl_FragData[N] */
             sb_append(sb, "\n");
-            for (int i = 0; i <= max_frag_data; i++)
+            for (int i = 0; i <= d->max_frag_data; i++)
                 sb_printf(sb, "layout(location = %d) out vec4 fragData_%d;\n", i, i);
         } else {
             sb_append(sb, "\nlayout(location = 0) out vec4 fragColor;\n");
@@ -2725,7 +2710,7 @@ static glslt_result_t glslt_transpile_impl(glslt_ctx_t *ctx, const char *source,
     ctx->num_replacements = 0;
     ctx->num_struct_array_uniforms = 0;
 
-    /* ---- Detect gl_DepthRange usage and inject synthetic uniforms ---- */
+    /* ---- Detect gl_DepthRange usage and inject synthetic d.uniforms ---- */
     int has_depth_range = (strstr(source, "gl_DepthRange") != NULL) ? 1 : 0;
     if (has_depth_range) {
         /* Inject uniform declarations into the source so pass 1 collects them.
@@ -2768,31 +2753,26 @@ static glslt_result_t glslt_transpile_impl(glslt_ctx_t *ctx, const char *source,
     glslt_decls_t d;
     collect_declarations(ctx, source, stage, &d);
 
-    glslt_uniform_t   *uniforms = d.uniforms;    int nu = d.nu;
-    glslt_sampler_t   *samplers = d.samplers;    int ns = d.ns;
-    glslt_attribute_t *attributes = d.attributes; int na = d.na;
-    glslt_varying_t   *varyings = d.varyings;    int nv = d.nv;
-
     /* ---- Process: assign locations, compute layout ---- */
 
     /* Attributes */
-    assign_attrib_locations(attributes, na, opts);
-    qsort(attributes, na, sizeof(glslt_attribute_t), cmp_by_location_attr);
+    assign_attrib_locations(d.attributes, d.na, opts);
+    qsort(d.attributes, d.na, sizeof(glslt_attribute_t), cmp_by_location_attr);
 
     /* Varyings */
-    assign_varying_locations(varyings, nv, opts);
-    qsort(varyings, nv, sizeof(glslt_varying_t), cmp_by_location_varying);
+    assign_varying_locations(d.varyings, d.nv, opts);
+    qsort(d.varyings, d.nv, sizeof(glslt_varying_t), cmp_by_location_varying);
 
     /* Uniforms: sort alphabetically, compute std140 layout */
-    qsort(uniforms, nu, sizeof(glslt_uniform_t), cmp_by_name_uniform);
+    qsort(d.uniforms, d.nu, sizeof(glslt_uniform_t), cmp_by_name_uniform);
     int ubo_total_size = 0;
-    compute_std140_layout(uniforms, nu, &ubo_total_size);
-    for (int i = 0; i < nu; i++)
-        uniforms[i].binding = opts->ubo_binding;
+    compute_std140_layout(d.uniforms, d.nu, &ubo_total_size);
+    for (int i = 0; i < d.nu; i++)
+        d.uniforms[i].binding = opts->ubo_binding;
 
     /* Samplers: keep declaration order, assign bindings */
-    for (int i = 0; i < ns; i++)
-        samplers[i].binding = opts->sampler_binding_start + i;
+    for (int i = 0; i < d.ns; i++)
+        d.samplers[i].binding = opts->sampler_binding_start + i;
 
 
     /* ---- Pass 2: emit output ---- */
@@ -2825,19 +2805,19 @@ static glslt_result_t glslt_transpile_impl(glslt_ctx_t *ctx, const char *source,
     result.success = 1;
 
     /* Copy reflection data */
-    memcpy(result.uniforms, uniforms, nu * sizeof(glslt_uniform_t));
-    result.num_uniforms = nu;
+    memcpy(result.uniforms, d.uniforms, d.nu * sizeof(glslt_uniform_t));
+    result.num_uniforms = d.nu;
     result.ubo_binding = opts->ubo_binding;
     result.ubo_total_size = ubo_total_size;
 
-    memcpy(result.samplers, samplers, ns * sizeof(glslt_sampler_t));
-    result.num_samplers = ns;
+    memcpy(result.samplers, d.samplers, d.ns * sizeof(glslt_sampler_t));
+    result.num_samplers = d.ns;
 
-    memcpy(result.attributes, attributes, na * sizeof(glslt_attribute_t));
-    result.num_attributes = na;
+    memcpy(result.attributes, d.attributes, d.na * sizeof(glslt_attribute_t));
+    result.num_attributes = d.na;
 
-    memcpy(result.varyings, varyings, nv * sizeof(glslt_varying_t));
-    result.num_varyings = nv;
+    memcpy(result.varyings, d.varyings, d.nv * sizeof(glslt_varying_t));
+    result.num_varyings = d.nv;
 
     result.has_depth_range = has_depth_range;
 
