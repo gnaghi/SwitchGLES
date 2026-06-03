@@ -135,10 +135,17 @@ typedef struct {
     char new_ref[GLSLT_MAX_NAME * 4];  /* e.g. "val_a" */
 } struct_repl_t;
 
-static struct_def_t  s_structs[MAX_STRUCT_DEFS];
-static int           s_num_structs = 0;
-static struct_repl_t s_replacements[MAX_STRUCT_REPLS];
-static int           s_num_replacements = 0;
+/* Preprocessor #define table — defined here (ahead of glslt_collect_defines)
+ * so glslt_ctx_t can hold a pointer to it. */
+#define GLSLT_MAX_DEFINES 64
+typedef struct {
+    char name[GLSLT_MAX_NAME];
+    int  value;
+} glslt_define_t;
+typedef struct {
+    glslt_define_t entries[GLSLT_MAX_DEFINES];
+    int count;
+} glslt_define_table_t;
 
 /* Struct array uniforms — kept as whole structs in UBO (not flattened) */
 #define MAX_STRUCT_ARRAY_UNIFORMS 8
@@ -148,8 +155,22 @@ typedef struct {
     int  array_size;
     int  std140_size;  /* Total bytes in std140 layout */
 } struct_array_uniform_t;
-static struct_array_uniform_t s_struct_array_uniforms[MAX_STRUCT_ARRAY_UNIFORMS];
-static int s_num_struct_array_uniforms = 0;
+
+/* Transpiler context: all mutable per-transpilation state, bundled so it is
+ * zeroed (calloc) and freed in exactly one place per call (see the public
+ * glslt_transpile / glslt_validate_es100 wrappers). Previously these were
+ * file-scope globals that leaked struct/replacement state between shaders when
+ * a call bailed on an error path — the root cause of B12. Threading an explicit
+ * context also makes the transpiler reentrant. */
+typedef struct glslt_ctx {
+    struct_def_t            structs[MAX_STRUCT_DEFS];
+    int                     num_structs;
+    struct_repl_t           replacements[MAX_STRUCT_REPLS];
+    int                     num_replacements;
+    struct_array_uniform_t  struct_array_uniforms[MAX_STRUCT_ARRAY_UNIFORMS];
+    int                     num_struct_array_uniforms;
+    const glslt_define_table_t *defines;
+} glslt_ctx_t;
 
 static const type_info_t *find_type_info(const char *name) {
     for (const type_info_t *t = s_types; t->name; t++) {
@@ -263,17 +284,17 @@ static int cmp_by_location_varying(const void *a, const void *b) {
 /* ========================================================================== */
 
 /* Find a struct definition by name */
-static const struct_def_t *find_struct_def(const char *name) {
-    for (int i = 0; i < s_num_structs; i++) {
-        if (strcmp(s_structs[i].name, name) == 0)
-            return &s_structs[i];
+static const struct_def_t *find_struct_def(glslt_ctx_t *ctx, const char *name) {
+    for (int i = 0; i < ctx->num_structs; i++) {
+        if (strcmp(ctx->structs[i].name, name) == 0)
+            return &ctx->structs[i];
     }
     return NULL;
 }
 
 /* Pre-scan source for struct definitions: struct Name { fields }; */
-static void collect_struct_defs(const char *source) {
-    s_num_structs = 0;
+static void collect_struct_defs(glslt_ctx_t *ctx, const char *source) {
+    ctx->num_structs = 0;
     const char *p = source;
     int in_block_comment = 0;
 
@@ -301,8 +322,8 @@ static void collect_struct_defs(const char *source) {
             if (*sp != '{') { p++; continue; }
             sp++; /* skip '{' */
 
-            if (s_num_structs >= MAX_STRUCT_DEFS) { p++; continue; }
-            struct_def_t *sd = &s_structs[s_num_structs];
+            if (ctx->num_structs >= MAX_STRUCT_DEFS) { p++; continue; }
+            struct_def_t *sd = &ctx->structs[ctx->num_structs];
             memset(sd, 0, sizeof(*sd));
             strncpy(sd->name, sname, GLSLT_MAX_NAME - 1);
 
@@ -358,7 +379,7 @@ static void collect_struct_defs(const char *source) {
                 if (*sp == ';') sp++;
             }
 
-            s_num_structs++;
+            ctx->num_structs++;
             /* Advance past closing '}' and ';' */
             if (*sp == '}') sp++;
             sp = skip_ws(sp);
@@ -374,11 +395,11 @@ static void collect_struct_defs(const char *source) {
  * flat_prefix = "val_sub" (underscore-joined for GLSL 4.60 identifier)
  * gles_prefix = "val.sub" (dot-joined for GLES API name)
  * struct_name = "Struct" → adds flat "val_sub_a", gles "val.sub.a" etc. */
-static void flatten_struct_to_uniforms_ex(const char *flat_prefix, const char *gles_prefix,
+static void flatten_struct_to_uniforms_ex(glslt_ctx_t *ctx, const char *flat_prefix, const char *gles_prefix,
                                            const char *struct_name,
                                            glslt_uniform_t *uniforms, int *nu,
                                            glslt_sampler_t *samplers, int *ns) {
-    const struct_def_t *sd = find_struct_def(struct_name);
+    const struct_def_t *sd = find_struct_def(ctx, struct_name);
     if (!sd) return;
 
     for (int i = 0; i < sd->num_fields; i++) {
@@ -396,12 +417,12 @@ static void flatten_struct_to_uniforms_ex(const char *flat_prefix, const char *g
                     char gles_arr[GLSLT_MAX_NAME * 4];
                     snprintf(flat_arr, sizeof(flat_arr), "%s_%d", flat_name, a);
                     snprintf(gles_arr, sizeof(gles_arr), "%s[%d]", gles_name, a);
-                    flatten_struct_to_uniforms_ex(flat_arr, gles_arr, sf->type_name,
+                    flatten_struct_to_uniforms_ex(ctx, flat_arr, gles_arr, sf->type_name,
                                                   uniforms, nu, samplers, ns);
                 }
             } else {
                 /* Single nested struct */
-                flatten_struct_to_uniforms_ex(flat_name, gles_name, sf->type_name,
+                flatten_struct_to_uniforms_ex(ctx, flat_name, gles_name, sf->type_name,
                                               uniforms, nu, samplers, ns);
             }
         } else if ((sf->type == GLSLT_SAMPLER2D || sf->type == GLSLT_SAMPLERCUBE) && samplers && ns) {
@@ -424,15 +445,15 @@ static void flatten_struct_to_uniforms_ex(const char *flat_prefix, const char *g
                     (*ns)++;
                 }
                 /* Replacements for each array element: "u_s.tex[i]" → "u_s_tex_i" */
-                for (int a = 0; a < sf->array_size && s_num_replacements < MAX_STRUCT_REPLS; a++) {
+                for (int a = 0; a < sf->array_size && ctx->num_replacements < MAX_STRUCT_REPLS; a++) {
                     char old_ref[GLSLT_MAX_NAME * 4], new_ref[GLSLT_MAX_NAME * 4];
                     snprintf(old_ref, sizeof(old_ref), "%s[%d]", gles_name, a);
                     snprintf(new_ref, sizeof(new_ref), "%s_%d", flat_name, a);
-                    strncpy(s_replacements[s_num_replacements].old_ref, old_ref,
-                            sizeof(s_replacements[0].old_ref) - 1);
-                    strncpy(s_replacements[s_num_replacements].new_ref, new_ref,
-                            sizeof(s_replacements[0].new_ref) - 1);
-                    s_num_replacements++;
+                    strncpy(ctx->replacements[ctx->num_replacements].old_ref, old_ref,
+                            sizeof(ctx->replacements[0].old_ref) - 1);
+                    strncpy(ctx->replacements[ctx->num_replacements].new_ref, new_ref,
+                            sizeof(ctx->replacements[0].new_ref) - 1);
+                    ctx->num_replacements++;
                 }
             } else {
                 /* Single sampler inside struct */
@@ -449,12 +470,12 @@ static void flatten_struct_to_uniforms_ex(const char *flat_prefix, const char *g
                 }
             }
             /* Add replacement for the sampler name: "u_s.tex" → "u_s_tex" */
-            if (s_num_replacements < MAX_STRUCT_REPLS) {
-                strncpy(s_replacements[s_num_replacements].old_ref, gles_name,
-                        sizeof(s_replacements[0].old_ref) - 1);
-                strncpy(s_replacements[s_num_replacements].new_ref, flat_name,
-                        sizeof(s_replacements[0].new_ref) - 1);
-                s_num_replacements++;
+            if (ctx->num_replacements < MAX_STRUCT_REPLS) {
+                strncpy(ctx->replacements[ctx->num_replacements].old_ref, gles_name,
+                        sizeof(ctx->replacements[0].old_ref) - 1);
+                strncpy(ctx->replacements[ctx->num_replacements].new_ref, flat_name,
+                        sizeof(ctx->replacements[0].new_ref) - 1);
+                ctx->num_replacements++;
             }
         } else {
             /* Regular uniform field */
@@ -472,12 +493,12 @@ static void flatten_struct_to_uniforms_ex(const char *flat_prefix, const char *g
             }
 
             /* Add replacement: "gles_prefix.field" → "flat_prefix_field" */
-            if (s_num_replacements < MAX_STRUCT_REPLS) {
-                strncpy(s_replacements[s_num_replacements].old_ref, gles_name,
-                        sizeof(s_replacements[0].old_ref) - 1);
-                strncpy(s_replacements[s_num_replacements].new_ref, flat_name,
-                        sizeof(s_replacements[0].new_ref) - 1);
-                s_num_replacements++;
+            if (ctx->num_replacements < MAX_STRUCT_REPLS) {
+                strncpy(ctx->replacements[ctx->num_replacements].old_ref, gles_name,
+                        sizeof(ctx->replacements[0].old_ref) - 1);
+                strncpy(ctx->replacements[ctx->num_replacements].new_ref, flat_name,
+                        sizeof(ctx->replacements[0].new_ref) - 1);
+                ctx->num_replacements++;
             }
         }
     }
@@ -485,29 +506,29 @@ static void flatten_struct_to_uniforms_ex(const char *flat_prefix, const char *g
 
 /* Convenience wrapper: flatten with same prefix for both flat and gles names.
  * gles_prefix uses dot notation: "prefix.field" */
-static void flatten_struct_to_uniforms(const char *prefix, const char *struct_name,
+static void flatten_struct_to_uniforms(glslt_ctx_t *ctx, const char *prefix, const char *struct_name,
                                        glslt_uniform_t *uniforms, int *nu,
                                        glslt_sampler_t *samplers, int *ns) {
-    flatten_struct_to_uniforms_ex(prefix, prefix, struct_name, uniforms, nu, samplers, ns);
+    flatten_struct_to_uniforms_ex(ctx, prefix, prefix, struct_name, uniforms, nu, samplers, ns);
 }
 
 /* Apply all struct member replacements to a line.
  * Handles "val.a" → "val_a" with left-side identifier boundary checks. */
-static void apply_struct_replacements(const char *input, char *out, int out_size) {
+static void apply_struct_replacements(glslt_ctx_t *ctx, const char *input, char *out, int out_size) {
     char b1[MAX_LINE_LEN], b2[MAX_LINE_LEN];
     const char *src = input;
     char *dst;
 
-    for (int i = 0; i < s_num_replacements; i++) {
+    for (int i = 0; i < ctx->num_replacements; i++) {
         dst = (i % 2 == 0) ? b1 : b2;
-        int old_len = (int)strlen(s_replacements[i].old_ref);
-        int new_len = (int)strlen(s_replacements[i].new_ref);
+        int old_len = (int)strlen(ctx->replacements[i].old_ref);
+        int new_len = (int)strlen(ctx->replacements[i].new_ref);
         const char *p = src;
         char *o = dst;
         char *end = dst + MAX_LINE_LEN - 1;
 
         while (*p && o < end) {
-            if (strncmp(p, s_replacements[i].old_ref, old_len) == 0) {
+            if (strncmp(p, ctx->replacements[i].old_ref, old_len) == 0) {
                 /* Check left boundary: must not be preceded by ident char */
                 int left_ok = (p == src) || !is_ident_char(*(p - 1));
                 /* Check right boundary: must not be followed by ident char
@@ -515,7 +536,7 @@ static void apply_struct_replacements(const char *input, char *out, int out_size
                 int right_ok = !is_ident_char(*(p + old_len));
                 if (left_ok && right_ok) {
                     if (o + new_len >= end) break;
-                    memcpy(o, s_replacements[i].new_ref, new_len);
+                    memcpy(o, ctx->replacements[i].new_ref, new_len);
                     o += new_len;
                     p += old_len;
                     continue;
@@ -527,7 +548,7 @@ static void apply_struct_replacements(const char *input, char *out, int out_size
         src = dst;
     }
 
-    if (s_num_replacements == 0) {
+    if (ctx->num_replacements == 0) {
         strncpy(out, input, out_size);
         out[out_size - 1] = '\0';
     } else {
@@ -540,17 +561,7 @@ static void apply_struct_replacements(const char *input, char *out, int out_size
 /*  Simple #define resolution (for macro-based array sizes)                    */
 /* ========================================================================== */
 
-#define GLSLT_MAX_DEFINES 64
-
-typedef struct {
-    char name[GLSLT_MAX_NAME];
-    int  value;
-} glslt_define_t;
-
-typedef struct {
-    glslt_define_t entries[GLSLT_MAX_DEFINES];
-    int count;
-} glslt_define_table_t;
+/* glslt_define_t / glslt_define_table_t are defined earlier (near glslt_ctx_t). */
 
 /* Skip spaces and tabs only (NOT newlines) */
 static const char *skip_hws(const char *p) {
@@ -599,7 +610,7 @@ static int glslt_resolve_define(const glslt_define_table_t *table, const char *n
 }
 
 /* Module-level pointer set during transpilation (avoids threading through all calls) */
-static const glslt_define_table_t *s_current_defines = NULL;
+/* ctx->defines moved into glslt_ctx_t (ctx->defines). */
 
 /* ========================================================================== */
 /*  Line extraction                                                            */
@@ -673,7 +684,7 @@ static const char *skip_precision(const char *p) {
 }
 
 /* Parse: type name[, name2, ...]; from current position */
-static int parse_type_and_names(const char *p, parsed_decl_t *decl) {
+static int parse_type_and_names(glslt_ctx_t *ctx, const char *p, parsed_decl_t *decl) {
     p = skip_precision(p);
 
     /* Read type */
@@ -722,8 +733,8 @@ static int parse_type_and_names(const char *p, parsed_decl_t *decl) {
                 /* Macro name — try to resolve from #define table */
                 char macro_name[GLSLT_MAX_NAME];
                 const char *mp = read_word(p, macro_name, sizeof(macro_name));
-                if (s_current_defines) {
-                    int resolved = glslt_resolve_define(s_current_defines, macro_name);
+                if (ctx->defines) {
+                    int resolved = glslt_resolve_define(ctx->defines, macro_name);
                     if (resolved > 0) arr_size = resolved;
                 }
                 p = mp;
@@ -743,8 +754,8 @@ static int parse_type_and_names(const char *p, parsed_decl_t *decl) {
                 } else if (is_ident_char(*p)) {
                     char macro_name[GLSLT_MAX_NAME];
                     const char *mp = read_word(p, macro_name, sizeof(macro_name));
-                    if (s_current_defines) {
-                        int resolved = glslt_resolve_define(s_current_defines, macro_name);
+                    if (ctx->defines) {
+                        int resolved = glslt_resolve_define(ctx->defines, macro_name);
                         if (resolved > 0) operand = resolved;
                     }
                     p = mp;
@@ -766,7 +777,7 @@ static int parse_type_and_names(const char *p, parsed_decl_t *decl) {
 }
 
 /* Parse a single line. Returns the declaration kind or DECL_NONE. */
-static decl_kind_t parse_line(const char *raw_line, parsed_decl_t *decl) {
+static decl_kind_t parse_line(glslt_ctx_t *ctx, const char *raw_line, parsed_decl_t *decl) {
     char line[MAX_LINE_LEN];
     strip_comment(raw_line, line, sizeof(line));
 
@@ -804,7 +815,7 @@ static decl_kind_t parse_line(const char *raw_line, parsed_decl_t *decl) {
     /* attribute */
     if (starts_with_word(p, "attribute")) {
         p = skip_ws(p + 9);
-        if (parse_type_and_names(p, decl)) {
+        if (parse_type_and_names(ctx, p, decl)) {
             decl->kind = DECL_ATTRIBUTE;
             return DECL_ATTRIBUTE;
         }
@@ -815,7 +826,7 @@ static decl_kind_t parse_line(const char *raw_line, parsed_decl_t *decl) {
         const char *ip = skip_ws(p + 9);
         if (starts_with_word(ip, "varying")) {
             p = skip_ws(ip + 7);
-            if (parse_type_and_names(p, decl)) {
+            if (parse_type_and_names(ctx, p, decl)) {
                 decl->kind = DECL_VARYING;
                 return DECL_VARYING;
             }
@@ -823,7 +834,7 @@ static decl_kind_t parse_line(const char *raw_line, parsed_decl_t *decl) {
     }
     if (starts_with_word(p, "varying")) {
         p = skip_ws(p + 7);
-        if (parse_type_and_names(p, decl)) {
+        if (parse_type_and_names(ctx, p, decl)) {
             decl->kind = DECL_VARYING;
             return DECL_VARYING;
         }
@@ -832,7 +843,7 @@ static decl_kind_t parse_line(const char *raw_line, parsed_decl_t *decl) {
     /* uniform */
     if (starts_with_word(p, "uniform")) {
         p = skip_ws(p + 7);
-        if (parse_type_and_names(p, decl)) {
+        if (parse_type_and_names(ctx, p, decl)) {
             decl->kind = DECL_UNIFORM;
             return DECL_UNIFORM;
         }
@@ -841,7 +852,7 @@ static decl_kind_t parse_line(const char *raw_line, parsed_decl_t *decl) {
             const char *sp = skip_precision(p);
             char type_str[GLSLT_MAX_NAME];
             const char *after_type = read_word(sp, type_str, sizeof(type_str));
-            if (after_type != sp && find_struct_def(type_str)) {
+            if (after_type != sp && find_struct_def(ctx, type_str)) {
                 strncpy(decl->struct_type_name, type_str, GLSLT_MAX_NAME - 1);
                 decl->struct_type_name[GLSLT_MAX_NAME - 1] = '\0';
                 decl->num_names = 0;
@@ -869,8 +880,8 @@ static decl_kind_t parse_line(const char *raw_line, parsed_decl_t *decl) {
                         } else if (is_ident_char(*sp)) {
                             char macro_name[GLSLT_MAX_NAME];
                             const char *mp = read_word(sp, macro_name, sizeof(macro_name));
-                            if (s_current_defines) {
-                                int resolved = glslt_resolve_define(s_current_defines, macro_name);
+                            if (ctx->defines) {
+                                int resolved = glslt_resolve_define(ctx->defines, macro_name);
                                 if (resolved > 0) arr_size = resolved;
                             }
                             sp = mp;
@@ -889,8 +900,8 @@ static decl_kind_t parse_line(const char *raw_line, parsed_decl_t *decl) {
                             } else if (is_ident_char(*sp)) {
                                 char macro_name2[GLSLT_MAX_NAME];
                                 const char *mp2 = read_word(sp, macro_name2, sizeof(macro_name2));
-                                if (s_current_defines) {
-                                    int resolved = glslt_resolve_define(s_current_defines, macro_name2);
+                                if (ctx->defines) {
+                                    int resolved = glslt_resolve_define(ctx->defines, macro_name2);
                                     if (resolved > 0) operand = resolved;
                                 }
                                 sp = mp2;
@@ -1327,7 +1338,7 @@ static int is_glsl_builtin_func(const char *name, int len) {
 
 /* Scan an expression for non-constant identifier references.
  * Returns pointer to first non-const identifier, or NULL if all OK. */
-static const char *find_nonconst_in_expr(const char *expr, int expr_len,
+static const char *find_nonconst_in_expr(glslt_ctx_t *ctx, const char *expr, int expr_len,
                                           char const_names[][64], int num_consts) {
     const char *p = expr;
     const char *end = expr + expr_len;
@@ -1397,7 +1408,7 @@ static const char *find_nonconst_in_expr(const char *expr, int expr_len,
                 char tmp[64];
                 int tl = id_len < 63 ? id_len : 63;
                 memcpy(tmp, id, tl); tmp[tl] = '\0';
-                if (find_struct_def(tmp)) continue;
+                if (find_struct_def(ctx, tmp)) continue;
             }
             return id; /* User function call — not constant */
         }
@@ -1412,7 +1423,7 @@ static const char *find_nonconst_in_expr(const char *expr, int expr_len,
 /* Validate that local const variables are initialized from constant expressions
  * per GLES 1.00 §5.10. Source must be normalized (one statement per line).
  * Returns 1 if valid, 0 if invalid. */
-static int validate_const_initializers(const char *source,
+static int validate_const_initializers(glslt_ctx_t *ctx, const char *source,
                                         char *error, int error_size) {
     char const_names[128][64];
     int num_consts = 0;
@@ -1515,7 +1526,7 @@ static int validate_const_initializers(const char *source,
 
                 if (semi < line + effective_len) {
                     int expr_len = (int)(semi - c);
-                    const char *bad = find_nonconst_in_expr(
+                    const char *bad = find_nonconst_in_expr(ctx,
                         c, expr_len, const_names, num_consts);
                     if (bad) {
                         snprintf(error, error_size,
@@ -2152,7 +2163,7 @@ static int validate_texture_functions(const char *source, glslt_stage_t stage,
 
 /* Public API: validate GLES 1.00 semantics at compile time.
  * Normalizes source before validation (inserts newlines). */
-int glslt_validate_es100(const char *source, glslt_stage_t stage,
+static int glslt_validate_es100_impl(glslt_ctx_t *ctx, const char *source, glslt_stage_t stage,
                          char *error, int error_size) {
     if (!source) {
         snprintf(error, error_size, "source is NULL");
@@ -2174,8 +2185,8 @@ int glslt_validate_es100(const char *source, glslt_stage_t stage,
     }
     int ok = validate_gles_semantics(norm, stage, error, error_size);
     if (ok) {
-        collect_struct_defs(norm);
-        ok = validate_const_initializers(norm, error, error_size);
+        collect_struct_defs(ctx, norm);
+        ok = validate_const_initializers(ctx, norm, error, error_size);
     }
     if (ok) {
         ok = validate_qualification_order(norm, error, error_size);
@@ -2186,9 +2197,9 @@ int glslt_validate_es100(const char *source, glslt_stage_t stage,
     free(norm);
     /* collect_struct_defs above populated the module-global struct table;
      * clear it so it cannot leak into a later transpile/validate call. */
-    s_num_structs = 0;
-    s_num_replacements = 0;
-    s_num_struct_array_uniforms = 0;
+    ctx->num_structs = 0;
+    ctx->num_replacements = 0;
+    ctx->num_struct_array_uniforms = 0;
     return ok;
 }
 
@@ -2196,16 +2207,16 @@ int glslt_validate_es100(const char *source, glslt_stage_t stage,
 /*  Main transpile function                                                    */
 /* ========================================================================== */
 
-glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
+static glslt_result_t glslt_transpile_impl(glslt_ctx_t *ctx, const char *source, glslt_stage_t stage,
                                const glslt_options_t *opts) {
     glslt_result_t result;
     memset(&result, 0, sizeof(result));
 
     /* Reset module-global parse state up front so a prior call that bailed
      * on an error path cannot leak stale structs/replacements into this one. */
-    s_num_structs = 0;
-    s_num_replacements = 0;
-    s_num_struct_array_uniforms = 0;
+    ctx->num_structs = 0;
+    ctx->num_replacements = 0;
+    ctx->num_struct_array_uniforms = 0;
 
     if (!source) {
         snprintf(result.error, sizeof(result.error), "source is NULL");
@@ -2220,7 +2231,7 @@ glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
     /* Pre-scan source for #define NAME NUMERIC_VALUE (for macro array sizes) */
     glslt_define_table_t defines;
     glslt_collect_defines(source, &defines);
-    s_current_defines = &defines;
+    ctx->defines = &defines;
 
     /* Check if already modern GLSL - pass through unchanged */
     {
@@ -2237,14 +2248,14 @@ glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
                 if (!result.output) {
                     snprintf(result.error, sizeof(result.error),
                              "out of memory (passthrough)");
-                    s_current_defines = NULL;
+                    ctx->defines = NULL;
                     return result;  /* result.success = 0 (from memset) */
                 }
                 memcpy(result.output, source, src_len + 1);
                 result.output_len = src_len;
 
                 result.success = 1;
-                s_current_defines = NULL;
+                ctx->defines = NULL;
                 return result;
             }
         }
@@ -2252,11 +2263,11 @@ glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
 
     /* ---- Preprocessor validation (on raw source, before normalization) ---- */
     if (!validate_preprocessor_directives(source, result.error, sizeof(result.error))) {
-        s_current_defines = NULL;
+        ctx->defines = NULL;
         return result;
     }
     if (!validate_preprocessor_undefined(source, result.error, sizeof(result.error))) {
-        s_current_defines = NULL;
+        ctx->defines = NULL;
         return result;
     }
 
@@ -2265,7 +2276,7 @@ glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
     char *norm_source = normalize_source(source);
     if (!norm_source) {
         snprintf(result.error, sizeof(result.error), "out of memory normalizing source");
-        s_current_defines = NULL;
+        ctx->defines = NULL;
         return result;
     }
     source = norm_source; /* Use normalized source for all subsequent processing */
@@ -2273,29 +2284,29 @@ glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
     /* ---- GLES 1.00 semantic validation ---- */
     if (!validate_gles_semantics(source, stage, result.error, sizeof(result.error))) {
         free(norm_source);
-        s_current_defines = NULL;
+        ctx->defines = NULL;
         return result;  /* result.success = 0 (from memset) */
     }
-    if (!validate_const_initializers(source, result.error, sizeof(result.error))) {
+    if (!validate_const_initializers(ctx, source, result.error, sizeof(result.error))) {
         free(norm_source);
-        s_current_defines = NULL;
+        ctx->defines = NULL;
         return result;
     }
     if (!validate_qualification_order(source, result.error, sizeof(result.error))) {
         free(norm_source);
-        s_current_defines = NULL;
+        ctx->defines = NULL;
         return result;
     }
     if (!validate_texture_functions(source, stage, result.error, sizeof(result.error))) {
         free(norm_source);
-        s_current_defines = NULL;
+        ctx->defines = NULL;
         return result;
     }
 
     /* ---- Pre-scan: collect struct definitions ---- */
-    collect_struct_defs(source);
-    s_num_replacements = 0;
-    s_num_struct_array_uniforms = 0;
+    collect_struct_defs(ctx, source);
+    ctx->num_replacements = 0;
+    ctx->num_struct_array_uniforms = 0;
 
     /* ---- Detect gl_DepthRange usage and inject synthetic uniforms ---- */
     int has_depth_range = (strstr(source, "gl_DepthRange") != NULL) ? 1 : 0;
@@ -2317,22 +2328,22 @@ glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
             source = norm_source;
         }
         /* Register replacements: gl_DepthRange.near → sgl_dr_near etc. */
-        if (s_num_replacements + 3 <= MAX_STRUCT_REPLS) {
-            strncpy(s_replacements[s_num_replacements].old_ref, "gl_DepthRange.near",
-                    sizeof(s_replacements[0].old_ref) - 1);
-            strncpy(s_replacements[s_num_replacements].new_ref, "sgl_dr_near",
-                    sizeof(s_replacements[0].new_ref) - 1);
-            s_num_replacements++;
-            strncpy(s_replacements[s_num_replacements].old_ref, "gl_DepthRange.far",
-                    sizeof(s_replacements[0].old_ref) - 1);
-            strncpy(s_replacements[s_num_replacements].new_ref, "sgl_dr_far",
-                    sizeof(s_replacements[0].new_ref) - 1);
-            s_num_replacements++;
-            strncpy(s_replacements[s_num_replacements].old_ref, "gl_DepthRange.diff",
-                    sizeof(s_replacements[0].old_ref) - 1);
-            strncpy(s_replacements[s_num_replacements].new_ref, "sgl_dr_diff",
-                    sizeof(s_replacements[0].new_ref) - 1);
-            s_num_replacements++;
+        if (ctx->num_replacements + 3 <= MAX_STRUCT_REPLS) {
+            strncpy(ctx->replacements[ctx->num_replacements].old_ref, "gl_DepthRange.near",
+                    sizeof(ctx->replacements[0].old_ref) - 1);
+            strncpy(ctx->replacements[ctx->num_replacements].new_ref, "sgl_dr_near",
+                    sizeof(ctx->replacements[0].new_ref) - 1);
+            ctx->num_replacements++;
+            strncpy(ctx->replacements[ctx->num_replacements].old_ref, "gl_DepthRange.far",
+                    sizeof(ctx->replacements[0].old_ref) - 1);
+            strncpy(ctx->replacements[ctx->num_replacements].new_ref, "sgl_dr_far",
+                    sizeof(ctx->replacements[0].new_ref) - 1);
+            ctx->num_replacements++;
+            strncpy(ctx->replacements[ctx->num_replacements].old_ref, "gl_DepthRange.diff",
+                    sizeof(ctx->replacements[0].old_ref) - 1);
+            strncpy(ctx->replacements[ctx->num_replacements].new_ref, "sgl_dr_diff",
+                    sizeof(ctx->replacements[0].new_ref) - 1);
+            ctx->num_replacements++;
         }
     }
 
@@ -2375,7 +2386,7 @@ glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
 
         if (!in_block_comment) {
             parsed_decl_t decl;
-            decl_kind_t kind = parse_line(line, &decl);
+            decl_kind_t kind = parse_line(ctx, line, &decl);
 
             switch (kind) {
             case DECL_ATTRIBUTE:
@@ -2413,16 +2424,16 @@ glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
                                 ns++;
                             }
                             /* Add body replacements: s[0] → s_0, s[1] → s_1 */
-                            for (int a = 0; a < arr && s_num_replacements < MAX_STRUCT_REPLS; a++) {
+                            for (int a = 0; a < arr && ctx->num_replacements < MAX_STRUCT_REPLS; a++) {
                                 char old_ref[GLSLT_MAX_NAME * 2];
                                 char new_ref[GLSLT_MAX_NAME * 2];
                                 snprintf(old_ref, sizeof(old_ref), "%s[%d]", decl.names[i], a);
                                 snprintf(new_ref, sizeof(new_ref), "%s_%d", decl.names[i], a);
-                                strncpy(s_replacements[s_num_replacements].old_ref, old_ref,
-                                        sizeof(s_replacements[0].old_ref) - 1);
-                                strncpy(s_replacements[s_num_replacements].new_ref, new_ref,
-                                        sizeof(s_replacements[0].new_ref) - 1);
-                                s_num_replacements++;
+                                strncpy(ctx->replacements[ctx->num_replacements].old_ref, old_ref,
+                                        sizeof(ctx->replacements[0].old_ref) - 1);
+                                strncpy(ctx->replacements[ctx->num_replacements].new_ref, new_ref,
+                                        sizeof(ctx->replacements[0].new_ref) - 1);
+                                ctx->num_replacements++;
                             }
                         } else {
                             /* Single sampler */
@@ -2459,19 +2470,19 @@ glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
                         /* Struct array: keep as whole struct in UBO (not flattened).
                          * Flattening breaks dynamic indexing (e.g. u_lights[ndx].field).
                          * The struct definition must be emitted before the UBO block. */
-                        if (s_num_struct_array_uniforms < MAX_STRUCT_ARRAY_UNIFORMS) {
-                            struct_array_uniform_t *sau = &s_struct_array_uniforms[s_num_struct_array_uniforms++];
+                        if (ctx->num_struct_array_uniforms < MAX_STRUCT_ARRAY_UNIFORMS) {
+                            struct_array_uniform_t *sau = &ctx->struct_array_uniforms[ctx->num_struct_array_uniforms++];
                             strncpy(sau->struct_type, decl.struct_type_name, GLSLT_MAX_NAME - 1);
                             sau->struct_type[GLSLT_MAX_NAME - 1] = '\0';
                             strncpy(sau->var_name, decl.names[i], GLSLT_MAX_NAME - 1);
                             sau->var_name[GLSLT_MAX_NAME - 1] = '\0';
                             sau->array_size = arr_size;
-                            struct_def_t *sd = find_struct_def(decl.struct_type_name);
+                            struct_def_t *sd = find_struct_def(ctx, decl.struct_type_name);
                             sau->std140_size = compute_struct_std140_size(sd) * arr_size;
                         }
                     } else {
                         /* Single struct instance */
-                        flatten_struct_to_uniforms(decl.names[i],
+                        flatten_struct_to_uniforms(ctx, decl.names[i],
                                                    decl.struct_type_name,
                                                    uniforms, &nu,
                                                    samplers, &ns);
@@ -2561,8 +2572,8 @@ glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
     }
 
     /* Emit struct definitions needed by struct array uniforms (before UBO block) */
-    for (int sa = 0; sa < s_num_struct_array_uniforms; sa++) {
-        struct_def_t *sd = find_struct_def(s_struct_array_uniforms[sa].struct_type);
+    for (int sa = 0; sa < ctx->num_struct_array_uniforms; sa++) {
+        struct_def_t *sd = find_struct_def(ctx, ctx->struct_array_uniforms[sa].struct_type);
         if (!sd) continue;
         sb_printf(&sb, "\nstruct %s {\n", sd->name);
         for (int f = 0; f < sd->num_fields; f++) {
@@ -2579,7 +2590,7 @@ glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
     }
 
     /* UBO block (includes flattened scalar uniforms + struct array uniforms) */
-    if (nu > 0 || s_num_struct_array_uniforms > 0) {
+    if (nu > 0 || ctx->num_struct_array_uniforms > 0) {
         sb_append(&sb, "\n");
         sb_printf(&sb, "layout(std140, binding = %d) uniform %sUniforms {\n",
                   opts->ubo_binding,
@@ -2597,11 +2608,11 @@ glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
             }
         }
         /* Struct array uniforms (kept as whole structs) */
-        for (int i = 0; i < s_num_struct_array_uniforms; i++) {
+        for (int i = 0; i < ctx->num_struct_array_uniforms; i++) {
             sb_printf(&sb, "    %s %s[%d];\n",
-                      s_struct_array_uniforms[i].struct_type,
-                      s_struct_array_uniforms[i].var_name,
-                      s_struct_array_uniforms[i].array_size);
+                      ctx->struct_array_uniforms[i].struct_type,
+                      ctx->struct_array_uniforms[i].var_name,
+                      ctx->struct_array_uniforms[i].array_size);
         }
         sb_append(&sb, "};\n");
     }
@@ -2671,7 +2682,7 @@ glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
                 sp = skip_ws(sp + 6);
                 char sname[GLSLT_MAX_NAME];
                 const char *after = read_word(sp, sname, sizeof(sname));
-                if (after != sp && find_struct_def(sname)) {
+                if (after != sp && find_struct_def(ctx, sname)) {
                     inside_struct_def = 1;
                     emit = 0;
                 }
@@ -2699,7 +2710,7 @@ glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
 
         if (!line_in_comment && emit) {
             parsed_decl_t decl;
-            decl_kind_t kind = parse_line(line, &decl);
+            decl_kind_t kind = parse_line(ctx, line, &decl);
 
             switch (kind) {
             case DECL_VERSION:
@@ -2730,9 +2741,9 @@ glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
             } else {
                 char replaced[MAX_LINE_LEN];
                 apply_body_replacements(line, replaced, sizeof(replaced), stage);
-                if (s_num_replacements > 0) {
+                if (ctx->num_replacements > 0) {
                     char replaced2[MAX_LINE_LEN];
-                    apply_struct_replacements(replaced, replaced2, sizeof(replaced2));
+                    apply_struct_replacements(ctx, replaced, replaced2, sizeof(replaced2));
                     sb_append(&sb, replaced2);
                 } else {
                     sb_append(&sb, replaced);
@@ -2755,10 +2766,10 @@ glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
         snprintf(result.error, sizeof(result.error),
                  "out of memory building transpiled output");
         free(sb.buf);
-        s_current_defines = NULL;
-        s_num_structs = 0;
-        s_num_replacements = 0;
-        s_num_struct_array_uniforms = 0;
+        ctx->defines = NULL;
+        ctx->num_structs = 0;
+        ctx->num_replacements = 0;
+        ctx->num_struct_array_uniforms = 0;
         free(norm_source);
         return result;  /* result.success = 0 (from memset) */
     }
@@ -2784,10 +2795,10 @@ glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
 
     result.has_depth_range = has_depth_range;
 
-    s_current_defines = NULL;
-    s_num_structs = 0;
-    s_num_replacements = 0;
-    s_num_struct_array_uniforms = 0;
+    ctx->defines = NULL;
+    ctx->num_structs = 0;
+    ctx->num_replacements = 0;
+    ctx->num_struct_array_uniforms = 0;
     free(norm_source);
     return result;
 }
@@ -2829,4 +2840,39 @@ void glslt_result_free(glslt_result_t *result) {
         result->output = NULL;
     }
     result->output_len = 0;
+}
+
+/* ==========================================================================
+ *  Public entry points
+ *
+ *  Allocate the per-call transpiler context on the heap (~100 KB, calloc-zeroed
+ *  so no field can carry stale state), run the implementation, and free it in
+ *  exactly one place. This makes the transpiler reentrant and removes the
+ *  global-state reset discipline that was the root cause of B12.
+ * ========================================================================== */
+
+glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
+                               const glslt_options_t *opts) {
+    glslt_ctx_t *ctx = (glslt_ctx_t *)calloc(1, sizeof(*ctx));
+    if (!ctx) {
+        glslt_result_t r;
+        memset(&r, 0, sizeof(r));
+        snprintf(r.error, sizeof(r.error), "out of memory (transpiler context)");
+        return r;
+    }
+    glslt_result_t r = glslt_transpile_impl(ctx, source, stage, opts);
+    free(ctx);
+    return r;
+}
+
+int glslt_validate_es100(const char *source, glslt_stage_t stage,
+                         char *error, int error_size) {
+    glslt_ctx_t *ctx = (glslt_ctx_t *)calloc(1, sizeof(*ctx));
+    if (!ctx) {
+        snprintf(error, error_size, "out of memory (transpiler context)");
+        return 0;
+    }
+    int ok = glslt_validate_es100_impl(ctx, source, stage, error, error_size);
+    free(ctx);
+    return ok;
 }
