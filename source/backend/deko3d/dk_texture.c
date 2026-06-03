@@ -127,6 +127,39 @@ static bool dk_unpack_packed_to_rgba8(uint8_t *staging, const uint8_t *src,
     return false;
 }
 
+/* Convert a source pixel rectangle into the staging buffer, choosing the
+ * conversion by GL format/type: packed->RGBA8, BGRA->RGBA, RGB16F->RGBA16F,
+ * RGB8->RGBA8, or a plain bpp-per-pixel row copy (RGBA/LUMINANCE/ALPHA/...).
+ * Shared by every glTexImage2D/SubImage2D upload path in this file. */
+static void dk_convert_to_staging(uint8_t *staging, const uint8_t *src,
+                                  int width, int height, uint32_t aligned_row_size,
+                                  uint32_t bpp, GLenum format, GLenum type) {
+    if (dk_unpack_packed_to_rgba8(staging, src, width, height, aligned_row_size, format, type)) {
+        /* Packed format unpacked to RGBA8 */
+    } else if (format == GL_BGRA_EXT && type == GL_UNSIGNED_BYTE) {
+        dk_swizzle_bgra_to_rgba(staging, src, width, height, aligned_row_size);
+    } else if (format == GL_RGB && type == GL_HALF_FLOAT_OES) {
+        dk_expand_rgb16f_to_rgba16f(staging, src, width, height, aligned_row_size);
+    } else if (format == GL_RGB && type == GL_UNSIGNED_BYTE) {
+        /* Convert RGB to RGBA (bpp=4 for staging) */
+        for (int y = 0; y < height; y++) {
+            uint8_t *dst_row = staging + y * aligned_row_size;
+            const uint8_t *src_row = src + y * dk_src_row_stride(width, 3);
+            for (int x = 0; x < width; x++) {
+                dst_row[x * 4 + 0] = src_row[x * 3 + 0];
+                dst_row[x * 4 + 1] = src_row[x * 3 + 1];
+                dst_row[x * 4 + 2] = src_row[x * 3 + 2];
+                dst_row[x * 4 + 3] = 255;
+            }
+        }
+    } else {
+        /* RGBA, LUMINANCE, ALPHA, LUMINANCE_ALPHA: copy bpp bytes per pixel */
+        for (int y = 0; y < height; y++) {
+            memcpy(staging + y * aligned_row_size, src + y * dk_src_row_stride(width, bpp), width * bpp);
+        }
+    }
+}
+
 
 /* ============================================================================
  * Descriptor Memory Helpers
@@ -535,30 +568,7 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
         const uint8_t *src = (const uint8_t*)pixels;
 
         /* Copy pixels to staging buffer */
-        if (dk_unpack_packed_to_rgba8(staging, src, width, height, aligned_row_size, format, type)) {
-            /* Packed format unpacked to RGBA8 */
-        } else if (format == GL_BGRA_EXT && type == GL_UNSIGNED_BYTE) {
-            dk_swizzle_bgra_to_rgba(staging, src, width, height, aligned_row_size);
-        } else if (format == GL_RGB && type == GL_HALF_FLOAT_OES) {
-            dk_expand_rgb16f_to_rgba16f(staging, src, width, height, aligned_row_size);
-        } else if (format == GL_RGB && type == GL_UNSIGNED_BYTE) {
-            /* Convert RGB to RGBA (bpp=4 for staging) */
-            for (int y = 0; y < height; y++) {
-                uint8_t *dst_row = staging + y * aligned_row_size;
-                const uint8_t *src_row = src + y * dk_src_row_stride(width, 3);
-                for (int x = 0; x < width; x++) {
-                    dst_row[x * 4 + 0] = src_row[x * 3 + 0];
-                    dst_row[x * 4 + 1] = src_row[x * 3 + 1];
-                    dst_row[x * 4 + 2] = src_row[x * 3 + 2];
-                    dst_row[x * 4 + 3] = 255;
-                }
-            }
-        } else {
-            /* RGBA, LUMINANCE, ALPHA, LUMINANCE_ALPHA: copy bpp bytes per pixel */
-            for (int y = 0; y < height; y++) {
-                memcpy(staging + y * aligned_row_size, src + y * dk_src_row_stride(width, bpp), width * bpp);
-            }
-        }
+        dk_convert_to_staging(staging, src, width, height, aligned_row_size, bpp, format, type);
 
         dk->client_array_offset = stagingOffset + staging_size;
 
@@ -739,29 +749,7 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
                                            + dk->client_array_base + stagingOffset;
                         const uint8_t *src = (const uint8_t*)pixels;
 
-                        if (dk_unpack_packed_to_rgba8(staging, src, width, height, aligned_row_size, format, type)) {
-                            /* Packed format */
-                        } else if (format == GL_BGRA_EXT && type == GL_UNSIGNED_BYTE) {
-            dk_swizzle_bgra_to_rgba(staging, src, width, height, aligned_row_size);
-        } else if (format == GL_RGB && type == GL_HALF_FLOAT_OES) {
-            dk_expand_rgb16f_to_rgba16f(staging, src, width, height, aligned_row_size);
-        } else if (format == GL_RGB && type == GL_UNSIGNED_BYTE) {
-                            for (int y = 0; y < height; y++) {
-                                uint8_t *dst_row = staging + y * aligned_row_size;
-                                const uint8_t *src_row = src + y * dk_src_row_stride(width, 3);
-                                for (int x = 0; x < width; x++) {
-                                    dst_row[x * 4 + 0] = src_row[x * 3 + 0];
-                                    dst_row[x * 4 + 1] = src_row[x * 3 + 1];
-                                    dst_row[x * 4 + 2] = src_row[x * 3 + 2];
-                                    dst_row[x * 4 + 3] = 255;
-                                }
-                            }
-                        } else {
-                            for (int y = 0; y < height; y++) {
-                                memcpy(staging + y * aligned_row_size,
-                                       src + y * dk_src_row_stride(width, bpp), width * bpp);
-                            }
-                        }
+                        dk_convert_to_staging(staging, src, width, height, aligned_row_size, bpp, format, type);
 
                         dk->client_array_offset = stagingOffset + staging_size;
 
@@ -826,29 +814,7 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
                                        + dk->client_array_base + stagingOffset;
                     const uint8_t *src = (const uint8_t*)pixels;
 
-                    if (dk_unpack_packed_to_rgba8(staging, src, width, height, aligned_row_size, format, type)) {
-                        /* Packed format */
-                    } else if (format == GL_BGRA_EXT && type == GL_UNSIGNED_BYTE) {
-            dk_swizzle_bgra_to_rgba(staging, src, width, height, aligned_row_size);
-        } else if (format == GL_RGB && type == GL_HALF_FLOAT_OES) {
-            dk_expand_rgb16f_to_rgba16f(staging, src, width, height, aligned_row_size);
-        } else if (format == GL_RGB && type == GL_UNSIGNED_BYTE) {
-                        for (int y = 0; y < height; y++) {
-                            uint8_t *dst_row = staging + y * aligned_row_size;
-                            const uint8_t *src_row = src + y * dk_src_row_stride(width, 3);
-                            for (int x = 0; x < width; x++) {
-                                dst_row[x * 4 + 0] = src_row[x * 3 + 0];
-                                dst_row[x * 4 + 1] = src_row[x * 3 + 1];
-                                dst_row[x * 4 + 2] = src_row[x * 3 + 2];
-                                dst_row[x * 4 + 3] = 255;
-                            }
-                        }
-                    } else {
-                        for (int y = 0; y < height; y++) {
-                            memcpy(staging + y * aligned_row_size,
-                                   src + y * dk_src_row_stride(width, bpp), width * bpp);
-                        }
-                    }
+                    dk_convert_to_staging(staging, src, width, height, aligned_row_size, bpp, format, type);
 
                     dk->client_array_offset = stagingOffset + staging_size;
 
@@ -993,28 +959,7 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
                 uint8_t *staging = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock)
                                    + dk->client_array_base + stagingOffset;
 
-                if (dk_unpack_packed_to_rgba8(staging, src, width, height, aligned_row_size, format, type)) {
-                    /* Packed format unpacked to RGBA8 */
-                } else if (format == GL_BGRA_EXT && type == GL_UNSIGNED_BYTE) {
-            dk_swizzle_bgra_to_rgba(staging, src, width, height, aligned_row_size);
-        } else if (format == GL_RGB && type == GL_HALF_FLOAT_OES) {
-            dk_expand_rgb16f_to_rgba16f(staging, src, width, height, aligned_row_size);
-        } else if (format == GL_RGB && type == GL_UNSIGNED_BYTE) {
-                    for (int y = 0; y < height; y++) {
-                        uint8_t *dst_row = staging + y * aligned_row_size;
-                        const uint8_t *src_row = src + y * dk_src_row_stride(width, 3);
-                        for (int x = 0; x < width; x++) {
-                            dst_row[x * 4 + 0] = src_row[x * 3 + 0];
-                            dst_row[x * 4 + 1] = src_row[x * 3 + 1];
-                            dst_row[x * 4 + 2] = src_row[x * 3 + 2];
-                            dst_row[x * 4 + 3] = 255;
-                        }
-                    }
-                } else {
-                    for (int y = 0; y < height; y++) {
-                        memcpy(staging + y * aligned_row_size, src + y * dk_src_row_stride(width, bpp), width * bpp);
-                    }
-                }
+                dk_convert_to_staging(staging, src, width, height, aligned_row_size, bpp, format, type);
 
                 dk->client_array_offset = stagingOffset + staging_size;
 
@@ -1183,30 +1128,7 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
              * deko3d texture V=0 samples the TOP of the texture storage (row 0).
              * By storing GL row 0 (bottom) at storage row 0 (top), deko3d V=0
              * will sample what GL expects at V=0 (bottom content). */
-            if (dk_unpack_packed_to_rgba8(staging, src, width, height, aligned_row_size, format, type)) {
-                /* Packed format unpacked to RGBA8 */
-            } else if (format == GL_BGRA_EXT && type == GL_UNSIGNED_BYTE) {
-            dk_swizzle_bgra_to_rgba(staging, src, width, height, aligned_row_size);
-        } else if (format == GL_RGB && type == GL_HALF_FLOAT_OES) {
-            dk_expand_rgb16f_to_rgba16f(staging, src, width, height, aligned_row_size);
-        } else if (format == GL_RGB && type == GL_UNSIGNED_BYTE) {
-                /* Convert RGB to RGBA, no Y-flip */
-                for (int y = 0; y < height; y++) {
-                    uint8_t *dst_row = staging + y * aligned_row_size;
-                    const uint8_t *src_row = src + y * dk_src_row_stride(width, 3);
-                    for (int x = 0; x < width; x++) {
-                        dst_row[x * 4 + 0] = src_row[x * 3 + 0];
-                        dst_row[x * 4 + 1] = src_row[x * 3 + 1];
-                        dst_row[x * 4 + 2] = src_row[x * 3 + 2];
-                        dst_row[x * 4 + 3] = 255;
-                    }
-                }
-            } else {
-                /* RGBA, LUMINANCE, ALPHA, LUMINANCE_ALPHA: copy bpp bytes per pixel */
-                for (int y = 0; y < height; y++) {
-                    memcpy(staging + y * aligned_row_size, src + y * dk_src_row_stride(width, bpp), width * bpp);
-                }
-            }
+            dk_convert_to_staging(staging, src, width, height, aligned_row_size, bpp, format, type);
 
             dk->client_array_offset = stagingOffset + staging_size;
 
@@ -1291,30 +1213,7 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
     /* Copy pixel data to staging buffer with proper stride.
      * No Y-flip needed - texture storage matches GL row order (see glTexImage2D comment). */
-    if (dk_unpack_packed_to_rgba8(staging, src, width, height, aligned_row_size, format, type)) {
-        /* Packed format unpacked to RGBA8 */
-    } else if (format == GL_BGRA_EXT && type == GL_UNSIGNED_BYTE) {
-            dk_swizzle_bgra_to_rgba(staging, src, width, height, aligned_row_size);
-        } else if (format == GL_RGB && type == GL_HALF_FLOAT_OES) {
-            dk_expand_rgb16f_to_rgba16f(staging, src, width, height, aligned_row_size);
-        } else if (format == GL_RGB && type == GL_UNSIGNED_BYTE) {
-        /* Convert RGB to RGBA, no Y-flip */
-        for (int y = 0; y < height; y++) {
-            uint8_t *dst_row = staging + y * aligned_row_size;
-            const uint8_t *src_row = src + y * dk_src_row_stride(width, 3);
-            for (int x = 0; x < width; x++) {
-                dst_row[x * 4 + 0] = src_row[x * 3 + 0];
-                dst_row[x * 4 + 1] = src_row[x * 3 + 1];
-                dst_row[x * 4 + 2] = src_row[x * 3 + 2];
-                dst_row[x * 4 + 3] = 255;
-            }
-        }
-    } else {
-        /* RGBA, LUMINANCE, ALPHA, LUMINANCE_ALPHA: copy bpp bytes per pixel */
-        for (int y = 0; y < height; y++) {
-            memcpy(staging + y * aligned_row_size, src + y * dk_src_row_stride(width, bpp), width * bpp);
-        }
-    }
+    dk_convert_to_staging(staging, src, width, height, aligned_row_size, bpp, format, type);
 
     dk->client_array_offset = stagingOffset + staging_size;
 
