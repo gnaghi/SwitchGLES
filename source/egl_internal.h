@@ -128,4 +128,9 @@ static inline bool sgl_egl_display_valid(const sgl_display *display) {
 /* Ensure frame is ready for rendering */
 void sgl_ensure_frame_ready(void);
 
+/* Shared EGL helpers (defined in egl_impl.c, used by egl_surface.c/egl_context.c) */
+sgl_config *sgl_egl_get_config(EGLConfig config);
+void sgl_egl_destroy_surface_now(sgl_surface *surf);
+void sgl_egl_destroy_context_now(sgl_context_t *ctx);
+
 #endif /* EGL_INTERNAL_H */
