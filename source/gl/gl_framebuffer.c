@@ -15,7 +15,9 @@ static bool sgl_is_color_renderable(GLenum fmt);
 /* Framebuffer Objects */
 
 GL_APICALL void GL_APIENTRY glGenFramebuffers(GLsizei n, GLuint *framebuffers) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (n < 0) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
@@ -35,7 +37,9 @@ GL_APICALL void GL_APIENTRY glGenFramebuffers(GLsizei n, GLuint *framebuffers) {
 }
 
 GL_APICALL void GL_APIENTRY glDeleteFramebuffers(GLsizei n, const GLuint *framebuffers) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (n < 0) { sgl_set_error(ctx, GL_INVALID_VALUE); return; }
     if (!framebuffers) return;
@@ -104,7 +108,9 @@ GL_APICALL void GL_APIENTRY glDeleteFramebuffers(GLsizei n, const GLuint *frameb
 }
 
 GL_APICALL GLboolean GL_APIENTRY glIsFramebuffer(GLuint framebuffer) {
-    GET_CTX_RET(GL_FALSE);
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return GL_FALSE;
     if (framebuffer == 0) return GL_FALSE;
     sgl_framebuffer_t *fbo = GET_FRAMEBUFFER(framebuffer);
     if (fbo && fbo->bound) return GL_TRUE;
@@ -117,7 +123,9 @@ GL_APICALL GLboolean GL_APIENTRY glIsFramebuffer(GLuint framebuffer) {
 }
 
 GL_APICALL void GL_APIENTRY glBindFramebuffer(GLenum target, GLuint framebuffer) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     CHECK_BACKEND();
 
     if (target != GL_FRAMEBUFFER && target != GL_READ_FRAMEBUFFER && target != GL_DRAW_FRAMEBUFFER) {
@@ -227,7 +235,9 @@ GL_APICALL void GL_APIENTRY glBindFramebuffer(GLenum target, GLuint framebuffer)
 
 GL_APICALL void GL_APIENTRY glFramebufferTexture2D(GLenum target, GLenum attachment,
                                                      GLenum textarget, GLuint texture, GLint level) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (target != GL_FRAMEBUFFER && target != GL_READ_FRAMEBUFFER && target != GL_DRAW_FRAMEBUFFER) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
@@ -415,7 +425,9 @@ static bool sgl_is_stencil_renderable(GLenum fmt) {
 }
 
 GL_APICALL GLenum GL_APIENTRY glCheckFramebufferStatus(GLenum target) {
-    GET_CTX_RET(0);
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return 0;
 
     if (target != GL_FRAMEBUFFER && target != GL_READ_FRAMEBUFFER && target != GL_DRAW_FRAMEBUFFER) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
@@ -511,7 +523,9 @@ GL_APICALL GLenum GL_APIENTRY glCheckFramebufferStatus(GLenum target) {
 
 GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer(GLenum target, GLenum attachment,
                                                         GLenum renderbuffertarget, GLuint renderbuffer) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (target != GL_FRAMEBUFFER && target != GL_READ_FRAMEBUFFER && target != GL_DRAW_FRAMEBUFFER) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
@@ -660,7 +674,9 @@ GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer(GLenum target, GLenum atta
 
 GL_APICALL void GL_APIENTRY glGetFramebufferAttachmentParameteriv(GLenum target, GLenum attachment,
                                                                     GLenum pname, GLint *params) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (target != GL_FRAMEBUFFER && target != GL_READ_FRAMEBUFFER && target != GL_DRAW_FRAMEBUFFER) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
@@ -762,7 +778,9 @@ GL_APICALL void GL_APIENTRY glGetFramebufferAttachmentParameteriv(GLenum target,
 /* Renderbuffer Objects */
 
 GL_APICALL void GL_APIENTRY glGenRenderbuffers(GLsizei n, GLuint *renderbuffers) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (n < 0) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
@@ -782,7 +800,9 @@ GL_APICALL void GL_APIENTRY glGenRenderbuffers(GLsizei n, GLuint *renderbuffers)
 }
 
 GL_APICALL void GL_APIENTRY glDeleteRenderbuffers(GLsizei n, const GLuint *renderbuffers) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (n < 0) { sgl_set_error(ctx, GL_INVALID_VALUE); return; }
     if (!renderbuffers) return;
@@ -866,7 +886,9 @@ GL_APICALL void GL_APIENTRY glDeleteRenderbuffers(GLsizei n, const GLuint *rende
 }
 
 GL_APICALL GLboolean GL_APIENTRY glIsRenderbuffer(GLuint renderbuffer) {
-    GET_CTX_RET(GL_FALSE);
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return GL_FALSE;
     if (renderbuffer == 0) return GL_FALSE;
     sgl_renderbuffer_t *rb = GET_RENDERBUFFER(renderbuffer);
     if (rb && rb->bound) return GL_TRUE;
@@ -879,7 +901,9 @@ GL_APICALL GLboolean GL_APIENTRY glIsRenderbuffer(GLuint renderbuffer) {
 }
 
 GL_APICALL void GL_APIENTRY glBindRenderbuffer(GLenum target, GLuint renderbuffer) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (target != GL_RENDERBUFFER) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
@@ -917,7 +941,9 @@ GL_APICALL void GL_APIENTRY glBindRenderbuffer(GLenum target, GLuint renderbuffe
 
 GL_APICALL void GL_APIENTRY glRenderbufferStorage(GLenum target, GLenum internalformat,
                                                     GLsizei width, GLsizei height) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     CHECK_BACKEND();
 
     if (target != GL_RENDERBUFFER) {
@@ -976,7 +1002,9 @@ GL_APICALL void GL_APIENTRY glRenderbufferStorage(GLenum target, GLenum internal
 }
 
 GL_APICALL void GL_APIENTRY glGetRenderbufferParameteriv(GLenum target, GLenum pname, GLint *params) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (target != GL_RENDERBUFFER) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
@@ -1036,7 +1064,9 @@ GL_APICALL void GL_APIENTRY glGetRenderbufferParameteriv(GLenum target, GLenum p
 
 GL_APICALL void GL_APIENTRY glReadPixels(GLint x, GLint y, GLsizei width, GLsizei height,
                                           GLenum format, GLenum type, void *pixels) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     CHECK_BACKEND();
 
     if (width < 0 || height < 0) {
@@ -1088,7 +1118,9 @@ GL_APICALL void GL_APIENTRY glBlitFramebuffer(
 {
     sgl_ensure_frame_ready();
 
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     CHECK_BACKEND();
 
     if (!ctx->backend->ops->blit_framebuffer) {

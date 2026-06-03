@@ -48,7 +48,9 @@ static GLenum glslt_to_gl_type(glslt_type_t type) {
 /* Shader Objects */
 
 GL_APICALL GLuint GL_APIENTRY glCreateShader(GLenum type) {
-    GET_CTX_RET(0);
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return 0;
 
     if (type != GL_VERTEX_SHADER && type != GL_FRAGMENT_SHADER) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
@@ -66,7 +68,9 @@ GL_APICALL GLuint GL_APIENTRY glCreateShader(GLenum type) {
 }
 
 GL_APICALL void GL_APIENTRY glDeleteShader(GLuint shader) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     if (shader == 0) return;
 
     sgl_shader_t *sh = GET_SHADER(shader);
@@ -93,12 +97,16 @@ GL_APICALL void GL_APIENTRY glDeleteShader(GLuint shader) {
 }
 
 GL_APICALL GLboolean GL_APIENTRY glIsShader(GLuint shader) {
-    GET_CTX_RET(GL_FALSE);
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return GL_FALSE;
     return GET_SHADER(shader) ? GL_TRUE : GL_FALSE;
 }
 
 GL_APICALL void GL_APIENTRY glShaderSource(GLuint shader, GLsizei count, const GLchar *const*string, const GLint *length) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     /* Check shader validity FIRST — dEQP expects GL_INVALID_OPERATION for
      * a program handle even when count/string are also bad. */
@@ -491,7 +499,9 @@ static bool sgl_is_es100_source(const char *source) {
 #endif /* SGL_ENABLE_RUNTIME_COMPILER */
 
 GL_APICALL void GL_APIENTRY glCompileShader(GLuint shader) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     sgl_shader_t *sh = GET_SHADER(shader);
     if (!sh) {
         sgl_set_error(ctx, GET_PROGRAM(shader) ? GL_INVALID_OPERATION : GL_INVALID_VALUE);
@@ -619,7 +629,9 @@ transpiler_fallback:
 }
 
 GL_APICALL void GL_APIENTRY glGetShaderiv(GLuint shader, GLenum pname, GLint *params) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     if (!params) return;
 
     sgl_shader_t *sh = GET_SHADER(shader);
@@ -651,7 +663,9 @@ GL_APICALL void GL_APIENTRY glGetShaderiv(GLuint shader, GLenum pname, GLint *pa
 }
 
 GL_APICALL void GL_APIENTRY glGetShaderInfoLog(GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *infoLog) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (bufSize < 0) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
@@ -682,7 +696,9 @@ GL_APICALL void GL_APIENTRY glGetShaderInfoLog(GLuint shader, GLsizei bufSize, G
 }
 
 GL_APICALL void GL_APIENTRY glGetShaderSource(GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *source) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (bufSize < 0) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
@@ -715,7 +731,9 @@ GL_APICALL void GL_APIENTRY glGetShaderSource(GLuint shader, GLsizei bufSize, GL
 /* Program Objects */
 
 GL_APICALL GLuint GL_APIENTRY glCreateProgram(void) {
-    GET_CTX_RET(0);
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return 0;
 
     GLuint id = sgl_res_mgr_alloc_program(&ctx->res_mgr);
     if (id == 0) {
@@ -753,7 +771,9 @@ static void sgl_program_do_free(sgl_context_t *ctx, GLuint program) {
 }
 
 GL_APICALL void GL_APIENTRY glDeleteProgram(GLuint program) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     if (program == 0) return;
 
     sgl_program_t *prog = GET_PROGRAM(program);
@@ -774,7 +794,9 @@ GL_APICALL void GL_APIENTRY glDeleteProgram(GLuint program) {
 }
 
 GL_APICALL GLboolean GL_APIENTRY glIsProgram(GLuint program) {
-    GET_CTX_RET(GL_FALSE);
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return GL_FALSE;
     /* GLES2: program exists (TRUE) until actually freed (after UseProgram(0)) */
     return GET_PROGRAM(program) ? GL_TRUE : GL_FALSE;
 }
@@ -793,7 +815,9 @@ static void sgl_shader_try_deferred_delete(sgl_context_t *ctx, GLuint shader) {
 }
 
 GL_APICALL void GL_APIENTRY glAttachShader(GLuint program, GLuint shader) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     sgl_program_t *prog = GET_PROGRAM(program);
     if (!prog) {
@@ -830,7 +854,9 @@ GL_APICALL void GL_APIENTRY glAttachShader(GLuint program, GLuint shader) {
 }
 
 GL_APICALL void GL_APIENTRY glDetachShader(GLuint program, GLuint shader) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     sgl_program_t *prog = GET_PROGRAM(program);
     if (!prog) {
@@ -864,7 +890,9 @@ GL_APICALL void GL_APIENTRY glDetachShader(GLuint program, GLuint shader) {
 }
 
 GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     sgl_program_t *prog = GET_PROGRAM(program);
     if (!prog) {
@@ -1896,7 +1924,9 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
 }
 
 GL_APICALL void GL_APIENTRY glUseProgram(GLuint program) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (program != 0 && !GET_PROGRAM(program)) {
         sgl_set_error(ctx, GET_SHADER(program) ? GL_INVALID_OPERATION : GL_INVALID_VALUE);
@@ -1925,7 +1955,9 @@ GL_APICALL void GL_APIENTRY glUseProgram(GLuint program) {
 }
 
 GL_APICALL void GL_APIENTRY glGetProgramiv(GLuint program, GLenum pname, GLint *params) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     if (!params) return;
 
     sgl_program_t *prog = GET_PROGRAM(program);
@@ -1985,7 +2017,9 @@ GL_APICALL void GL_APIENTRY glGetProgramiv(GLuint program, GLenum pname, GLint *
 }
 
 GL_APICALL void GL_APIENTRY glGetProgramInfoLog(GLuint program, GLsizei bufSize, GLsizei *length, GLchar *infoLog) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (bufSize < 0) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
@@ -2016,7 +2050,9 @@ GL_APICALL void GL_APIENTRY glGetProgramInfoLog(GLuint program, GLsizei bufSize,
 }
 
 GL_APICALL void GL_APIENTRY glValidateProgram(GLuint program) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     sgl_program_t *prog = GET_PROGRAM(program);
     if (!prog) {
         sgl_set_error(ctx, GET_SHADER(program) ? GL_INVALID_OPERATION : GL_INVALID_VALUE);
@@ -2028,7 +2064,9 @@ GL_APICALL void GL_APIENTRY glValidateProgram(GLuint program) {
 }
 
 GL_APICALL void GL_APIENTRY glGetAttachedShaders(GLuint program, GLsizei maxCount, GLsizei *count, GLuint *shaders) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (maxCount < 0) {
         sgl_set_error(ctx, GL_INVALID_VALUE);

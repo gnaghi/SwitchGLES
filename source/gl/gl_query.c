@@ -86,7 +86,9 @@ GL_APICALL const GLubyte *GL_APIENTRY glGetString(GLenum name) {
                 "GL_EXT_shader_texture_lod "
                 "GL_EXT_debug_marker";
         default: {
-            GET_CTX_RET(NULL);
+            sgl_context_t *ctx = sgl_get_current_context();
+            if (!ctx)
+                return NULL;
             sgl_set_error(ctx, GL_INVALID_ENUM);
             return NULL;
         }
@@ -96,7 +98,9 @@ GL_APICALL const GLubyte *GL_APIENTRY glGetString(GLenum name) {
 /* Integer Queries */
 
 GL_APICALL void GL_APIENTRY glGetIntegerv(GLenum pname, GLint *params) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (!params) return;
 
@@ -436,7 +440,9 @@ GL_APICALL void GL_APIENTRY glGetIntegerv(GLenum pname, GLint *params) {
 }
 
 GL_APICALL void GL_APIENTRY glGetBooleanv(GLenum pname, GLboolean *params) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (!params) return;
 
@@ -538,7 +544,9 @@ GL_APICALL void GL_APIENTRY glGetBooleanv(GLenum pname, GLboolean *params) {
 }
 
 GL_APICALL void GL_APIENTRY glGetFloatv(GLenum pname, GLfloat *params) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (!params) return;
 
@@ -661,14 +669,18 @@ GL_APICALL void GL_APIENTRY glGetFloatv(GLenum pname, GLfloat *params) {
 /* Flush/Finish */
 
 GL_APICALL void GL_APIENTRY glFlush(void) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     if (ctx->backend && ctx->backend->ops->flush) {
         ctx->backend->ops->flush(ctx->backend);
     }
 }
 
 GL_APICALL void GL_APIENTRY glFinish(void) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     if (ctx->backend && ctx->backend->ops->finish) {
         ctx->backend->ops->finish(ctx->backend);
     }
@@ -677,7 +689,9 @@ GL_APICALL void GL_APIENTRY glFinish(void) {
 /* Hints (ignored) */
 
 GL_APICALL void GL_APIENTRY glHint(GLenum target, GLenum mode) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     /* Validate target */
     if (target != GL_GENERATE_MIPMAP_HINT &&
@@ -700,7 +714,9 @@ GL_APICALL void GL_APIENTRY glHint(GLenum target, GLenum mode) {
 /* Line Width */
 
 GL_APICALL void GL_APIENTRY glLineWidth(GLfloat width) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (width <= 0.0f) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
@@ -713,7 +729,9 @@ GL_APICALL void GL_APIENTRY glLineWidth(GLfloat width) {
 /* Polygon Offset */
 
 GL_APICALL void GL_APIENTRY glPolygonOffset(GLfloat factor, GLfloat units) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     ctx->raster_state.polygon_offset_factor = factor;
     ctx->raster_state.polygon_offset_units = units;
@@ -729,7 +747,9 @@ GL_APICALL void GL_APIENTRY glPolygonOffset(GLfloat factor, GLfloat units) {
 /* Pixel Store */
 
 GL_APICALL void GL_APIENTRY glPixelStorei(GLenum pname, GLint param) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     /* Only valid alignment values are 1, 2, 4, 8 */
     if (param != 1 && param != 2 && param != 4 && param != 8) {
@@ -753,7 +773,9 @@ GL_APICALL void GL_APIENTRY glPixelStorei(GLenum pname, GLint param) {
 /* Buffer Queries */
 
 GL_APICALL void GL_APIENTRY glGetBufferParameteriv(GLenum target, GLenum pname, GLint *params) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (!params) return;
 
@@ -799,7 +821,9 @@ GL_APICALL void GL_APIENTRY glReleaseShaderCompiler(void) {
 
 GL_APICALL void GL_APIENTRY glShaderBinary(GLsizei count, const GLuint *shaders,
                                             GLenum binaryformat, const void *binary, GLsizei length) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     /* Validate binary format FIRST — dEQP expects GL_INVALID_ENUM for invalid
      * format even when other params are bad (per GLES2 spec error precedence). */
@@ -834,7 +858,9 @@ GL_APICALL void GL_APIENTRY glGetShaderPrecisionFormat(GLenum shadertype, GLenum
                                                         GLint *range, GLint *precision) {
     /* Validate shadertype */
     if (shadertype != GL_VERTEX_SHADER && shadertype != GL_FRAGMENT_SHADER) {
-        GET_CTX();
+        sgl_context_t *ctx = sgl_get_current_context();
+        if (!ctx)
+            return;
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
     }
@@ -854,7 +880,9 @@ GL_APICALL void GL_APIENTRY glGetShaderPrecisionFormat(GLenum shadertype, GLenum
             if (precision) *precision = 0;
             break;
         default: {
-            GET_CTX();
+            sgl_context_t *ctx = sgl_get_current_context();
+            if (!ctx)
+                return;
             sgl_set_error(ctx, GL_INVALID_ENUM);
             break;
         }
@@ -864,7 +892,9 @@ GL_APICALL void GL_APIENTRY glGetShaderPrecisionFormat(GLenum shadertype, GLenum
 /* Sample Coverage (stubs) */
 
 GL_APICALL void GL_APIENTRY glSampleCoverage(GLfloat value, GLboolean invert) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     /* Store values for glGetFloatv/glGetBooleanv query (MSAA not supported on hardware) */
     ctx->sample_coverage_value = value < 0.0f ? 0.0f : (value > 1.0f ? 1.0f : value);
     ctx->sample_coverage_invert = invert != 0;

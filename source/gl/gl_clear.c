@@ -9,26 +9,34 @@
 /* Note: glGetError is in gl_query.c */
 
 GL_APICALL void GL_APIENTRY glClearColor(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     sgl_state_color_set_clear(&ctx->color_state, red, green, blue, alpha);
     SGL_TRACE_STATE("glClearColor(%.2f, %.2f, %.2f, %.2f)", red, green, blue, alpha);
 }
 
 GL_APICALL void GL_APIENTRY glClearDepthf(GLfloat depth) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     sgl_state_depth_set_clear(&ctx->depth_state, depth);
     SGL_TRACE_STATE("glClearDepthf(%.2f)", depth);
 }
 
 GL_APICALL void GL_APIENTRY glClearStencil(GLint s) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     sgl_state_stencil_set_clear(&ctx->depth_state, s);
     SGL_TRACE_STATE("glClearStencil(%d)", s);
 }
 
 GL_APICALL void GL_APIENTRY glClear(GLbitfield mask) {
     sgl_ensure_frame_ready();
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     CHECK_BACKEND();
 
     /* Validate mask: only COLOR, DEPTH, STENCIL bits are allowed */
@@ -56,7 +64,9 @@ GL_APICALL void GL_APIENTRY glClear(GLbitfield mask) {
 }
 
 GL_APICALL void GL_APIENTRY glViewport(GLint x, GLint y, GLsizei width, GLsizei height) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     CHECK_BACKEND();
 
     if (width < 0 || height < 0) {
@@ -80,7 +90,9 @@ GL_APICALL void GL_APIENTRY glViewport(GLint x, GLint y, GLsizei width, GLsizei 
 }
 
 GL_APICALL void GL_APIENTRY glScissor(GLint x, GLint y, GLsizei width, GLsizei height) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     CHECK_BACKEND();
 
     if (width < 0 || height < 0) {
@@ -100,7 +112,9 @@ GL_APICALL void GL_APIENTRY glScissor(GLint x, GLint y, GLsizei width, GLsizei h
 }
 
 GL_APICALL void GL_APIENTRY glDepthRangef(GLfloat nearVal, GLfloat farVal) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     CHECK_BACKEND();
 
     if (sgl_state_viewport_set_depth_range(&ctx->viewport_state, nearVal, farVal)) {

@@ -16,15 +16,6 @@
 #include "../backend/sgl_backend.h"
 #include "../util/sgl_log.h"
 
-/* Get current context with error check */
-#define GET_CTX() \
-    sgl_context_t *ctx = sgl_get_current_context(); \
-    if (!ctx) { return; }
-
-#define GET_CTX_RET(ret) \
-    sgl_context_t *ctx = sgl_get_current_context(); \
-    if (!ctx) { return (ret); }
-
 /* Check backend is available */
 #define CHECK_BACKEND() \
     if (!ctx->backend || !ctx->backend->ops) { return; }

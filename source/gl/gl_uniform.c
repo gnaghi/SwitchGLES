@@ -386,7 +386,9 @@ static GLenum find_packed_uniform_type(sgl_program_t *prog, GLint location) {
 }
 
 GL_APICALL GLint GL_APIENTRY glGetUniformLocation(GLuint program, const GLchar *name) {
-    GET_CTX_RET(-1);
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return -1;
 
     if (program == 0 || !name) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
@@ -751,7 +753,9 @@ static GLint lookup_builtin_attrib(const GLchar *name) {
 }
 
 GL_APICALL GLint GL_APIENTRY glGetAttribLocation(GLuint program, const GLchar *name) {
-    GET_CTX_RET(-1);
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return -1;
 
     if (program == 0 || !name) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
@@ -784,7 +788,9 @@ GL_APICALL GLint GL_APIENTRY glGetAttribLocation(GLuint program, const GLchar *n
 }
 
 GL_APICALL void GL_APIENTRY glBindAttribLocation(GLuint program, GLuint index, const GLchar *name) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (index >= 16) {  /* GL_MAX_VERTEX_ATTRIBS = 16 */
         sgl_set_error(ctx, GL_INVALID_VALUE);
@@ -841,7 +847,9 @@ GL_APICALL void GL_APIENTRY glBindAttribLocation(GLuint program, GLuint index, c
 
 GL_APICALL void GL_APIENTRY glGetActiveAttrib(GLuint program, GLuint index, GLsizei bufSize,
                                                GLsizei *length, GLint *size, GLenum *type, GLchar *name) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     sgl_program_t *prog = GET_PROGRAM(program);
     if (!prog) {
@@ -887,7 +895,9 @@ GL_APICALL void GL_APIENTRY glGetActiveAttrib(GLuint program, GLuint index, GLsi
 
 GL_APICALL void GL_APIENTRY glGetActiveUniform(GLuint program, GLuint index, GLsizei bufSize,
                                                 GLsizei *length, GLint *size, GLenum *type, GLchar *name) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     sgl_program_t *prog = GET_PROGRAM(program);
     if (!prog) {
@@ -929,7 +939,9 @@ GL_APICALL void GL_APIENTRY glGetActiveUniform(GLuint program, GLuint index, GLs
 }
 
 GL_APICALL void GL_APIENTRY glGetUniformfv(GLuint program, GLint location, GLfloat *params) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (!params) return;
     if (location == -1) return;  /* "not found" location — silently no-op */
@@ -1042,7 +1054,9 @@ GL_APICALL void GL_APIENTRY glGetUniformfv(GLuint program, GLint location, GLflo
 }
 
 GL_APICALL void GL_APIENTRY glGetUniformiv(GLuint program, GLint location, GLint *params) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (!params) return;
     if (location == -1) return;  /* "not found" location — silently no-op */

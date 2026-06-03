@@ -273,7 +273,9 @@ static void sgl_prepare_draw(sgl_context_t *ctx) {
 
 GL_APICALL void GL_APIENTRY glDrawArrays(GLenum mode, GLint first, GLsizei count) {
     sgl_ensure_frame_ready();
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     CHECK_BACKEND();
 
     /* Validate mode FIRST — dEQP expects GL_INVALID_ENUM before any other error */
@@ -356,7 +358,9 @@ GL_APICALL void GL_APIENTRY glDrawArrays(GLenum mode, GLint first, GLsizei count
 
 GL_APICALL void GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum type, const void *indices) {
     sgl_ensure_frame_ready();
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     CHECK_BACKEND();
 
     /* Validate mode FIRST — dEQP expects GL_INVALID_ENUM before any other error */

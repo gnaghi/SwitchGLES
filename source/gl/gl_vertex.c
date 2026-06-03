@@ -12,7 +12,9 @@
 #define SGL_GL_MAX_VERTEX_ATTRIBS 16
 
 GL_APICALL void GL_APIENTRY glEnableVertexAttribArray(GLuint index) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (index >= SGL_GL_MAX_VERTEX_ATTRIBS) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
@@ -24,7 +26,9 @@ GL_APICALL void GL_APIENTRY glEnableVertexAttribArray(GLuint index) {
 }
 
 GL_APICALL void GL_APIENTRY glDisableVertexAttribArray(GLuint index) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (index >= SGL_GL_MAX_VERTEX_ATTRIBS) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
@@ -38,7 +42,9 @@ GL_APICALL void GL_APIENTRY glDisableVertexAttribArray(GLuint index) {
 GL_APICALL void GL_APIENTRY glVertexAttribPointer(GLuint index, GLint size, GLenum type,
                                                    GLboolean normalized, GLsizei stride,
                                                    const void *pointer) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (index >= SGL_GL_MAX_VERTEX_ATTRIBS || size < 1 || size > 4 || stride < 0) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
@@ -70,7 +76,9 @@ GL_APICALL void GL_APIENTRY glVertexAttribPointer(GLuint index, GLint size, GLen
 }
 
 GL_APICALL void GL_APIENTRY glGetVertexAttribfv(GLuint index, GLenum pname, GLfloat *params) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (index >= SGL_GL_MAX_VERTEX_ATTRIBS || !params) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
@@ -111,7 +119,9 @@ GL_APICALL void GL_APIENTRY glGetVertexAttribfv(GLuint index, GLenum pname, GLfl
 }
 
 GL_APICALL void GL_APIENTRY glGetVertexAttribiv(GLuint index, GLenum pname, GLint *params) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (index >= SGL_GL_MAX_VERTEX_ATTRIBS || !params) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
@@ -152,7 +162,9 @@ GL_APICALL void GL_APIENTRY glGetVertexAttribiv(GLuint index, GLenum pname, GLin
 }
 
 GL_APICALL void GL_APIENTRY glGetVertexAttribPointerv(GLuint index, GLenum pname, void **pointer) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (index >= SGL_GL_MAX_VERTEX_ATTRIBS || !pointer) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
@@ -169,7 +181,9 @@ GL_APICALL void GL_APIENTRY glGetVertexAttribPointerv(GLuint index, GLenum pname
 
 /* Vertex Attrib Constant Values */
 GL_APICALL void GL_APIENTRY glVertexAttrib1f(GLuint index, GLfloat x) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     if (index >= SGL_GL_MAX_VERTEX_ATTRIBS) { sgl_set_error(ctx, GL_INVALID_VALUE); return; }
     ctx->vertex_attribs[index].current_value[0] = x;
     ctx->vertex_attribs[index].current_value[1] = 0.0f;
@@ -178,7 +192,9 @@ GL_APICALL void GL_APIENTRY glVertexAttrib1f(GLuint index, GLfloat x) {
 }
 
 GL_APICALL void GL_APIENTRY glVertexAttrib2f(GLuint index, GLfloat x, GLfloat y) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     if (index >= SGL_GL_MAX_VERTEX_ATTRIBS) { sgl_set_error(ctx, GL_INVALID_VALUE); return; }
     ctx->vertex_attribs[index].current_value[0] = x;
     ctx->vertex_attribs[index].current_value[1] = y;
@@ -187,7 +203,9 @@ GL_APICALL void GL_APIENTRY glVertexAttrib2f(GLuint index, GLfloat x, GLfloat y)
 }
 
 GL_APICALL void GL_APIENTRY glVertexAttrib3f(GLuint index, GLfloat x, GLfloat y, GLfloat z) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     if (index >= SGL_GL_MAX_VERTEX_ATTRIBS) { sgl_set_error(ctx, GL_INVALID_VALUE); return; }
     ctx->vertex_attribs[index].current_value[0] = x;
     ctx->vertex_attribs[index].current_value[1] = y;
@@ -196,7 +214,9 @@ GL_APICALL void GL_APIENTRY glVertexAttrib3f(GLuint index, GLfloat x, GLfloat y,
 }
 
 GL_APICALL void GL_APIENTRY glVertexAttrib4f(GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     if (index >= SGL_GL_MAX_VERTEX_ATTRIBS) { sgl_set_error(ctx, GL_INVALID_VALUE); return; }
     ctx->vertex_attribs[index].current_value[0] = x;
     ctx->vertex_attribs[index].current_value[1] = y;

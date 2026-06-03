@@ -7,7 +7,9 @@
 #include <string.h>
 
 GL_APICALL void GL_APIENTRY glGenBuffers(GLsizei n, GLuint *buffers) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (n < 0) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
@@ -27,7 +29,9 @@ GL_APICALL void GL_APIENTRY glGenBuffers(GLsizei n, GLuint *buffers) {
 }
 
 GL_APICALL void GL_APIENTRY glDeleteBuffers(GLsizei n, const GLuint *buffers) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (n < 0) { sgl_set_error(ctx, GL_INVALID_VALUE); return; }
     if (!buffers) return;
@@ -62,7 +66,9 @@ GL_APICALL void GL_APIENTRY glDeleteBuffers(GLsizei n, const GLuint *buffers) {
 }
 
 GL_APICALL GLboolean GL_APIENTRY glIsBuffer(GLuint buffer) {
-    GET_CTX_RET(GL_FALSE);
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return GL_FALSE;
     if (buffer == 0) return GL_FALSE;
     sgl_buffer_t *buf = GET_BUFFER(buffer);
     /* GLES2: name becomes a buffer object only after first glBindBuffer */
@@ -77,7 +83,9 @@ GL_APICALL GLboolean GL_APIENTRY glIsBuffer(GLuint buffer) {
 }
 
 GL_APICALL void GL_APIENTRY glBindBuffer(GLenum target, GLuint buffer) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (buffer != 0 && !GET_BUFFER(buffer)) {
         /* GLES2 spec: binding an unused name implicitly creates the object */
@@ -135,7 +143,9 @@ GL_APICALL void GL_APIENTRY glBindBuffer(GLenum target, GLuint buffer) {
 }
 
 GL_APICALL void GL_APIENTRY glBufferData(GLenum target, GLsizeiptr size, const void *data, GLenum usage) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     CHECK_BACKEND();
 
     /* Validate target */
@@ -216,7 +226,9 @@ GL_APICALL void GL_APIENTRY glBufferData(GLenum target, GLsizeiptr size, const v
 }
 
 GL_APICALL void GL_APIENTRY glBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, const void *data) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     CHECK_BACKEND();
 
     /* Validate target BEFORE checking data pointer — dEQP negative_api

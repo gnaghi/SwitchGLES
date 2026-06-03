@@ -117,7 +117,9 @@ static GLenum sgl_validate_tex_format_type(GLenum format, GLenum type) {
 }
 
 GL_APICALL void GL_APIENTRY glGenTextures(GLsizei n, GLuint *textures) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (n < 0) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
@@ -137,7 +139,9 @@ GL_APICALL void GL_APIENTRY glGenTextures(GLsizei n, GLuint *textures) {
 }
 
 GL_APICALL void GL_APIENTRY glDeleteTextures(GLsizei n, const GLuint *textures) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (n < 0) { sgl_set_error(ctx, GL_INVALID_VALUE); return; }
     if (!textures) return;
@@ -225,7 +229,9 @@ GL_APICALL void GL_APIENTRY glDeleteTextures(GLsizei n, const GLuint *textures) 
 }
 
 GL_APICALL GLboolean GL_APIENTRY glIsTexture(GLuint texture) {
-    GET_CTX_RET(GL_FALSE);
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return GL_FALSE;
     if (texture == 0) return GL_FALSE;
     sgl_texture_t *tex = GET_TEXTURE(texture);
     /* GLES2: name becomes a texture object only after first glBindTexture */
@@ -239,7 +245,9 @@ GL_APICALL GLboolean GL_APIENTRY glIsTexture(GLuint texture) {
 }
 
 GL_APICALL void GL_APIENTRY glActiveTexture(GLenum texture) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (texture < GL_TEXTURE0 || texture >= GL_TEXTURE0 + SGL_MAX_TEXTURE_UNITS) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
@@ -251,7 +259,9 @@ GL_APICALL void GL_APIENTRY glActiveTexture(GLenum texture) {
 }
 
 GL_APICALL void GL_APIENTRY glBindTexture(GLenum target, GLuint texture) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (target != GL_TEXTURE_2D && target != GL_TEXTURE_CUBE_MAP) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
@@ -321,7 +331,9 @@ GL_APICALL void GL_APIENTRY glTexImage2D(GLenum target, GLint level, GLint inter
     /* Ensure frame is ready before GPU work */
     sgl_ensure_frame_ready();
 
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     CHECK_BACKEND();
 
     /* Validate target: GL_TEXTURE_2D or one of the cubemap face targets */
@@ -476,7 +488,9 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint xo
     /* Ensure frame is ready before GPU work */
     sgl_ensure_frame_ready();
 
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     CHECK_BACKEND();
 
     if (target != GL_TEXTURE_2D && !sgl_is_cubemap_face(target)) {
@@ -550,7 +564,9 @@ GL_APICALL void GL_APIENTRY glTexParameterf(GLenum target, GLenum pname, GLfloat
 
 GL_APICALL void GL_APIENTRY glTexParameterfv(GLenum target, GLenum pname, const GLfloat *params) {
     if (!params) {
-        GET_CTX();
+        sgl_context_t *ctx = sgl_get_current_context();
+        if (!ctx)
+            return;
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
@@ -558,7 +574,9 @@ GL_APICALL void GL_APIENTRY glTexParameterfv(GLenum target, GLenum pname, const 
 }
 
 GL_APICALL void GL_APIENTRY glTexParameteri(GLenum target, GLenum pname, GLint param) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
 
     if (target != GL_TEXTURE_2D && target != GL_TEXTURE_CUBE_MAP) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
@@ -611,7 +629,9 @@ GL_APICALL void GL_APIENTRY glTexParameteri(GLenum target, GLenum pname, GLint p
 
 GL_APICALL void GL_APIENTRY glTexParameteriv(GLenum target, GLenum pname, const GLint *params) {
     if (!params) {
-        GET_CTX();
+        sgl_context_t *ctx = sgl_get_current_context();
+        if (!ctx)
+            return;
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
@@ -619,7 +639,9 @@ GL_APICALL void GL_APIENTRY glTexParameteriv(GLenum target, GLenum pname, const 
 }
 
 GL_APICALL void GL_APIENTRY glGetTexParameterfv(GLenum target, GLenum pname, GLfloat *params) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     if (!params) return;
 
     if (target != GL_TEXTURE_2D && target != GL_TEXTURE_CUBE_MAP) {
@@ -651,7 +673,9 @@ GL_APICALL void GL_APIENTRY glGetTexParameterfv(GLenum target, GLenum pname, GLf
 }
 
 GL_APICALL void GL_APIENTRY glGetTexParameteriv(GLenum target, GLenum pname, GLint *params) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     if (!params) return;
 
     if (target != GL_TEXTURE_2D && target != GL_TEXTURE_CUBE_MAP) {
@@ -684,7 +708,9 @@ GL_APICALL void GL_APIENTRY glGetTexParameteriv(GLenum target, GLenum pname, GLi
 GL_APICALL void GL_APIENTRY glGenerateMipmap(GLenum target) {
     sgl_ensure_frame_ready();
 
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     CHECK_BACKEND();
 
     if (target != GL_TEXTURE_2D && target != GL_TEXTURE_CUBE_MAP) {
@@ -732,7 +758,9 @@ GL_APICALL void GL_APIENTRY glGenerateMipmap(GLenum target) {
 
 GL_APICALL void GL_APIENTRY glCopyTexImage2D(GLenum target, GLint level, GLenum internalformat,
                                               GLint x, GLint y, GLsizei width, GLsizei height, GLint border) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     CHECK_BACKEND();
 
     if (target != GL_TEXTURE_2D && !sgl_is_cubemap_face(target)) {
@@ -820,7 +848,9 @@ GL_APICALL void GL_APIENTRY glCopyTexImage2D(GLenum target, GLint level, GLenum 
 
 GL_APICALL void GL_APIENTRY glCopyTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset,
                                                  GLint x, GLint y, GLsizei width, GLsizei height) {
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     CHECK_BACKEND();
 
     if (target != GL_TEXTURE_2D && !sgl_is_cubemap_face(target)) {
@@ -890,7 +920,9 @@ GL_APICALL void GL_APIENTRY glCompressedTexImage2D(GLenum target, GLint level, G
     /* Ensure frame is ready before GPU work */
     sgl_ensure_frame_ready();
 
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     CHECK_BACKEND();
 
     /* Validate target: GL_TEXTURE_2D or cubemap face */
@@ -981,7 +1013,9 @@ GL_APICALL void GL_APIENTRY glCompressedTexSubImage2D(GLenum target, GLint level
     /* Ensure frame is ready before GPU work */
     sgl_ensure_frame_ready();
 
-    GET_CTX();
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
     CHECK_BACKEND();
 
     if (target != GL_TEXTURE_2D && !sgl_is_cubemap_face(target)) {
