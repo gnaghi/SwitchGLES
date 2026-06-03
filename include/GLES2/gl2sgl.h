@@ -126,6 +126,24 @@ GL_APICALL void GL_APIENTRY sglSetPackedUBOSize(GLint stage, GLint binding,
  */
 GL_APICALL GLboolean GL_APIENTRY sgl_load_shader_from_file(GLuint shader, const char *path);
 
+/*
+ * sglShutdown - Release ALL GPU resources, including the deko3d device.
+ *
+ * eglTerminate intentionally keeps the DkDevice alive across
+ * eglInitialize/eglTerminate cycles to avoid GPU address-space fragmentation.
+ * As a result nothing destroys the device during normal EGL teardown. Call
+ * sglShutdown() exactly once, just before the process exits, to destroy any
+ * remaining backends/surfaces and the device, releasing the GPU/nvservices
+ * session.
+ *
+ * Without it, the next process launched on the same console (e.g. via nxlink
+ * without a reboot) inherits a wedged GPU and crashes on first GPU use.
+ *
+ * Safe to call even if EGL was already terminated (it is idempotent and
+ * tolerates a partially or fully torn-down state).
+ */
+GL_APICALL void GL_APIENTRY sglShutdown(void);
+
 #ifdef __cplusplus
 }
 #endif

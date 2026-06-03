@@ -8,6 +8,7 @@
 #include "egl_internal.h"
 #include "context/sgl_state_build.h"
 #include "util/sgl_log.h"
+#include <GLES2/gl2sgl.h>
 #include <string.h>
 #include <stdio.h>
 #include <switch.h>  /* svcSleepThread */
@@ -324,6 +325,53 @@ EGLAPI EGLBoolean EGLAPIENTRY eglTerminate(EGLDisplay dpy) {
     g_sgl.current_display = NULL;
 
     return EGL_TRUE;
+}
+
+GL_APICALL void GL_APIENTRY sglShutdown(void) {
+    /* Final process-exit teardown. eglTerminate keeps the DkDevice alive
+     * (anti-fragmentation), so this is the ONLY place that destroys it and
+     * releases the GPU/nvservices session. Without it, the next process on
+     * the same console inherits a wedged GPU and crashes on first use.
+     * Idempotent and tolerant of a partially torn-down state. */
+
+    /* Tear down any backends/contexts still live (covers the path where
+     * eglTerminate was not called, e.g. an aborted run). Normally these are
+     * already gone and the loops are no-ops. Backends are destroyed before
+     * the device since they hold queues/memblocks owned by it. */
+    for (int i = 0; i < SGL_MAX_CONTEXTS; i++) {
+        if (g_sgl.backends[i]) {
+            dk_backend_destroy(g_sgl.backends[i]);
+            g_sgl.backends[i] = NULL;
+        }
+        if (g_sgl.contexts[i].used) {
+            sgl_context_destroy(&g_sgl.contexts[i]);
+        }
+    }
+
+    for (int i = 0; i < SGL_MAX_SURFACES; i++) {
+        sgl_surface *s = &g_sgl.surfaces[i];
+        if (!s->used) continue;
+        if (s->swapchain) dkSwapchainDestroy(s->swapchain);
+        if (s->framebuffer_memblock) dkMemBlockDestroy(s->framebuffer_memblock);
+        for (int j = 0; j < SGL_FB_NUM; j++) {
+            if (s->depthbuffer_memblocks[j])
+                dkMemBlockDestroy(s->depthbuffer_memblocks[j]);
+        }
+        memset(s, 0, sizeof(*s));
+    }
+
+    /* The device itself — the gap eglTerminate deliberately leaves open. */
+    if (g_sgl.display.device) {
+        dkDeviceDestroy(g_sgl.display.device);
+        g_sgl.display.device = NULL;
+    }
+
+    g_sgl.display.initialized = false;
+    sgl_set_current_context(NULL);
+    g_sgl.current_context = NULL;
+    g_sgl.current_display = NULL;
+
+    SGL_TRACE_EGL("sglShutdown: device destroyed, GPU released");
 }
 
 EGLAPI const char * EGLAPIENTRY eglQueryString(EGLDisplay dpy, EGLint name) {
