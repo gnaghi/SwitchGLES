@@ -49,7 +49,8 @@ static const GLint s_compressed_formats[] = {
 
 GL_APICALL GLenum GL_APIENTRY glGetError(void) {
     sgl_context_t *ctx = sgl_get_current_context();
-    if (!ctx) return GL_NO_ERROR;
+    if (!ctx)
+        return GL_NO_ERROR;
 
     GLenum error = ctx->error;
     ctx->error = GL_NO_ERROR;
@@ -61,30 +62,29 @@ GL_APICALL GLenum GL_APIENTRY glGetError(void) {
 GL_APICALL const GLubyte *GL_APIENTRY glGetString(GLenum name) {
     switch (name) {
         case GL_VENDOR:
-            return (const GLubyte*)"SwitchGLES";
+            return (const GLubyte *)"SwitchGLES";
         case GL_RENDERER:
-            return (const GLubyte*)"deko3d/NVIDIA Tegra X1";
+            return (const GLubyte *)"deko3d/NVIDIA Tegra X1";
         case GL_VERSION:
-            return (const GLubyte*)"OpenGL ES 2.0 SwitchGLES";
+            return (const GLubyte *)"OpenGL ES 2.0 SwitchGLES";
         case GL_SHADING_LANGUAGE_VERSION:
-            return (const GLubyte*)"OpenGL ES GLSL ES 1.00";
+            return (const GLubyte *)"OpenGL ES GLSL ES 1.00";
         case GL_EXTENSIONS:
-            return (const GLubyte*)
-                "GL_OES_rgb8_rgba8 "
-                "GL_OES_depth24 "
-                "GL_OES_packed_depth_stencil "
-                "GL_OES_element_index_uint "
-                "GL_OES_compressed_ETC1_RGB8_texture "
-                "GL_EXT_blend_minmax "
-                "GL_EXT_texture_compression_s3tc "
-                "GL_KHR_texture_compression_astc_ldr "
-                "GL_OES_standard_derivatives "
-                "GL_OES_texture_half_float "
-                "GL_OES_texture_half_float_linear "
-                "GL_EXT_texture_format_BGRA8888 "
-                "GL_ARB_framebuffer_object "
-                "GL_EXT_shader_texture_lod "
-                "GL_EXT_debug_marker";
+            return (const GLubyte *)"GL_OES_rgb8_rgba8 "
+                                    "GL_OES_depth24 "
+                                    "GL_OES_packed_depth_stencil "
+                                    "GL_OES_element_index_uint "
+                                    "GL_OES_compressed_ETC1_RGB8_texture "
+                                    "GL_EXT_blend_minmax "
+                                    "GL_EXT_texture_compression_s3tc "
+                                    "GL_KHR_texture_compression_astc_ldr "
+                                    "GL_OES_standard_derivatives "
+                                    "GL_OES_texture_half_float "
+                                    "GL_OES_texture_half_float_linear "
+                                    "GL_EXT_texture_format_BGRA8888 "
+                                    "GL_ARB_framebuffer_object "
+                                    "GL_EXT_shader_texture_lod "
+                                    "GL_EXT_debug_marker";
         default: {
             sgl_context_t *ctx = sgl_get_current_context();
             if (!ctx)
@@ -102,7 +102,8 @@ GL_APICALL void GL_APIENTRY glGetIntegerv(GLenum pname, GLint *params) {
     if (!ctx)
         return;
 
-    if (!params) return;
+    if (!params)
+        return;
 
     switch (pname) {
         /* Implementation limits */
@@ -117,10 +118,10 @@ GL_APICALL void GL_APIENTRY glGetIntegerv(GLenum pname, GLint *params) {
             params[1] = 8192;
             break;
         case GL_MAX_VERTEX_ATTRIBS:
-            *params = 16;  /* Hardware native limit (MaxNativeAttribs). Internal arrays
-                            * are SGL_MAX_ATTRIBS=32 to support aliased-inactive attributes,
-                            * but the advertised limit must match hardware to prevent GPU crash
-                            * (mat2/3/4 consume multiple slots per attribute). */
+            *params = 16; /* Hardware native limit (MaxNativeAttribs). Internal arrays
+                           * are SGL_MAX_ATTRIBS=32 to support aliased-inactive attributes,
+                           * but the advertised limit must match hardware to prevent GPU crash
+                           * (mat2/3/4 consume multiple slots per attribute). */
             break;
         case GL_MAX_VERTEX_UNIFORM_VECTORS:
             *params = 256;
@@ -421,16 +422,16 @@ GL_APICALL void GL_APIENTRY glGetIntegerv(GLenum pname, GLint *params) {
 
         /* GL 3.0+ queries (used by Spearmint/ioquake3) */
         case GL_MAX_VERTEX_UNIFORM_COMPONENTS:
-            *params = 1024;  /* 256 vec4 * 4 components */
+            *params = 1024; /* 256 vec4 * 4 components */
             break;
         case GL_MAX_SAMPLES:
-            *params = 0;     /* No MSAA */
+            *params = 0; /* No MSAA */
             break;
         case GL_MAX_COLOR_ATTACHMENTS:
             *params = 1;
             break;
         case GL_NUM_EXTENSIONS:
-            *params = 0;     /* Use glGetString(GL_EXTENSIONS) instead */
+            *params = 0; /* Use glGetString(GL_EXTENSIONS) instead */
             break;
 
         default:
@@ -444,7 +445,8 @@ GL_APICALL void GL_APIENTRY glGetBooleanv(GLenum pname, GLboolean *params) {
     if (!ctx)
         return;
 
-    if (!params) return;
+    if (!params)
+        return;
 
     switch (pname) {
         case GL_DEPTH_TEST:
@@ -506,12 +508,18 @@ GL_APICALL void GL_APIENTRY glGetBooleanv(GLenum pname, GLboolean *params) {
                 case GL_ALIASED_LINE_WIDTH_RANGE: {
                     int fcount = 1;
                     switch (pname) {
-                        case GL_DEPTH_RANGE: case GL_ALIASED_POINT_SIZE_RANGE:
+                        case GL_DEPTH_RANGE:
+                        case GL_ALIASED_POINT_SIZE_RANGE:
                         case GL_ALIASED_LINE_WIDTH_RANGE:
-                            fcount = 2; break;
-                        case GL_COLOR_CLEAR_VALUE: case GL_BLEND_COLOR:
-                            fcount = 4; break;
-                        default: fcount = 1; break;
+                            fcount = 2;
+                            break;
+                        case GL_COLOR_CLEAR_VALUE:
+                        case GL_BLEND_COLOR:
+                            fcount = 4;
+                            break;
+                        default:
+                            fcount = 1;
+                            break;
                     }
                     GLfloat ftemp[4] = {0};
                     glGetFloatv(pname, ftemp);
@@ -523,13 +531,19 @@ GL_APICALL void GL_APIENTRY glGetBooleanv(GLenum pname, GLboolean *params) {
                     /* Integer states → bool via glGetIntegerv */
                     int count = 1;
                     switch (pname) {
-                        case GL_VIEWPORT: case GL_SCISSOR_BOX:
-                            count = 4; break;
+                        case GL_VIEWPORT:
+                        case GL_SCISSOR_BOX:
+                            count = 4;
+                            break;
                         case GL_MAX_VIEWPORT_DIMS:
-                            count = 2; break;
+                            count = 2;
+                            break;
                         case GL_COMPRESSED_TEXTURE_FORMATS:
-                            count = (int)NUM_COMPRESSED_FORMATS; break;
-                        default: count = 1; break;
+                            count = (int)NUM_COMPRESSED_FORMATS;
+                            break;
+                        default:
+                            count = 1;
+                            break;
                     }
                     GLint temp[32] = {0};
                     glGetIntegerv(pname, temp);
@@ -548,7 +562,8 @@ GL_APICALL void GL_APIENTRY glGetFloatv(GLenum pname, GLfloat *params) {
     if (!ctx)
         return;
 
-    if (!params) return;
+    if (!params)
+        return;
 
     switch (pname) {
         /* Float-native states */
@@ -649,13 +664,20 @@ GL_APICALL void GL_APIENTRY glGetFloatv(GLenum pname, GLfloat *params) {
             /* Fall through to glGetIntegerv for integer states → float conversion */
             int count = 1;
             switch (pname) {
-                case GL_VIEWPORT: case GL_SCISSOR_BOX: case GL_COLOR_WRITEMASK:
-                    count = 4; break;
+                case GL_VIEWPORT:
+                case GL_SCISSOR_BOX:
+                case GL_COLOR_WRITEMASK:
+                    count = 4;
+                    break;
                 case GL_MAX_VIEWPORT_DIMS:
-                    count = 2; break;
+                    count = 2;
+                    break;
                 case GL_COMPRESSED_TEXTURE_FORMATS:
-                    count = (int)NUM_COMPRESSED_FORMATS; break;
-                default: count = 1; break;
+                    count = (int)NUM_COMPRESSED_FORMATS;
+                    break;
+                default:
+                    count = 1;
+                    break;
             }
             GLint temp[32] = {0};
             glGetIntegerv(pname, temp);
@@ -694,8 +716,7 @@ GL_APICALL void GL_APIENTRY glHint(GLenum target, GLenum mode) {
         return;
 
     /* Validate target */
-    if (target != GL_GENERATE_MIPMAP_HINT &&
-        target != GL_FRAGMENT_SHADER_DERIVATIVE_HINT_OES) {
+    if (target != GL_GENERATE_MIPMAP_HINT && target != GL_FRAGMENT_SHADER_DERIVATIVE_HINT_OES) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
     }
@@ -777,7 +798,8 @@ GL_APICALL void GL_APIENTRY glGetBufferParameteriv(GLenum target, GLenum pname, 
     if (!ctx)
         return;
 
-    if (!params) return;
+    if (!params)
+        return;
 
     GLuint buffer_id = 0;
     if (target == GL_ARRAY_BUFFER) {
@@ -820,7 +842,8 @@ GL_APICALL void GL_APIENTRY glReleaseShaderCompiler(void) {
 }
 
 GL_APICALL void GL_APIENTRY glShaderBinary(GLsizei count, const GLuint *shaders,
-                                            GLenum binaryformat, const void *binary, GLsizei length) {
+                                           GLenum binaryformat, const void *binary,
+                                           GLsizei length) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
@@ -844,7 +867,8 @@ GL_APICALL void GL_APIENTRY glShaderBinary(GLsizei count, const GLuint *shaders,
     /* Load precompiled DKSH shader binary into each specified shader */
     for (GLsizei i = 0; i < count; i++) {
         sgl_shader_t *shader = GET_SHADER(shaders[i]);
-        if (!shader) continue;
+        if (!shader)
+            continue;
 
         if (ctx->backend && ctx->backend->ops->load_shader_binary) {
             if (ctx->backend->ops->load_shader_binary(ctx->backend, shaders[i], binary, length)) {
@@ -855,7 +879,7 @@ GL_APICALL void GL_APIENTRY glShaderBinary(GLsizei count, const GLuint *shaders,
 }
 
 GL_APICALL void GL_APIENTRY glGetShaderPrecisionFormat(GLenum shadertype, GLenum precisiontype,
-                                                        GLint *range, GLint *precision) {
+                                                       GLint *range, GLint *precision) {
     /* Validate shadertype */
     if (shadertype != GL_VERTEX_SHADER && shadertype != GL_FRAGMENT_SHADER) {
         sgl_context_t *ctx = sgl_get_current_context();
@@ -870,14 +894,22 @@ GL_APICALL void GL_APIENTRY glGetShaderPrecisionFormat(GLenum shadertype, GLenum
         case GL_LOW_FLOAT:
         case GL_MEDIUM_FLOAT:
         case GL_HIGH_FLOAT:
-            if (range) { range[0] = 127; range[1] = 127; }
-            if (precision) *precision = 23;
+            if (range) {
+                range[0] = 127;
+                range[1] = 127;
+            }
+            if (precision)
+                *precision = 23;
             break;
         case GL_LOW_INT:
         case GL_MEDIUM_INT:
         case GL_HIGH_INT:
-            if (range) { range[0] = 31; range[1] = 30; }
-            if (precision) *precision = 0;
+            if (range) {
+                range[0] = 31;
+                range[1] = 30;
+            }
+            if (precision)
+                *precision = 0;
             break;
         default: {
             sgl_context_t *ctx = sgl_get_current_context();
@@ -903,28 +935,33 @@ GL_APICALL void GL_APIENTRY glSampleCoverage(GLfloat value, GLboolean invert) {
 /* GL 3.0 stub (needed by Spearmint, not used in GLES2 path) */
 
 GL_APICALL const GLubyte *GL_APIENTRY glGetStringi(GLenum name, GLuint index) {
-    (void)name; (void)index;
+    (void)name;
+    (void)index;
     return (const GLubyte *)"";
 }
 
 /* Fixed-function stubs (loaded by Spearmint QGL_1_1_PROCS but never called by renderergl2) */
 
 GL_APICALL void GL_APIENTRY glFogf(GLenum pname, GLfloat param) {
-    (void)pname; (void)param;
+    (void)pname;
+    (void)param;
 }
 
 GL_APICALL void GL_APIENTRY glFogfv(GLenum pname, const GLfloat *params) {
-    (void)pname; (void)params;
+    (void)pname;
+    (void)params;
 }
 
 /* GL_EXT_debug_marker — no-op stubs (spec says these must never report errors) */
 
 GL_APICALL void GL_APIENTRY glInsertEventMarkerEXT(GLsizei length, const GLchar *marker) {
-    (void)length; (void)marker;
+    (void)length;
+    (void)marker;
 }
 
 GL_APICALL void GL_APIENTRY glPushGroupMarkerEXT(GLsizei length, const GLchar *marker) {
-    (void)length; (void)marker;
+    (void)length;
+    (void)marker;
 }
 
 GL_APICALL void GL_APIENTRY glPopGroupMarkerEXT(void) {

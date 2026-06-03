@@ -27,12 +27,9 @@ bool sgl_state_blend_set_enabled(sgl_state_blend_t *state, bool enabled) {
     return true;
 }
 
-bool sgl_state_blend_set_func(sgl_state_blend_t *state,
-                               GLenum src_rgb, GLenum dst_rgb,
-                               GLenum src_alpha, GLenum dst_alpha) {
-    if (state->src_rgb == src_rgb &&
-        state->dst_rgb == dst_rgb &&
-        state->src_alpha == src_alpha &&
+bool sgl_state_blend_set_func(sgl_state_blend_t *state, GLenum src_rgb, GLenum dst_rgb,
+                              GLenum src_alpha, GLenum dst_alpha) {
+    if (state->src_rgb == src_rgb && state->dst_rgb == dst_rgb && state->src_alpha == src_alpha &&
         state->dst_alpha == dst_alpha) {
         return false;
     }
@@ -43,8 +40,7 @@ bool sgl_state_blend_set_func(sgl_state_blend_t *state,
     return true;
 }
 
-bool sgl_state_blend_set_equation(sgl_state_blend_t *state,
-                                   GLenum rgb, GLenum alpha) {
+bool sgl_state_blend_set_equation(sgl_state_blend_t *state, GLenum rgb, GLenum alpha) {
     if (state->equation_rgb == rgb && state->equation_alpha == alpha) {
         return false;
     }

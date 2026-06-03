@@ -17,7 +17,8 @@ static void sgl_shader_try_deferred_delete(sgl_context_t *ctx, GLuint shader);
 #include <malloc.h>
 #include "../transpiler/glsl_transpiler.h"
 #include "gl_shader_cache.h"
-extern GLboolean sglRegisterPackedUniform(const GLchar *name, GLint stage, GLint binding, GLint byte_offset);
+extern GLboolean sglRegisterPackedUniform(const GLchar *name, GLint stage, GLint binding,
+                                          GLint byte_offset);
 extern void sglSetPackedUBOSize(GLint stage, GLint binding, GLint size);
 #endif
 
@@ -41,11 +42,15 @@ GL_APICALL GLuint GL_APIENTRY glCreateProgram(void) {
 /* Helper: actually free a program's resources (detach shaders, notify backend, release slot) */
 static void sgl_program_do_free(sgl_context_t *ctx, GLuint program) {
     sgl_program_t *prog = GET_PROGRAM(program);
-    if (!prog) return;
+    if (!prog)
+        return;
 
-    if (prog->info_log) { free(prog->info_log); prog->info_log = NULL; }
+    if (prog->info_log) {
+        free(prog->info_log);
+        prog->info_log = NULL;
+    }
 
-    GLuint attached[2] = { prog->vertex_shader, prog->fragment_shader };
+    GLuint attached[2] = {prog->vertex_shader, prog->fragment_shader};
     prog->vertex_shader = 0;
     prog->fragment_shader = 0;
 
@@ -56,9 +61,11 @@ static void sgl_program_do_free(sgl_context_t *ctx, GLuint program) {
     sgl_res_mgr_free_program(&ctx->res_mgr, program);
 
     for (int i = 0; i < 2; i++) {
-        if (attached[i] == 0) continue;
+        if (attached[i] == 0)
+            continue;
         sgl_shader_t *sh = GET_SHADER(attached[i]);
-        if (sh && sh->attach_count > 0) sh->attach_count--;
+        if (sh && sh->attach_count > 0)
+            sh->attach_count--;
         sgl_shader_try_deferred_delete(ctx, attached[i]);
     }
 }
@@ -67,7 +74,8 @@ GL_APICALL void GL_APIENTRY glDeleteProgram(GLuint program) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
-    if (program == 0) return;
+    if (program == 0)
+        return;
 
     sgl_program_t *prog = GET_PROGRAM(program);
     if (!prog) {
@@ -97,8 +105,10 @@ GL_APICALL GLboolean GL_APIENTRY glIsProgram(GLuint program) {
 /* Helper: actually free a shader (called when attach_count reaches 0 and delete_pending) */
 static void sgl_shader_try_deferred_delete(sgl_context_t *ctx, GLuint shader) {
     sgl_shader_t *sh = GET_SHADER(shader);
-    if (!sh) return;
-    if (!sh->delete_pending || sh->attach_count > 0) return;
+    if (!sh)
+        return;
+    if (!sh->delete_pending || sh->attach_count > 0)
+        return;
 
     if (ctx->backend && ctx->backend->ops->delete_shader) {
         ctx->backend->ops->delete_shader(ctx->backend, shader);
@@ -169,8 +179,10 @@ GL_APICALL void GL_APIENTRY glDetachShader(GLuint program, GLuint shader) {
         return;
     }
 
-    if (prog->vertex_shader == shader) prog->vertex_shader = 0;
-    if (prog->fragment_shader == shader) prog->fragment_shader = 0;
+    if (prog->vertex_shader == shader)
+        prog->vertex_shader = 0;
+    if (prog->fragment_shader == shader)
+        prog->fragment_shader = 0;
 
     if (sh->attach_count > 0) {
         sh->attach_count--;
@@ -186,9 +198,8 @@ GL_APICALL void GL_APIENTRY glDetachShader(GLuint program, GLuint shader) {
 /* Populate program metadata from Mesa-compiled shader reflection:
  * uniforms, samplers, sampler arrays, attribs, packed UBOs and dual-stage
  * mirrors. Extracted verbatim from glLinkProgram's Mesa link path. */
-static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog,
-                                  sgl_shader_t *vs_sh, sgl_shader_t *fs_sh,
-                                  bool vs_mesa, bool fs_mesa) {
+static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog, sgl_shader_t *vs_sh,
+                                  sgl_shader_t *fs_sh, bool vs_mesa, bool fs_mesa) {
     SGL_TRACE_SHADER("linking Mesa-compiled shaders for program %u", program);
 
     prog->num_program_uniforms = 0;
@@ -199,7 +210,8 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog,
     for (int stage_idx = 0; stage_idx < 2; stage_idx++) {
         sgl_shader_t *sh = (stage_idx == 0) ? vs_sh : fs_sh;
         bool is_mesa = (stage_idx == 0) ? vs_mesa : fs_mesa;
-        if (!is_mesa || !sh->mesa_meta) continue;
+        if (!is_mesa || !sh->mesa_meta)
+            continue;
 
         sgl_mesa_metadata_t *meta = sh->mesa_meta;
 
@@ -218,20 +230,20 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog,
 
         /* Store uniforms */
         for (int i = 0; i < meta->num_uniforms && i < SGL_MESA_MAX_UNIFORMS; i++) {
-            if (prog->num_program_uniforms >= SGL_MAX_PROGRAM_UNIFORMS) break;
+            if (prog->num_program_uniforms >= SGL_MAX_PROGRAM_UNIFORMS)
+                break;
             int slot = prog->num_program_uniforms++;
-            strncpy(prog->program_uniforms[slot].name,
-                    meta->uniforms[i].name, SGL_ATTRIB_NAME_MAX - 1);
+            strncpy(prog->program_uniforms[slot].name, meta->uniforms[i].name,
+                    SGL_ATTRIB_NAME_MAX - 1);
             prog->program_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
             /* For Mesa, GLES name = uniform name (no transpiler renaming) */
-            strncpy(prog->program_uniforms[slot].gles_name,
-                    meta->uniforms[i].name, SGL_ATTRIB_NAME_MAX - 1);
+            strncpy(prog->program_uniforms[slot].gles_name, meta->uniforms[i].name,
+                    SGL_ATTRIB_NAME_MAX - 1);
             prog->program_uniforms[slot].gles_name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-            prog->program_uniforms[slot].location = (GLint)(
-                SGL_LOC_PACKED_FLAG |
-                ((unsigned)stage_idx << SGL_LOC_STAGE_SHIFT) |
-                ((unsigned)0 << SGL_LOC_BINDING_SHIFT) |
-                (unsigned)meta->uniforms[i].offset);
+            prog->program_uniforms[slot].location =
+                (GLint)(SGL_LOC_PACKED_FLAG | ((unsigned)stage_idx << SGL_LOC_STAGE_SHIFT) |
+                        ((unsigned)0 << SGL_LOC_BINDING_SHIFT) |
+                        (unsigned)meta->uniforms[i].offset);
             prog->program_uniforms[slot].gl_type = meta->uniforms[i].gl_type;
             prog->program_uniforms[slot].array_size =
                 meta->uniforms[i].array_elements > 0 ? meta->uniforms[i].array_elements : 0;
@@ -263,21 +275,22 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog,
                     break;
                 }
             }
-            if (already) continue;
-            if (prog->num_samplers >= SGL_MAX_PROGRAM_SAMPLERS) break;
+            if (already)
+                continue;
+            if (prog->num_samplers >= SGL_MAX_PROGRAM_SAMPLERS)
+                break;
             int slot = prog->num_samplers++;
-            strncpy(prog->samplers[slot].name,
-                    meta->samplers[i].name, SGL_ATTRIB_NAME_MAX - 1);
+            strncpy(prog->samplers[slot].name, meta->samplers[i].name, SGL_ATTRIB_NAME_MAX - 1);
             prog->samplers[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-            strncpy(prog->samplers[slot].gles_name,
-                    meta->samplers[i].name, SGL_ATTRIB_NAME_MAX - 1);
+            strncpy(prog->samplers[slot].gles_name, meta->samplers[i].name,
+                    SGL_ATTRIB_NAME_MAX - 1);
             prog->samplers[slot].gles_name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
             prog->samplers[slot].shader_binding = meta->samplers[i].binding;
             if (stage_idx == 0)
                 prog->samplers[slot].vs_shader_binding = meta->samplers[i].binding;
             else
                 prog->samplers[slot].vs_shader_binding = -1;
-            prog->samplers[slot].tex_unit = 0; /* GLES2 spec default */
+            prog->samplers[slot].tex_unit = 0;     /* GLES2 spec default */
             prog->samplers[slot].array_index = -1; /* set below if array */
             prog->samplers[slot].array_total = 0;
             prog->samplers[slot].gl_type = meta->samplers[i].gl_type;
@@ -291,9 +304,10 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog,
      * This enables glGetUniformLocation("u_var") → first element,
      * and glGetUniformLocation("u_var[N]") → Nth element. */
     for (int i = 0; i < prog->num_samplers; i++) {
-        if (!prog->samplers[i].used) continue;
-        const char *sn = prog->samplers[i].gles_name[0]
-            ? prog->samplers[i].gles_name : prog->samplers[i].name;
+        if (!prog->samplers[i].used)
+            continue;
+        const char *sn =
+            prog->samplers[i].gles_name[0] ? prog->samplers[i].gles_name : prog->samplers[i].name;
         /* Use strrchr to find LAST bracket — avoids confusing struct
          * array subscripts (u_var[0].m0) with sampler arrays (u_arr[0]).
          * A terminal bracket (no dot after) means sampler array element. */
@@ -308,11 +322,13 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog,
         size_t base_len = br - sn;
         int total = 0;
         for (int j = 0; j < prog->num_samplers; j++) {
-            if (!prog->samplers[j].used) continue;
-            const char *jn = prog->samplers[j].gles_name[0]
-                ? prog->samplers[j].gles_name : prog->samplers[j].name;
+            if (!prog->samplers[j].used)
+                continue;
+            const char *jn = prog->samplers[j].gles_name[0] ? prog->samplers[j].gles_name
+                                                            : prog->samplers[j].name;
             const char *jbr = strrchr(jn, '[');
-            if (!jbr || strchr(jbr, '.') != NULL) continue;
+            if (!jbr || strchr(jbr, '.') != NULL)
+                continue;
             size_t jbase_len = jbr - jn;
             if (jbase_len == base_len && strncmp(sn, jn, base_len) == 0)
                 total++;
@@ -325,8 +341,8 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog,
         sgl_mesa_metadata_t *meta = vs_sh->mesa_meta;
         /* GL_ACTIVE_ATTRIBUTES = count of attributes in the compiled shader,
          * NOT the total num_attrib_bindings (which includes inactive user-bound). */
-        prog->num_active_attribs = (meta->num_inputs < SGL_MESA_MAX_INPUTS)
-            ? meta->num_inputs : SGL_MESA_MAX_INPUTS;
+        prog->num_active_attribs =
+            (meta->num_inputs < SGL_MESA_MAX_INPUTS) ? meta->num_inputs : SGL_MESA_MAX_INPUTS;
         /* Clear in_shader flag and linked_location for all existing bindings */
         for (int j = 0; j < prog->num_attrib_bindings; j++) {
             prog->attrib_bindings[j].in_shader = false;
@@ -335,8 +351,7 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog,
         for (int i = 0; i < meta->num_inputs && i < SGL_MESA_MAX_INPUTS; i++) {
             bool found = false;
             for (int j = 0; j < prog->num_attrib_bindings; j++) {
-                if (strcmp(prog->attrib_bindings[j].name,
-                           meta->inputs[i].name) == 0) {
+                if (strcmp(prog->attrib_bindings[j].name, meta->inputs[i].name) == 0) {
                     prog->attrib_bindings[j].index = meta->inputs[i].location;
                     prog->attrib_bindings[j].linked_location = (GLint)meta->inputs[i].location;
                     prog->attrib_bindings[j].gl_type = meta->inputs[i].gl_type;
@@ -347,8 +362,8 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog,
             }
             if (!found && prog->num_attrib_bindings < SGL_MAX_ATTRIB_BINDINGS) {
                 int slot = prog->num_attrib_bindings++;
-                strncpy(prog->attrib_bindings[slot].name,
-                        meta->inputs[i].name, SGL_ATTRIB_NAME_MAX - 1);
+                strncpy(prog->attrib_bindings[slot].name, meta->inputs[i].name,
+                        SGL_ATTRIB_NAME_MAX - 1);
                 prog->attrib_bindings[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
                 prog->attrib_bindings[slot].index = meta->inputs[i].location;
                 prog->attrib_bindings[slot].linked_location = (GLint)meta->inputs[i].location;
@@ -365,7 +380,8 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog,
         {
             int active_count = 0;
             for (int j = 0; j < prog->num_attrib_bindings; j++) {
-                if (prog->attrib_bindings[j].in_shader) active_count++;
+                if (prog->attrib_bindings[j].in_shader)
+                    active_count++;
             }
             prog->num_active_attribs = active_count;
         }
@@ -376,9 +392,8 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog,
         for (int binding = 0; binding < SGL_MAX_PACKED_UBOS; binding++) {
             int ubo_size = prog->packed_ubo_sizes[stage][binding];
             if (ubo_size > 0 && ubo_size <= SGL_MAX_PACKED_UBO_SIZE) {
-                sgl_packed_ubo_t *packed = (stage == 0)
-                    ? &prog->packed_vertex[binding]
-                    : &prog->packed_fragment[binding];
+                sgl_packed_ubo_t *packed =
+                    (stage == 0) ? &prog->packed_vertex[binding] : &prog->packed_fragment[binding];
                 if (!packed->valid) {
                     packed->size = ubo_size;
                     packed->valid = true;
@@ -390,7 +405,8 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog,
                         sgl_shader_t *sh = (stage == 0) ? vs_sh : fs_sh;
                         if (sh && sh->mesa_meta && sh->mesa_meta->initial_data) {
                             uint32_t copy = sh->mesa_meta->initial_data_size;
-                            if (copy > (uint32_t)ubo_size) copy = (uint32_t)ubo_size;
+                            if (copy > (uint32_t)ubo_size)
+                                copy = (uint32_t)ubo_size;
                             memcpy(packed->data, sh->mesa_meta->initial_data, copy);
                         }
                     }
@@ -402,19 +418,24 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog,
     /* Set up dual-stage mirrors for uniforms present in both VS and FS */
     prog->num_packed_mirrors = 0;
     for (int i = 0; i < prog->num_program_uniforms; i++) {
-        if (!prog->program_uniforms[i].used) continue;
+        if (!prog->program_uniforms[i].used)
+            continue;
         GLint iloc = prog->program_uniforms[i].location;
-        if (!(iloc & SGL_LOC_PACKED_FLAG)) continue;
+        if (!(iloc & SGL_LOC_PACKED_FLAG))
+            continue;
         int i_stage = (iloc >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
-        if (i_stage != 0) continue;
+        if (i_stage != 0)
+            continue;
         for (int j = 0; j < prog->num_program_uniforms; j++) {
-            if (j == i || !prog->program_uniforms[j].used) continue;
+            if (j == i || !prog->program_uniforms[j].used)
+                continue;
             GLint jloc = prog->program_uniforms[j].location;
-            if (!(jloc & SGL_LOC_PACKED_FLAG)) continue;
+            if (!(jloc & SGL_LOC_PACKED_FLAG))
+                continue;
             int j_stage = (jloc >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
-            if (j_stage == 0) continue;
-            if (strcmp(prog->program_uniforms[j].name,
-                      prog->program_uniforms[i].name) == 0) {
+            if (j_stage == 0)
+                continue;
+            if (strcmp(prog->program_uniforms[j].name, prog->program_uniforms[i].name) == 0) {
                 if (prog->num_packed_mirrors < SGL_MAX_PACKED_MIRRORS) {
                     prog->packed_mirrors[prog->num_packed_mirrors].primary = iloc;
                     prog->packed_mirrors[prog->num_packed_mirrors].mirror = jloc;
@@ -438,17 +459,18 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog,
     for (int stage_idx = 0; stage_idx < 2; stage_idx++) {
         sgl_shader_t *sh = (stage_idx == 0) ? vs_sh : fs_sh;
         bool is_mesa = (stage_idx == 0) ? vs_mesa : fs_mesa;
-        if (!is_mesa || !sh->mesa_meta) continue;
+        if (!is_mesa || !sh->mesa_meta)
+            continue;
         int dr_off = sh->mesa_meta->depth_range_offset;
-        if (dr_off < 0) continue;
+        if (dr_off < 0)
+            continue;
         prog->has_depth_range = true;
         /* Build packed location: stage | binding 0 | byte offset */
         GLint *dr_locs = (stage_idx == 0) ? prog->depth_range_loc : prog->depth_range_loc_fs;
         for (int d = 0; d < 3; d++) {
-            dr_locs[d] = (GLint)(SGL_LOC_PACKED_FLAG
-                | ((uint32_t)stage_idx << SGL_LOC_STAGE_SHIFT)
-                | (0u << SGL_LOC_BINDING_SHIFT)
-                | (uint32_t)(dr_off + d * 4));
+            dr_locs[d] =
+                (GLint)(SGL_LOC_PACKED_FLAG | ((uint32_t)stage_idx << SGL_LOC_STAGE_SHIFT) |
+                        (0u << SGL_LOC_BINDING_SHIFT) | (uint32_t)(dr_off + d * 4));
         }
     }
 
@@ -456,7 +478,10 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog,
      * Mesa compiles each stage independently — cross-stage type mismatches
      * (e.g. VS "varying float var" vs FS "varying vec2 var") are not caught. */
     if (vs_mesa && fs_mesa && vs_sh->source && fs_sh->source) {
-        typedef struct { char name[64]; char type[32]; } vdecl_t;
+        typedef struct {
+            char name[64];
+            char type[32];
+        } vdecl_t;
         vdecl_t vs_v[64], fs_v[64];
         int vs_nv = 0, fs_nv = 0;
         for (int pass = 0; pass < 2; pass++) {
@@ -465,25 +490,35 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog,
             int *nv = (pass == 0) ? &vs_nv : &fs_nv;
             const char *ln = src;
             while (ln && *ln && *nv < 64) {
-                while (*ln == ' ' || *ln == '\t') ln++;
+                while (*ln == ' ' || *ln == '\t')
+                    ln++;
                 const char *p = ln;
                 if (strncmp(p, "varying", 7) == 0 && (p[7] == ' ' || p[7] == '\t')) {
                     p += 7;
-                    while (*p == ' ' || *p == '\t') p++;
-                    if (strncmp(p, "lowp ", 5) == 0 || strncmp(p, "mediump ", 8) == 0 || strncmp(p, "highp ", 6) == 0) {
-                        while (*p && *p != ' ' && *p != '\t') p++;
-                        while (*p == ' ' || *p == '\t') p++;
+                    while (*p == ' ' || *p == '\t')
+                        p++;
+                    if (strncmp(p, "lowp ", 5) == 0 || strncmp(p, "mediump ", 8) == 0 ||
+                        strncmp(p, "highp ", 6) == 0) {
+                        while (*p && *p != ' ' && *p != '\t')
+                            p++;
+                        while (*p == ' ' || *p == '\t')
+                            p++;
                     }
                     const char *ts = p;
-                    while (*p && *p != ' ' && *p != '\t' && *p != ';') p++;
+                    while (*p && *p != ' ' && *p != '\t' && *p != ';')
+                        p++;
                     size_t tl = p - ts;
-                    while (*p == ' ' || *p == '\t') p++;
+                    while (*p == ' ' || *p == '\t')
+                        p++;
                     const char *ns = p;
-                    while (*p && *p != ' ' && *p != '\t' && *p != ';' && *p != '[') p++;
+                    while (*p && *p != ' ' && *p != '\t' && *p != ';' && *p != '[')
+                        p++;
                     size_t nl = p - ns;
                     if (tl > 0 && tl < 32 && nl > 0 && nl < 64) {
-                        memcpy(v[*nv].type, ts, tl); v[*nv].type[tl] = '\0';
-                        memcpy(v[*nv].name, ns, nl); v[*nv].name[nl] = '\0';
+                        memcpy(v[*nv].type, ts, tl);
+                        v[*nv].type[tl] = '\0';
+                        memcpy(v[*nv].name, ns, nl);
+                        v[*nv].name[nl] = '\0';
                         (*nv)++;
                     }
                 }
@@ -496,7 +531,8 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog,
                 if (strcmp(vs_v[i].name, fs_v[j].name) == 0 &&
                     strcmp(vs_v[i].type, fs_v[j].type) != 0) {
                     prog->linked = false;
-                    if (prog->info_log) free(prog->info_log);
+                    if (prog->info_log)
+                        free(prog->info_log);
                     char msg[256];
                     snprintf(msg, sizeof(msg), "varying '%s' type mismatch: VS=%s, FS=%s",
                              vs_v[i].name, vs_v[i].type, fs_v[j].type);
@@ -510,10 +546,11 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog,
     /* Populate active_uniforms[] */
     prog->num_active_uniforms = 0;
     for (int i = 0; i < prog->num_program_uniforms; i++) {
-        if (!prog->program_uniforms[i].used) continue;
+        if (!prog->program_uniforms[i].used)
+            continue;
         const char *uni_name = prog->program_uniforms[i].gles_name[0]
-            ? prog->program_uniforms[i].gles_name
-            : prog->program_uniforms[i].name;
+                                   ? prog->program_uniforms[i].gles_name
+                                   : prog->program_uniforms[i].name;
         int arr = prog->program_uniforms[i].array_size;
         /* Deduplicate — Mesa stores array names with [0] suffix already */
         bool already = false;
@@ -528,25 +565,27 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog,
         for (int j = 0; j < prog->num_active_uniforms; j++) {
             if (strcmp(prog->active_uniforms[j].name, uni_name) == 0 ||
                 (arr > 1 && strcmp(prog->active_uniforms[j].name, uni_name_arr) == 0)) {
-                already = true; break;
+                already = true;
+                break;
             }
         }
-        if (already) continue;
-        if (prog->num_active_uniforms >= SGL_MAX_UNIFORMS * 2) break;
+        if (already)
+            continue;
+        if (prog->num_active_uniforms >= SGL_MAX_UNIFORMS * 2)
+            break;
         int slot = prog->num_active_uniforms++;
         if (arr > 1) {
             if (strchr(uni_name, '['))
                 strncpy(prog->active_uniforms[slot].name, uni_name, SGL_ATTRIB_NAME_MAX - 1);
             else
-                snprintf(prog->active_uniforms[slot].name, SGL_ATTRIB_NAME_MAX,
-                         "%s[0]", uni_name);
+                snprintf(prog->active_uniforms[slot].name, SGL_ATTRIB_NAME_MAX, "%s[0]", uni_name);
             prog->active_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
         } else {
             strncpy(prog->active_uniforms[slot].name, uni_name, SGL_ATTRIB_NAME_MAX - 1);
             prog->active_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
         }
-        prog->active_uniforms[slot].type = prog->program_uniforms[i].gl_type
-            ? prog->program_uniforms[i].gl_type : GL_FLOAT_VEC4;
+        prog->active_uniforms[slot].type =
+            prog->program_uniforms[i].gl_type ? prog->program_uniforms[i].gl_type : GL_FLOAT_VEC4;
         prog->active_uniforms[slot].size = (arr > 1) ? arr : 1;
         prog->active_uniforms[slot].location = prog->program_uniforms[i].location;
         prog->active_uniforms[slot].element_stride = prog->program_uniforms[i].element_stride;
@@ -556,13 +595,15 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog,
      * For sampler arrays, add only one entry (first element) with size = array_total.
      * Per GLES spec, glGetActiveUniform returns "s[0]" with size=N for sampler arrays. */
     for (int i = 0; i < prog->num_samplers; i++) {
-        if (!prog->samplers[i].used) continue;
-        if (prog->num_active_uniforms >= SGL_MAX_UNIFORMS * 2) break;
+        if (!prog->samplers[i].used)
+            continue;
+        if (prog->num_active_uniforms >= SGL_MAX_UNIFORMS * 2)
+            break;
         /* Skip non-first elements of sampler arrays */
         if (prog->samplers[i].array_total > 0 && prog->samplers[i].array_index > 0)
             continue;
-        const char *samp_name = prog->samplers[i].gles_name[0]
-            ? prog->samplers[i].gles_name : prog->samplers[i].name;
+        const char *samp_name =
+            prog->samplers[i].gles_name[0] ? prog->samplers[i].gles_name : prog->samplers[i].name;
         /* For arrays, ensure the name has [0] suffix */
         char name_buf[SGL_ATTRIB_NAME_MAX];
         if (prog->samplers[i].array_total > 0 && !strchr(samp_name, '[')) {
@@ -572,32 +613,33 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog,
         bool already = false;
         for (int j = 0; j < prog->num_active_uniforms; j++) {
             if (strcmp(prog->active_uniforms[j].name, samp_name) == 0) {
-                already = true; break;
+                already = true;
+                break;
             }
         }
-        if (already) continue;
+        if (already)
+            continue;
         int slot = prog->num_active_uniforms++;
         strncpy(prog->active_uniforms[slot].name, samp_name, SGL_ATTRIB_NAME_MAX - 1);
         prog->active_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-        prog->active_uniforms[slot].type = prog->samplers[i].gl_type
-            ? prog->samplers[i].gl_type : GL_SAMPLER_2D;
-        prog->active_uniforms[slot].size = prog->samplers[i].array_total > 0
-            ? prog->samplers[i].array_total : 1;
+        prog->active_uniforms[slot].type =
+            prog->samplers[i].gl_type ? prog->samplers[i].gl_type : GL_SAMPLER_2D;
+        prog->active_uniforms[slot].size =
+            prog->samplers[i].array_total > 0 ? prog->samplers[i].array_total : 1;
         prog->active_uniforms[slot].location = (GLint)(SGL_LOC_SAMPLER_FLAG | (unsigned)i);
         prog->active_uniforms[slot].active = true;
     }
 
     SGL_TRACE_SHADER("Mesa link: %d uniforms, %d samplers, %d active, %d mirrors",
-                     prog->num_program_uniforms, prog->num_samplers,
-                     prog->num_active_uniforms, prog->num_packed_mirrors);
+                     prog->num_program_uniforms, prog->num_samplers, prog->num_active_uniforms,
+                     prog->num_packed_mirrors);
 }
 
 /* Transpile attached GLSL ES 1.00 shaders to 4.60, compile via uam, and store
  * the resulting uniform/sampler/attrib reflection. Extracted verbatim from
  * glLinkProgram's transpiler link path. */
-static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
-                                       sgl_program_t *prog, sgl_shader_t *vs_sh,
-                                       sgl_shader_t *fs_sh) {
+static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program, sgl_program_t *prog,
+                                       sgl_shader_t *vs_sh, sgl_shader_t *fs_sh) {
     SGL_TRACE_SHADER("transpiling ES 1.00 shaders for program %u", program);
 
     /* 1. Set up transpiler options with attrib bindings from glBindAttribLocation */
@@ -606,9 +648,8 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
 
     for (int i = 0; i < prog->num_attrib_bindings; i++) {
         if (prog->attrib_bindings[i].used) {
-            glslt_set_attrib_location(&vs_opts,
-                prog->attrib_bindings[i].name,
-                (int)prog->attrib_bindings[i].index);
+            glslt_set_attrib_location(&vs_opts, prog->attrib_bindings[i].name,
+                                      (int)prog->attrib_bindings[i].index);
         }
     }
 
@@ -621,19 +662,21 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
         vs_result = glslt_transpile(vs_sh->source, GLSLT_VERTEX, &vs_opts);
         if (!vs_result.success) {
             SGL_TRACE_SHADER("VS transpile failed: %s", vs_result.error);
-            if (vs_sh->info_log) free(vs_sh->info_log);
+            if (vs_sh->info_log)
+                free(vs_sh->info_log);
             vs_sh->info_log = strdup(vs_result.error);
             vs_sh->compiled = false;
             prog->linked = false;
-            if (prog->info_log) free(prog->info_log);
+            if (prog->info_log)
+                free(prog->info_log);
             prog->info_log = strdup(vs_result.error[0] ? vs_result.error : "VS transpile failed");
             glslt_result_free(&vs_result);
             SGL_TRACE_SHADER("glLinkProgram(%u) - VS transpile FAILED", program);
             return;
         }
         SGL_TRACE_SHADER("VS transpiled: %d uniforms, %d samplers, %d attribs, %d varyings",
-                         vs_result.num_uniforms, vs_result.num_samplers,
-                         vs_result.num_attributes, vs_result.num_varyings);
+                         vs_result.num_uniforms, vs_result.num_samplers, vs_result.num_attributes,
+                         vs_result.num_varyings);
     }
 
     /* 3. Transpile fragment shader (pass VS varying locations for consistency) */
@@ -647,19 +690,20 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
 
         /* Pass VS varying locations so FS uses matching locations */
         for (int i = 0; i < vs_result.num_varyings; i++) {
-            glslt_set_varying_location(&fs_opts,
-                vs_result.varyings[i].name,
-                vs_result.varyings[i].location);
+            glslt_set_varying_location(&fs_opts, vs_result.varyings[i].name,
+                                       vs_result.varyings[i].location);
         }
 
         fs_result = glslt_transpile(fs_sh->source, GLSLT_FRAGMENT, &fs_opts);
         if (!fs_result.success) {
             SGL_TRACE_SHADER("FS transpile failed: %s", fs_result.error);
-            if (fs_sh->info_log) free(fs_sh->info_log);
+            if (fs_sh->info_log)
+                free(fs_sh->info_log);
             fs_sh->info_log = strdup(fs_result.error);
             fs_sh->compiled = false;
             prog->linked = false;
-            if (prog->info_log) free(prog->info_log);
+            if (prog->info_log)
+                free(prog->info_log);
             prog->info_log = strdup(fs_result.error[0] ? fs_result.error : "FS transpile failed");
             glslt_result_free(&vs_result);
             glslt_result_free(&fs_result);
@@ -674,15 +718,14 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
     if (vs_result.success && fs_result.success) {
         for (int i = 0; i < vs_result.num_varyings; i++) {
             for (int j = 0; j < fs_result.num_varyings; j++) {
-                if (strcmp(vs_result.varyings[i].name,
-                          fs_result.varyings[j].name) == 0) {
+                if (strcmp(vs_result.varyings[i].name, fs_result.varyings[j].name) == 0) {
                     if (vs_result.varyings[i].type != fs_result.varyings[j].type ||
                         vs_result.varyings[i].array_size != fs_result.varyings[j].array_size) {
                         prog->linked = false;
-                        if (prog->info_log) free(prog->info_log);
+                        if (prog->info_log)
+                            free(prog->info_log);
                         char msg[256];
-                        snprintf(msg, sizeof(msg),
-                                 "varying '%s' type mismatch between VS and FS",
+                        snprintf(msg, sizeof(msg), "varying '%s' type mismatch between VS and FS",
                                  vs_result.varyings[i].name);
                         prog->info_log = strdup(msg);
                         glslt_result_free(&vs_result);
@@ -698,14 +741,18 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
 
     /* 4. Compile transpiled GLSL 4.60 → DKSH via libuam */
     if (vs_sh && vs_sh->needs_transpile && vs_result.output) {
-        if (vs_sh->info_log) { free(vs_sh->info_log); vs_sh->info_log = NULL; }
-        vs_sh->compiled = sgl_compile_glsl460(ctx, prog->vertex_shader,
-                                               vs_sh, vs_result.output);
+        if (vs_sh->info_log) {
+            free(vs_sh->info_log);
+            vs_sh->info_log = NULL;
+        }
+        vs_sh->compiled = sgl_compile_glsl460(ctx, prog->vertex_shader, vs_sh, vs_result.output);
         if (!vs_sh->compiled) {
             SGL_TRACE_SHADER("VS compile failed after transpile");
             prog->linked = false;
-            if (prog->info_log) free(prog->info_log);
-            prog->info_log = vs_sh->info_log ? strdup(vs_sh->info_log) : strdup("VS compile failed");
+            if (prog->info_log)
+                free(prog->info_log);
+            prog->info_log =
+                vs_sh->info_log ? strdup(vs_sh->info_log) : strdup("VS compile failed");
             glslt_result_free(&vs_result);
             glslt_result_free(&fs_result);
             SGL_TRACE_SHADER("glLinkProgram(%u) - VS compile FAILED", program);
@@ -715,14 +762,18 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
     }
 
     if (fs_sh && fs_sh->needs_transpile && fs_result.output) {
-        if (fs_sh->info_log) { free(fs_sh->info_log); fs_sh->info_log = NULL; }
-        fs_sh->compiled = sgl_compile_glsl460(ctx, prog->fragment_shader,
-                                               fs_sh, fs_result.output);
+        if (fs_sh->info_log) {
+            free(fs_sh->info_log);
+            fs_sh->info_log = NULL;
+        }
+        fs_sh->compiled = sgl_compile_glsl460(ctx, prog->fragment_shader, fs_sh, fs_result.output);
         if (!fs_sh->compiled) {
             SGL_TRACE_SHADER("FS compile failed after transpile");
             prog->linked = false;
-            if (prog->info_log) free(prog->info_log);
-            prog->info_log = fs_sh->info_log ? strdup(fs_sh->info_log) : strdup("FS compile failed");
+            if (prog->info_log)
+                free(prog->info_log);
+            prog->info_log =
+                fs_sh->info_log ? strdup(fs_sh->info_log) : strdup("FS compile failed");
             glslt_result_free(&vs_result);
             glslt_result_free(&fs_result);
             SGL_TRACE_SHADER("glLinkProgram(%u) - FS compile FAILED", program);
@@ -744,19 +795,19 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
         for (int i = 0; i < vs_result.num_uniforms; i++) {
             if (prog->num_program_uniforms < SGL_MAX_PROGRAM_UNIFORMS) {
                 int slot = prog->num_program_uniforms++;
-                strncpy(prog->program_uniforms[slot].name,
-                        vs_result.uniforms[i].name, SGL_ATTRIB_NAME_MAX - 1);
+                strncpy(prog->program_uniforms[slot].name, vs_result.uniforms[i].name,
+                        SGL_ATTRIB_NAME_MAX - 1);
                 prog->program_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
                 /* Store GLES name (dot notation for structs) */
                 const char *gn = vs_result.uniforms[i].gles_name[0]
-                    ? vs_result.uniforms[i].gles_name : vs_result.uniforms[i].name;
+                                     ? vs_result.uniforms[i].gles_name
+                                     : vs_result.uniforms[i].name;
                 strncpy(prog->program_uniforms[slot].gles_name, gn, SGL_ATTRIB_NAME_MAX - 1);
                 prog->program_uniforms[slot].gles_name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-                prog->program_uniforms[slot].location = (GLint)(
-                    SGL_LOC_PACKED_FLAG |
-                    ((unsigned)0 << SGL_LOC_STAGE_SHIFT) |
-                    ((unsigned)vs_opts.ubo_binding << SGL_LOC_BINDING_SHIFT) |
-                    (unsigned)vs_result.uniforms[i].offset);
+                prog->program_uniforms[slot].location =
+                    (GLint)(SGL_LOC_PACKED_FLAG | ((unsigned)0 << SGL_LOC_STAGE_SHIFT) |
+                            ((unsigned)vs_opts.ubo_binding << SGL_LOC_BINDING_SHIFT) |
+                            (unsigned)vs_result.uniforms[i].offset);
                 prog->program_uniforms[slot].gl_type = glslt_to_gl_type(vs_result.uniforms[i].type);
                 prog->program_uniforms[slot].array_size = vs_result.uniforms[i].array_size;
                 /* Transpiler uses std140: arrays padded to 16-byte minimum */
@@ -764,8 +815,8 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
                 prog->program_uniforms[slot].used = true;
             }
         }
-        SGL_TRACE_SHADER("stored %d VS uniforms in program (UBO size=%d)",
-                         vs_result.num_uniforms, vs_result.ubo_total_size);
+        SGL_TRACE_SHADER("stored %d VS uniforms in program (UBO size=%d)", vs_result.num_uniforms,
+                         vs_result.ubo_total_size);
     }
     /* FS uniforms → packed UBO at FS binding 0 */
     if (fs_result.num_uniforms > 0) {
@@ -773,19 +824,19 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
         for (int i = 0; i < fs_result.num_uniforms; i++) {
             if (prog->num_program_uniforms < SGL_MAX_PROGRAM_UNIFORMS) {
                 int slot = prog->num_program_uniforms++;
-                strncpy(prog->program_uniforms[slot].name,
-                        fs_result.uniforms[i].name, SGL_ATTRIB_NAME_MAX - 1);
+                strncpy(prog->program_uniforms[slot].name, fs_result.uniforms[i].name,
+                        SGL_ATTRIB_NAME_MAX - 1);
                 prog->program_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
                 /* Store GLES name (dot notation for structs) */
                 const char *gn = fs_result.uniforms[i].gles_name[0]
-                    ? fs_result.uniforms[i].gles_name : fs_result.uniforms[i].name;
+                                     ? fs_result.uniforms[i].gles_name
+                                     : fs_result.uniforms[i].name;
                 strncpy(prog->program_uniforms[slot].gles_name, gn, SGL_ATTRIB_NAME_MAX - 1);
                 prog->program_uniforms[slot].gles_name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-                prog->program_uniforms[slot].location = (GLint)(
-                    SGL_LOC_PACKED_FLAG |
-                    ((unsigned)1 << SGL_LOC_STAGE_SHIFT) |
-                    ((unsigned)0 << SGL_LOC_BINDING_SHIFT) |
-                    (unsigned)fs_result.uniforms[i].offset);
+                prog->program_uniforms[slot].location =
+                    (GLint)(SGL_LOC_PACKED_FLAG | ((unsigned)1 << SGL_LOC_STAGE_SHIFT) |
+                            ((unsigned)0 << SGL_LOC_BINDING_SHIFT) |
+                            (unsigned)fs_result.uniforms[i].offset);
                 prog->program_uniforms[slot].gl_type = glslt_to_gl_type(fs_result.uniforms[i].type);
                 prog->program_uniforms[slot].array_size = fs_result.uniforms[i].array_size;
                 /* Transpiler uses std140: arrays padded to 16-byte minimum */
@@ -793,8 +844,8 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
                 prog->program_uniforms[slot].used = true;
             }
         }
-        SGL_TRACE_SHADER("stored %d FS uniforms in program (UBO size=%d)",
-                         fs_result.num_uniforms, fs_result.ubo_total_size);
+        SGL_TRACE_SHADER("stored %d FS uniforms in program (UBO size=%d)", fs_result.num_uniforms,
+                         fs_result.ubo_total_size);
     }
 
     /* 5b. Pre-configure packed UBOs so they're valid at draw time.
@@ -806,9 +857,8 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
         for (int binding = 0; binding < SGL_MAX_PACKED_UBOS; binding++) {
             int ubo_size = prog->packed_ubo_sizes[stage][binding];
             if (ubo_size > 0 && ubo_size <= SGL_MAX_PACKED_UBO_SIZE) {
-                sgl_packed_ubo_t *packed = (stage == 0)
-                    ? &prog->packed_vertex[binding]
-                    : &prog->packed_fragment[binding];
+                sgl_packed_ubo_t *packed =
+                    (stage == 0) ? &prog->packed_vertex[binding] : &prog->packed_fragment[binding];
                 if (!packed->valid) {
                     packed->size = ubo_size;
                     packed->valid = true;
@@ -826,20 +876,25 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
      * uniform covers all array elements. */
     prog->num_packed_mirrors = 0;
     for (int i = 0; i < prog->num_program_uniforms; i++) {
-        if (!prog->program_uniforms[i].used) continue;
+        if (!prog->program_uniforms[i].used)
+            continue;
         GLint iloc = prog->program_uniforms[i].location;
-        if (!(iloc & SGL_LOC_PACKED_FLAG)) continue;
+        if (!(iloc & SGL_LOC_PACKED_FLAG))
+            continue;
         int i_stage = (iloc >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
-        if (i_stage != 0) continue; /* Only VS entries as primary */
+        if (i_stage != 0)
+            continue; /* Only VS entries as primary */
         /* Find matching FS entry with same name */
         for (int j = 0; j < prog->num_program_uniforms; j++) {
-            if (j == i || !prog->program_uniforms[j].used) continue;
+            if (j == i || !prog->program_uniforms[j].used)
+                continue;
             GLint jloc = prog->program_uniforms[j].location;
-            if (!(jloc & SGL_LOC_PACKED_FLAG)) continue;
+            if (!(jloc & SGL_LOC_PACKED_FLAG))
+                continue;
             int j_stage = (jloc >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
-            if (j_stage == 0) continue; /* Must be FS */
-            if (strcmp(prog->program_uniforms[j].name,
-                      prog->program_uniforms[i].name) == 0) {
+            if (j_stage == 0)
+                continue; /* Must be FS */
+            if (strcmp(prog->program_uniforms[j].name, prog->program_uniforms[i].name) == 0) {
                 if (prog->num_packed_mirrors < SGL_MAX_PACKED_MIRRORS) {
                     prog->packed_mirrors[prog->num_packed_mirrors].primary = iloc;
                     prog->packed_mirrors[prog->num_packed_mirrors].mirror = jloc;
@@ -860,7 +915,7 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
     prog->depth_range_loc_fs[1] = 0;
     prog->depth_range_loc_fs[2] = 0;
     if (prog->has_depth_range) {
-        static const char *dr_names[] = { "sgl_dr_near", "sgl_dr_far", "sgl_dr_diff" };
+        static const char *dr_names[] = {"sgl_dr_near", "sgl_dr_far", "sgl_dr_diff"};
         for (int d = 0; d < 3; d++) {
             for (int u = 0; u < prog->num_program_uniforms; u++) {
                 if (strcmp(prog->program_uniforms[u].name, dr_names[d]) == 0) {
@@ -880,16 +935,16 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
     if (fs_result.num_samplers > 0) {
         for (int i = 0; i < fs_result.num_samplers && i < SGL_MAX_PROGRAM_SAMPLERS; i++) {
             int slot = prog->num_samplers++;
-            strncpy(prog->samplers[slot].name,
-                    fs_result.samplers[i].name, SGL_ATTRIB_NAME_MAX - 1);
+            strncpy(prog->samplers[slot].name, fs_result.samplers[i].name, SGL_ATTRIB_NAME_MAX - 1);
             prog->samplers[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
             /* Store GLES name (e.g. "s[0]" for sampler arrays) */
-            const char *sgn = fs_result.samplers[i].gles_name[0]
-                ? fs_result.samplers[i].gles_name : fs_result.samplers[i].name;
+            const char *sgn = fs_result.samplers[i].gles_name[0] ? fs_result.samplers[i].gles_name
+                                                                 : fs_result.samplers[i].name;
             strncpy(prog->samplers[slot].gles_name, sgn, SGL_ATTRIB_NAME_MAX - 1);
             prog->samplers[slot].gles_name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
             prog->samplers[slot].shader_binding = fs_result.samplers[i].binding;
-            prog->samplers[slot].vs_shader_binding = -1; /* Will be set if VS also has this sampler */
+            prog->samplers[slot].vs_shader_binding =
+                -1;                            /* Will be set if VS also has this sampler */
             prog->samplers[slot].tex_unit = 0; /* GLES2 spec: initial sampler value = 0 */
             prog->samplers[slot].array_index = fs_result.samplers[i].array_index;
             prog->samplers[slot].array_total = fs_result.samplers[i].array_total;
@@ -902,7 +957,8 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
      * Per GLES2 spec, a uniform sampler used in both stages has a single location.
      * We store vs_shader_binding so draw code can bind to each stage independently. */
     if (vs_result.num_samplers > 0) {
-        for (int i = 0; i < vs_result.num_samplers && prog->num_samplers < SGL_MAX_PROGRAM_SAMPLERS; i++) {
+        for (int i = 0; i < vs_result.num_samplers && prog->num_samplers < SGL_MAX_PROGRAM_SAMPLERS;
+             i++) {
             /* Deduplicate: if same name exists from FS, store VS binding in that entry */
             bool already = false;
             for (int j = 0; j < prog->num_samplers; j++) {
@@ -914,14 +970,14 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
                     break;
                 }
             }
-            if (already) continue;
+            if (already)
+                continue;
             /* VS-only sampler (not in FS) */
             int slot = prog->num_samplers++;
-            strncpy(prog->samplers[slot].name,
-                    vs_result.samplers[i].name, SGL_ATTRIB_NAME_MAX - 1);
+            strncpy(prog->samplers[slot].name, vs_result.samplers[i].name, SGL_ATTRIB_NAME_MAX - 1);
             prog->samplers[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
-            const char *sgn = vs_result.samplers[i].gles_name[0]
-                ? vs_result.samplers[i].gles_name : vs_result.samplers[i].name;
+            const char *sgn = vs_result.samplers[i].gles_name[0] ? vs_result.samplers[i].gles_name
+                                                                 : vs_result.samplers[i].name;
             strncpy(prog->samplers[slot].gles_name, sgn, SGL_ATTRIB_NAME_MAX - 1);
             prog->samplers[slot].gles_name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
             prog->samplers[slot].shader_binding = vs_result.samplers[i].binding;
@@ -941,14 +997,15 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
 
     /* Add non-sampler uniforms (deduplicate VS/FS copies with same name) */
     for (int i = 0; i < prog->num_program_uniforms; i++) {
-        if (!prog->program_uniforms[i].used) continue;
+        if (!prog->program_uniforms[i].used)
+            continue;
         /* Deduplicate: same name in both VS and FS → one active uniform.
          * Must check both raw name and name[0] form since arrays are stored
          * with [0] suffix per GLES2 spec. */
         bool already = false;
         const char *uni_name = prog->program_uniforms[i].gles_name[0]
-            ? prog->program_uniforms[i].gles_name
-            : prog->program_uniforms[i].name;
+                                   ? prog->program_uniforms[i].gles_name
+                                   : prog->program_uniforms[i].name;
         int arr = prog->program_uniforms[i].array_size;
         char uni_name_arr[SGL_ATTRIB_NAME_MAX];
         if (arr > 1) {
@@ -961,26 +1018,28 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
         for (int j = 0; j < prog->num_active_uniforms; j++) {
             if (strcmp(prog->active_uniforms[j].name, uni_name) == 0 ||
                 (arr > 1 && strcmp(prog->active_uniforms[j].name, uni_name_arr) == 0)) {
-                already = true; break;
+                already = true;
+                break;
             }
         }
-        if (already) continue;
-        if (prog->num_active_uniforms >= SGL_MAX_UNIFORMS * 2) break;
+        if (already)
+            continue;
+        if (prog->num_active_uniforms >= SGL_MAX_UNIFORMS * 2)
+            break;
         int slot = prog->num_active_uniforms++;
         /* For arrays, GLES2 spec requires name = "name[0]", size = array_count */
         if (arr > 1) {
             if (strchr(uni_name, '['))
                 strncpy(prog->active_uniforms[slot].name, uni_name, SGL_ATTRIB_NAME_MAX - 1);
             else
-                snprintf(prog->active_uniforms[slot].name, SGL_ATTRIB_NAME_MAX,
-                         "%s[0]", uni_name);
+                snprintf(prog->active_uniforms[slot].name, SGL_ATTRIB_NAME_MAX, "%s[0]", uni_name);
             prog->active_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
         } else {
             strncpy(prog->active_uniforms[slot].name, uni_name, SGL_ATTRIB_NAME_MAX - 1);
             prog->active_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
         }
-        prog->active_uniforms[slot].type = prog->program_uniforms[i].gl_type
-            ? prog->program_uniforms[i].gl_type : GL_FLOAT_VEC4;
+        prog->active_uniforms[slot].type =
+            prog->program_uniforms[i].gl_type ? prog->program_uniforms[i].gl_type : GL_FLOAT_VEC4;
         prog->active_uniforms[slot].size = (arr > 1) ? arr : 1;
         prog->active_uniforms[slot].location = prog->program_uniforms[i].location;
         prog->active_uniforms[slot].element_stride = prog->program_uniforms[i].element_stride;
@@ -991,21 +1050,26 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
      * For sampler arrays: report ONE active uniform with name "s[0]" and size=array_total.
      * Skip subsequent array elements (array_index > 0). */
     for (int i = 0; i < prog->num_samplers; i++) {
-        if (!prog->samplers[i].used) continue;
-        if (prog->num_active_uniforms >= SGL_MAX_UNIFORMS * 2) break;
+        if (!prog->samplers[i].used)
+            continue;
+        if (prog->num_active_uniforms >= SGL_MAX_UNIFORMS * 2)
+            break;
         /* Skip non-first array elements */
-        if (prog->samplers[i].array_index > 0) continue;
+        if (prog->samplers[i].array_index > 0)
+            continue;
         /* Use GLES name for API visibility */
-        const char *samp_name = prog->samplers[i].gles_name[0]
-            ? prog->samplers[i].gles_name : prog->samplers[i].name;
+        const char *samp_name =
+            prog->samplers[i].gles_name[0] ? prog->samplers[i].gles_name : prog->samplers[i].name;
         /* Deduplicate (VS+FS sampler with same name) */
         bool already = false;
         for (int j = 0; j < prog->num_active_uniforms; j++) {
             if (strcmp(prog->active_uniforms[j].name, samp_name) == 0) {
-                already = true; break;
+                already = true;
+                break;
             }
         }
-        if (already) continue;
+        if (already)
+            continue;
         int slot = prog->num_active_uniforms++;
         strncpy(prog->active_uniforms[slot].name, samp_name, SGL_ATTRIB_NAME_MAX - 1);
         prog->active_uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
@@ -1035,8 +1099,7 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
         GLenum attr_gl_type = glslt_to_gl_type(vs_result.attributes[i].type);
         bool found = false;
         for (int j = 0; j < prog->num_attrib_bindings; j++) {
-            if (strcmp(prog->attrib_bindings[j].name,
-                       vs_result.attributes[i].name) == 0) {
+            if (strcmp(prog->attrib_bindings[j].name, vs_result.attributes[i].name) == 0) {
                 prog->attrib_bindings[j].index = vs_result.attributes[i].location;
                 prog->attrib_bindings[j].linked_location = (GLint)vs_result.attributes[i].location;
                 prog->attrib_bindings[j].gl_type = attr_gl_type;
@@ -1047,8 +1110,8 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
         }
         if (!found && prog->num_attrib_bindings < SGL_MAX_ATTRIB_BINDINGS) {
             int slot = prog->num_attrib_bindings++;
-            strncpy(prog->attrib_bindings[slot].name,
-                    vs_result.attributes[i].name, SGL_ATTRIB_NAME_MAX - 1);
+            strncpy(prog->attrib_bindings[slot].name, vs_result.attributes[i].name,
+                    SGL_ATTRIB_NAME_MAX - 1);
             prog->attrib_bindings[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
             prog->attrib_bindings[slot].index = vs_result.attributes[i].location;
             prog->attrib_bindings[slot].linked_location = (GLint)vs_result.attributes[i].location;
@@ -1063,7 +1126,8 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program,
     {
         int active_count = 0;
         for (int j = 0; j < prog->num_attrib_bindings; j++) {
-            if (prog->attrib_bindings[j].in_shader) active_count++;
+            if (prog->attrib_bindings[j].in_shader)
+                active_count++;
         }
         prog->num_active_attribs = active_count;
     }
@@ -1087,7 +1151,10 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
     }
 
     /* Clear previous link log on relink */
-    if (prog->info_log) { free(prog->info_log); prog->info_log = NULL; }
+    if (prog->info_log) {
+        free(prog->info_log);
+        prog->info_log = NULL;
+    }
 
     /* On relink: remove linker-added attrib_bindings, keep only user-bound ones.
      * Without this, stale linker-assigned entries from the previous link cause
@@ -1115,16 +1182,24 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
     bool vs_mesa = vs_sh && vs_sh->compiled_via_mesa && vs_sh->mesa_meta;
     bool fs_mesa = fs_sh && fs_sh->compiled_via_mesa && fs_sh->mesa_meta;
     bool any_mesa = vs_mesa || fs_mesa;
-    bool any_transpile = (vs_sh && vs_sh->needs_transpile) ||
-                         (fs_sh && fs_sh->needs_transpile);
+    bool any_transpile = (vs_sh && vs_sh->needs_transpile) || (fs_sh && fs_sh->needs_transpile);
 
     /* Mixed Mesa/transpiler programs are not allowed — varying locations would
      * be incompatible.  If one shader is Mesa and the other is transpiler,
      * force both to transpiler so the link path is consistent. */
     if (any_mesa && any_transpile) {
-        SGL_TRACE_SHADER("mixed Mesa/transpiler in program %u — forcing transpiler for both", program);
-        if (vs_mesa) { vs_sh->compiled_via_mesa = false; vs_mesa = false; vs_sh->needs_transpile = true; }
-        if (fs_mesa) { fs_sh->compiled_via_mesa = false; fs_mesa = false; fs_sh->needs_transpile = true; }
+        SGL_TRACE_SHADER("mixed Mesa/transpiler in program %u — forcing transpiler for both",
+                         program);
+        if (vs_mesa) {
+            vs_sh->compiled_via_mesa = false;
+            vs_mesa = false;
+            vs_sh->needs_transpile = true;
+        }
+        if (fs_mesa) {
+            fs_sh->compiled_via_mesa = false;
+            fs_mesa = false;
+            fs_sh->needs_transpile = true;
+        }
         any_mesa = false;
     }
 
@@ -1139,9 +1214,8 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
             /* Pass attribute bindings to uam */
             for (int i = 0; i < prog->num_attrib_bindings; i++) {
                 if (prog->attrib_bindings[i].used) {
-                    uam_set_attrib_binding(compiler,
-                        prog->attrib_bindings[i].name,
-                        (int)prog->attrib_bindings[i].index);
+                    uam_set_attrib_binding(compiler, prog->attrib_bindings[i].name,
+                                           (int)prog->attrib_bindings[i].index);
                 }
             }
 
@@ -1155,8 +1229,8 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
                     uam_write_code(compiler, dksh);
 
                     if (ctx->backend && ctx->backend->ops->load_shader_binary) {
-                        ctx->backend->ops->load_shader_binary(
-                            ctx->backend, prog->vertex_shader, dksh, dksh_size);
+                        ctx->backend->ops->load_shader_binary(ctx->backend, prog->vertex_shader,
+                                                              dksh, dksh_size);
                     }
                     free(dksh);
                 }
@@ -1173,8 +1247,8 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
                             meta->uniforms[i].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
                             meta->uniforms[i].offset = info.offset;
                             meta->uniforms[i].size_bytes = info.size_bytes;
-                            meta->uniforms[i].gl_type = uam_base_type_to_gl(info.base_type,
-                                info.vector_elements, info.matrix_columns);
+                            meta->uniforms[i].gl_type = uam_base_type_to_gl(
+                                info.base_type, info.vector_elements, info.matrix_columns);
                             meta->uniforms[i].array_elements = info.array_elements;
                         }
                     }
@@ -1185,12 +1259,15 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
                             strncpy(meta->inputs[i].name, iinfo.name, SGL_ATTRIB_NAME_MAX - 1);
                             meta->inputs[i].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
                             meta->inputs[i].location = iinfo.location;
-                            meta->inputs[i].gl_type = uam_base_type_to_gl(iinfo.base_type,
-                                iinfo.vector_elements, iinfo.matrix_columns);
+                            meta->inputs[i].gl_type = uam_base_type_to_gl(
+                                iinfo.base_type, iinfo.vector_elements, iinfo.matrix_columns);
                         }
                     }
                     /* Update initial constbuf data */
-                    if (meta->initial_data) { free(meta->initial_data); meta->initial_data = NULL; }
+                    if (meta->initial_data) {
+                        free(meta->initial_data);
+                        meta->initial_data = NULL;
+                    }
                     meta->initial_data_size = 0;
                     uint32_t init_size = 0;
                     const void *init_ptr = uam_get_constbuf_initial_data(compiler, &init_size);
@@ -1216,8 +1293,7 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
     }
 
     /* Check if any attached shader needs transpilation (GLSL ES 1.00 → 4.60) */
-    bool needs_transpile = (vs_sh && vs_sh->needs_transpile) ||
-                           (fs_sh && fs_sh->needs_transpile);
+    bool needs_transpile = (vs_sh && vs_sh->needs_transpile) || (fs_sh && fs_sh->needs_transpile);
 
     if (needs_transpile) {
         sgl_link_program_transpile(ctx, program, prog, vs_sh, fs_sh);
@@ -1228,8 +1304,8 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
      * This prevents issues when shader IDs are reused after glDeleteShader. */
     bool link_ok = true;
     if (ctx->backend && ctx->backend->ops->link_program) {
-        link_ok = ctx->backend->ops->link_program(ctx->backend, program,
-                                        prog->vertex_shader, prog->fragment_shader);
+        link_ok = ctx->backend->ops->link_program(ctx->backend, program, prog->vertex_shader,
+                                                  prog->fragment_shader);
     }
 
     prog->linked = link_ok;
@@ -1271,7 +1347,8 @@ GL_APICALL void GL_APIENTRY glGetProgramiv(GLuint program, GLenum pname, GLint *
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
-    if (!params) return;
+    if (!params)
+        return;
 
     sgl_program_t *prog = GET_PROGRAM(program);
     if (!prog) {
@@ -1306,7 +1383,8 @@ GL_APICALL void GL_APIENTRY glGetProgramiv(GLuint program, GLenum pname, GLint *
             for (int i = 0; i < prog->num_attrib_bindings; i++) {
                 if (prog->attrib_bindings[i].used && prog->attrib_bindings[i].in_shader) {
                     GLint len = (GLint)strlen(prog->attrib_bindings[i].name) + 1;
-                    if (len > maxlen) maxlen = len;
+                    if (len > maxlen)
+                        maxlen = len;
                 }
             }
             *params = maxlen;
@@ -1317,7 +1395,8 @@ GL_APICALL void GL_APIENTRY glGetProgramiv(GLuint program, GLenum pname, GLint *
             for (int i = 0; i < prog->num_active_uniforms; i++) {
                 if (prog->active_uniforms[i].active) {
                     GLint len = (GLint)strlen(prog->active_uniforms[i].name) + 1;
-                    if (len > maxlen) maxlen = len;
+                    if (len > maxlen)
+                        maxlen = len;
                 }
             }
             *params = maxlen;
@@ -1329,7 +1408,8 @@ GL_APICALL void GL_APIENTRY glGetProgramiv(GLuint program, GLenum pname, GLint *
     }
 }
 
-GL_APICALL void GL_APIENTRY glGetProgramInfoLog(GLuint program, GLsizei bufSize, GLsizei *length, GLchar *infoLog) {
+GL_APICALL void GL_APIENTRY glGetProgramInfoLog(GLuint program, GLsizei bufSize, GLsizei *length,
+                                                GLchar *infoLog) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
@@ -1342,23 +1422,30 @@ GL_APICALL void GL_APIENTRY glGetProgramInfoLog(GLuint program, GLsizei bufSize,
     sgl_program_t *prog = GET_PROGRAM(program);
     if (!prog) {
         sgl_set_error(ctx, GET_SHADER(program) ? GL_INVALID_OPERATION : GL_INVALID_VALUE);
-        if (length) *length = 0;
-        if (infoLog && bufSize > 0) infoLog[0] = '\0';
+        if (length)
+            *length = 0;
+        if (infoLog && bufSize > 0)
+            infoLog[0] = '\0';
         return;
     }
 
     if (prog->info_log && prog->info_log[0]) {
         GLsizei log_len = (GLsizei)strlen(prog->info_log);
         GLsizei copy_len = (bufSize > 0) ? (bufSize - 1) : 0;
-        if (copy_len > log_len) copy_len = log_len;
+        if (copy_len > log_len)
+            copy_len = log_len;
         if (infoLog && bufSize > 0) {
-            if (copy_len > 0) memcpy(infoLog, prog->info_log, copy_len);
+            if (copy_len > 0)
+                memcpy(infoLog, prog->info_log, copy_len);
             infoLog[copy_len] = '\0';
         }
-        if (length) *length = copy_len;
+        if (length)
+            *length = copy_len;
     } else {
-        if (length) *length = 0;
-        if (infoLog && bufSize > 0) infoLog[0] = '\0';
+        if (length)
+            *length = 0;
+        if (infoLog && bufSize > 0)
+            infoLog[0] = '\0';
     }
 }
 
@@ -1376,7 +1463,8 @@ GL_APICALL void GL_APIENTRY glValidateProgram(GLuint program) {
     prog->validated = prog->linked;
 }
 
-GL_APICALL void GL_APIENTRY glGetAttachedShaders(GLuint program, GLsizei maxCount, GLsizei *count, GLuint *shaders) {
+GL_APICALL void GL_APIENTRY glGetAttachedShaders(GLuint program, GLsizei maxCount, GLsizei *count,
+                                                 GLuint *shaders) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
@@ -1394,34 +1482,34 @@ GL_APICALL void GL_APIENTRY glGetAttachedShaders(GLuint program, GLsizei maxCoun
 
     int n = 0;
     if (prog->vertex_shader && n < maxCount) {
-        if (shaders) shaders[n] = prog->vertex_shader;
+        if (shaders)
+            shaders[n] = prog->vertex_shader;
         n++;
     }
     if (prog->fragment_shader && n < maxCount) {
-        if (shaders) shaders[n] = prog->fragment_shader;
+        if (shaders)
+            shaders[n] = prog->fragment_shader;
         n++;
     }
-    if (count) *count = n;
+    if (count)
+        *count = n;
 }
 
 /* Bind program and uniforms for drawing - delegates to backend */
 bool sgl_bind_program_for_draw(sgl_context_t *ctx, GLuint program_id) {
-    if (!ctx || !ctx->backend || !ctx->backend->ops) return false;
+    if (!ctx || !ctx->backend || !ctx->backend->ops)
+        return false;
 
     sgl_program_t *prog = sgl_res_mgr_get_program(&ctx->res_mgr, program_id);
-    if (!prog || !prog->linked) return false;
+    if (!prog || !prog->linked)
+        return false;
 
     /* Call backend to bind program with uniforms and shader handles */
     if (ctx->backend->ops->bind_program) {
-        ctx->backend->ops->bind_program(ctx->backend, program_id,
-                                        prog->vertex_shader,
-                                        prog->fragment_shader,
-                                        prog->vertex_uniforms,
-                                        prog->fragment_uniforms,
-                                        SGL_MAX_UNIFORMS,
-                                        prog->packed_vertex,
-                                        prog->packed_fragment,
-                                        SGL_MAX_PACKED_UBOS);
+        ctx->backend->ops->bind_program(
+            ctx->backend, program_id, prog->vertex_shader, prog->fragment_shader,
+            prog->vertex_uniforms, prog->fragment_uniforms, SGL_MAX_UNIFORMS, prog->packed_vertex,
+            prog->packed_fragment, SGL_MAX_PACKED_UBOS);
     }
 
     return true;

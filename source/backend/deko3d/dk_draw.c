@@ -16,9 +16,8 @@
 
 /* Convert GL_FIXED (16.16 fixed-point) vertex data to float.
  * src/dst may overlap (in-place conversion is safe since both are 4 bytes). */
-static void dk_convert_fixed_to_float(void *dst, const void *src,
-                                       GLsizei vertex_count, GLint components,
-                                       GLsizei src_stride, GLsizei dst_stride) {
+static void dk_convert_fixed_to_float(void *dst, const void *src, GLsizei vertex_count,
+                                      GLint components, GLsizei src_stride, GLsizei dst_stride) {
     const uint8_t *sp = (const uint8_t *)src;
     uint8_t *dp = (uint8_t *)dst;
     for (GLsizei v = 0; v < vertex_count; v++) {
@@ -37,8 +36,8 @@ static void dk_convert_fixed_to_float(void *dst, const void *src,
  * Handles both VBO-based and client-side vertex arrays.
  * ============================================================================ */
 
-void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attribs,
-                            int num_attribs, GLint first, GLsizei count) {
+void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attribs, int num_attribs,
+                            GLint first, GLsizei count) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
     DkVtxAttribState attribStates[SGL_MAX_ATTRIBS];
@@ -49,7 +48,7 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
     int numBuffers = 0;
 
     DkGpuAddr data_gpu_base = dkMemBlockGetGpuAddr(dk->data_memblock);
-    uint8_t *data_cpu_base = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock);
+    uint8_t *data_cpu_base = (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock);
 
     /* Determine numAttribs: MUST cover ALL attribute locations the shader might
      * read from, not just enabled ones. In GLES 2.0, disabled attributes return
@@ -58,10 +57,8 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
      * so any shader input finds a valid attribute state. */
     int hasAnyEnabled = 0;
     for (int i = 0; i < num_attribs && i < SGL_MAX_ATTRIBS; i++) {
-        if (attribs[i].enabled ||
-            attribs[i].current_value[0] != 0.0f ||
-            attribs[i].current_value[1] != 0.0f ||
-            attribs[i].current_value[2] != 0.0f ||
+        if (attribs[i].enabled || attribs[i].current_value[0] != 0.0f ||
+            attribs[i].current_value[1] != 0.0f || attribs[i].current_value[2] != 0.0f ||
             attribs[i].current_value[3] != 1.0f) {
             hasAnyEnabled = 1;
         }
@@ -99,7 +96,7 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
      * so every vertex reads the same constant value per attribute.
      */
     int constBufSlot = -1;
-    uint32_t constBufOffset = 0;  /* offset within constant buffer */
+    uint32_t constBufOffset = 0; /* offset within constant buffer */
 
     /* Build attribute and buffer states */
     for (int i = 0; i < numAttribs; i++) {
@@ -116,7 +113,7 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
                 if (alignedOff + totalSize <= dk->client_array_slot_end) {
                     constBufSlot = numBuffers;
                     boundBuffers[numBuffers] = 0xFFFFFFFF; /* marker for constant buffer */
-                    bufferStates[numBuffers].stride = 0;  /* same value for all vertices */
+                    bufferStates[numBuffers].stride = 0;   /* same value for all vertices */
                     bufferStates[numBuffers].divisor = 0;
                     bufferExtents[numBuffers].addr = data_gpu_base + clientAddr;
                     bufferExtents[numBuffers].size = totalSize;
@@ -135,7 +132,8 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
             }
 
             /* Write constant value (vec4) to the shared buffer */
-            uint32_t writeAddr = (uint32_t)(bufferExtents[constBufSlot].addr - data_gpu_base) + constBufOffset;
+            uint32_t writeAddr =
+                (uint32_t)(bufferExtents[constBufSlot].addr - data_gpu_base) + constBufOffset;
             float *dst = (float *)(data_cpu_base + writeAddr);
             dst[0] = attr->current_value[0];
             dst[1] = attr->current_value[1];
@@ -181,7 +179,7 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
             /* Client-side array - will copy to GPU, offset is 0 */
             attrOffset = 0;
         } else {
-            continue;  /* Skip this attribute */
+            continue; /* Skip this attribute */
         }
 
         /* GL_FIXED requires CPU-side conversion to float — always gets its own
@@ -201,7 +199,8 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
                         /* Client-side array: check pointer proximity */
                         uintptr_t basePtr = bufferClientPtrs[j];
                         uintptr_t thisPtr = (uintptr_t)attr->pointer;
-                        if (thisPtr >= basePtr && (thisPtr - basePtr) < (uintptr_t)effectiveStride) {
+                        if (thisPtr >= basePtr &&
+                            (thisPtr - basePtr) < (uintptr_t)effectiveStride) {
                             bufIdx = j;
                             attrOffset = (uint32_t)(thisPtr - basePtr);
                             break;
@@ -213,8 +212,8 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
                          * thousands of bytes) must get separate buffer slots. */
                         uint32_t baseVBOPtr = bufferVBOPtrs[j];
                         uint32_t thisVBOPtr = (uint32_t)(uintptr_t)attr->pointer;
-                        uint32_t diff = (thisVBOPtr >= baseVBOPtr) ?
-                                        (thisVBOPtr - baseVBOPtr) : (baseVBOPtr - thisVBOPtr);
+                        uint32_t diff = (thisVBOPtr >= baseVBOPtr) ? (thisVBOPtr - baseVBOPtr)
+                                                                   : (baseVBOPtr - thisVBOPtr);
                         if (diff < (uint32_t)effectiveStride) {
                             bufIdx = j;
                             /* Compute offset relative to buffer slot's base VBO pointer */
@@ -243,7 +242,8 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
                 GLsizei totalVertices = first + count;
                 GLsizei dataSize = totalVertices * effectiveStride;
 
-                uint32_t alignedOffset = SGL_ALIGN_UP(dk->client_array_offset, SGL_UNIFORM_ALIGNMENT);
+                uint32_t alignedOffset =
+                    SGL_ALIGN_UP(dk->client_array_offset, SGL_UNIFORM_ALIGNMENT);
                 uint32_t clientArrayAddr = dk->client_array_base + alignedOffset;
 
                 if (alignedOffset + dataSize <= dk->client_array_slot_end) {
@@ -256,8 +256,8 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
                     }
 
                     void *dst = data_cpu_base + clientArrayAddr;
-                    dk_convert_fixed_to_float(dst, src, totalVertices, attr->size,
-                                               effectiveStride, effectiveStride);
+                    dk_convert_fixed_to_float(dst, src, totalVertices, attr->size, effectiveStride,
+                                              effectiveStride);
 
                     bufferExtents[numBuffers].addr = data_gpu_base + clientArrayAddr;
                     bufferBaseAddrs[numBuffers] = bufferExtents[numBuffers].addr;
@@ -297,7 +297,8 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
                 GLsizei dataSize = totalVertices * effectiveStride;
 
                 /* Align current offset to 256 bytes */
-                uint32_t alignedOffset = SGL_ALIGN_UP(dk->client_array_offset, SGL_UNIFORM_ALIGNMENT);
+                uint32_t alignedOffset =
+                    SGL_ALIGN_UP(dk->client_array_offset, SGL_UNIFORM_ALIGNMENT);
                 uint32_t clientArrayAddr = dk->client_array_base + alignedOffset;
 
                 /* Check we have space in this slot's sub-region */
@@ -339,7 +340,7 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
     }
 
     if (numBuffers == 0) {
-        return;  /* No valid buffers */
+        return; /* No valid buffers */
     }
 
     /* Bind in same order as legacy:
@@ -347,7 +348,8 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
      * 2. dkCmdBufBindVtxBufferState - buffer stride/divisor
      * 3. dkCmdBufBindVtxBuffers - actual GPU addresses (plural!)
      */
-    DK_VERBOSE_PRINT("[DK] bind_vertex_attribs: numAttribs=%d numBuffers=%d\n", numAttribs, numBuffers);
+    DK_VERBOSE_PRINT("[DK] bind_vertex_attribs: numAttribs=%d numBuffers=%d\n", numAttribs,
+                     numBuffers);
 
     /* Ensure all CPU writes to client array staging area are committed to DRAM
      * before recording GPU commands that reference them. CpuUncached writes
@@ -358,8 +360,8 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
     dkCmdBufBindVtxBufferState(dk->cmdbuf, bufferStates, numBuffers);
     dkCmdBufBindVtxBuffers(dk->cmdbuf, 0, bufferExtents, numBuffers);
 
-    SGL_TRACE_DRAW("bind_vertex_attribs numAttribs=%d numBuffers=%d first=%d count=%d",
-                   numAttribs, numBuffers, first, count);
+    SGL_TRACE_DRAW("bind_vertex_attribs numAttribs=%d numBuffers=%d first=%d count=%d", numAttribs,
+                   numBuffers, first, count);
 }
 
 /* ============================================================================
@@ -408,8 +410,8 @@ void dk_draw_arrays(sgl_backend_t *be, GLenum mode, GLint first, GLsizei count) 
  * Draw Elements
  * ============================================================================ */
 
-void dk_draw_elements(sgl_backend_t *be, GLenum mode, GLsizei count,
-                      GLenum type, const void *indices, sgl_handle_t ebo) {
+void dk_draw_elements(sgl_backend_t *be, GLenum mode, GLsizei count, GLenum type,
+                      const void *indices, sgl_handle_t ebo) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
     if (count <= 0 || !dk->program_bound) {
@@ -431,7 +433,7 @@ void dk_draw_elements(sgl_backend_t *be, GLenum mode, GLsizei count,
             /* DkIdxFormat_Uint8 is NOT supported by Maxwell GPU!
              * Must convert to 16-bit indices. */
             idxFormat = DkIdxFormat_Uint16;
-            idxSize = 2;  /* Will convert */
+            idxSize = 2; /* Will convert */
             break;
         case GL_UNSIGNED_SHORT:
             idxFormat = DkIdxFormat_Uint16;
@@ -452,7 +454,7 @@ void dk_draw_elements(sgl_backend_t *be, GLenum mode, GLsizei count,
         /* EBO bound - ebo already contains buf->data_offset + indices byte offset
          * (computed by gl_draw.c). Don't add indices again! */
         DkGpuAddr data_gpu_base = dkMemBlockGetGpuAddr(dk->data_memblock);
-        uint8_t *cpu_base = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock);
+        uint8_t *cpu_base = (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock);
 
         if (type == GL_UNSIGNED_BYTE) {
             /* DkIdxFormat_Uint8 NOT supported — convert EBO 8-bit indices to 16-bit.
@@ -462,25 +464,25 @@ void dk_draw_elements(sgl_backend_t *be, GLenum mode, GLsizei count,
             size_t size16 = count * 2;
 
             if (alignedOffset + size16 <= dk->client_array_slot_end) {
-                uint16_t *dst = (uint16_t*)(cpu_base + clientAddr);
+                uint16_t *dst = (uint16_t *)(cpu_base + clientAddr);
                 const uint8_t *src = cpu_base + (uint32_t)ebo;
                 for (GLsizei i = 0; i < count; i++) {
                     dst[i] = src[i];
                 }
-                SGL_TRACE_DRAW("U8_CONV ebo_off=%u count=%d first5_src=[%u,%u,%u,%u,%u] first5_dst=[%u,%u,%u,%u,%u]",
-                              (uint32_t)ebo, count,
-                              count > 0 ? src[0] : 0, count > 1 ? src[1] : 0,
-                              count > 2 ? src[2] : 0, count > 3 ? src[3] : 0,
-                              count > 4 ? src[4] : 0,
-                              count > 0 ? dst[0] : 0, count > 1 ? dst[1] : 0,
-                              count > 2 ? dst[2] : 0, count > 3 ? dst[3] : 0,
-                              count > 4 ? dst[4] : 0);
+                SGL_TRACE_DRAW("U8_CONV ebo_off=%u count=%d first5_src=[%u,%u,%u,%u,%u] "
+                               "first5_dst=[%u,%u,%u,%u,%u]",
+                               (uint32_t)ebo, count, count > 0 ? src[0] : 0, count > 1 ? src[1] : 0,
+                               count > 2 ? src[2] : 0, count > 3 ? src[3] : 0,
+                               count > 4 ? src[4] : 0, count > 0 ? dst[0] : 0,
+                               count > 1 ? dst[1] : 0, count > 2 ? dst[2] : 0,
+                               count > 3 ? dst[3] : 0, count > 4 ? dst[4] : 0);
                 /* Ensure converted indices are committed to DRAM */
                 DK_ARM_STORE_BARRIER();
                 dk->client_array_offset = alignedOffset + size16;
                 idxAddr = data_gpu_base + clientAddr;
             } else {
-                SGL_ERROR_BACKEND("draw_elements: out of client array memory for EBO uint8 conversion");
+                SGL_ERROR_BACKEND(
+                    "draw_elements: out of client array memory for EBO uint8 conversion");
                 return;
             }
         } else {
@@ -488,7 +490,7 @@ void dk_draw_elements(sgl_backend_t *be, GLenum mode, GLsizei count,
         }
     } else {
         /* Client-side indices - copy to GPU staging area */
-        uint8_t *cpu_base = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock);
+        uint8_t *cpu_base = (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock);
         DkGpuAddr gpu_base = dkMemBlockGetGpuAddr(dk->data_memblock);
 
         /* Align offset */
@@ -503,8 +505,8 @@ void dk_draw_elements(sgl_backend_t *be, GLenum mode, GLsizei count,
                 return;
             }
 
-            uint16_t *dst = (uint16_t*)(cpu_base + clientAddr);
-            const uint8_t *src = (const uint8_t*)indices;
+            uint16_t *dst = (uint16_t *)(cpu_base + clientAddr);
+            const uint8_t *src = (const uint8_t *)indices;
             for (GLsizei i = 0; i < count; i++) {
                 dst[i] = src[i];
             }
@@ -547,8 +549,7 @@ void dk_draw_elements(sgl_backend_t *be, GLenum mode, GLsizei count,
         dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, 0);
     }
 
-    DK_VERBOSE_PRINT("[DK] draw_elements: mode=0x%X count=%d type=0x%X ebo=%u\n",
-                     mode, count, type, ebo);
-    SGL_TRACE_DRAW("draw_elements mode=0x%X count=%d type=0x%X ebo=%u",
-                   mode, count, type, ebo);
+    DK_VERBOSE_PRINT("[DK] draw_elements: mode=0x%X count=%d type=0x%X ebo=%u\n", mode, count, type,
+                     ebo);
+    SGL_TRACE_DRAW("draw_elements mode=0x%X count=%d type=0x%X ebo=%u", mode, count, type, ebo);
 }

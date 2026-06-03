@@ -21,8 +21,8 @@ extern "C" {
 /*
  * Shader stage constants for sglRegisterUniform
  */
-#define SGL_STAGE_VERTEX    0
-#define SGL_STAGE_FRAGMENT  1
+#define SGL_STAGE_VERTEX 0
+#define SGL_STAGE_FRAGMENT 1
 
 /*
  * Binary format for glShaderBinary - deko3d precompiled DKSH format
@@ -91,10 +91,8 @@ GL_APICALL void GL_APIENTRY sglClearUniformRegistry(void);
  *   bits 16-23 = binding
  *   bits 0-15  = byte_offset
  */
-GL_APICALL GLboolean GL_APIENTRY sglRegisterPackedUniform(const GLchar *name,
-                                                           GLint stage,
-                                                           GLint binding,
-                                                           GLint byte_offset);
+GL_APICALL GLboolean GL_APIENTRY sglRegisterPackedUniform(const GLchar *name, GLint stage,
+                                                          GLint binding, GLint byte_offset);
 
 /*
  * sglSetPackedUBOSize - Set the total size of a packed UBO binding
@@ -107,8 +105,7 @@ GL_APICALL GLboolean GL_APIENTRY sglRegisterPackedUniform(const GLchar *name,
  *   binding - Packed UBO index (0=main, 1=bones)
  *   size    - Total size in bytes (max SGL_MAX_PACKED_UBO_SIZE)
  */
-GL_APICALL void GL_APIENTRY sglSetPackedUBOSize(GLint stage, GLint binding,
-                                                  GLint size);
+GL_APICALL void GL_APIENTRY sglSetPackedUBOSize(GLint stage, GLint binding, GLint size);
 
 /*
  * sgl_load_shader_from_file - Load a precompiled deko3d shader from file

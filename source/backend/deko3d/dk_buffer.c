@@ -26,7 +26,7 @@
 sgl_handle_t dk_create_buffer(sgl_backend_t *be) {
     (void)be;
     /* Backend doesn't allocate separate handles - uses data_memblock offsets */
-    return 1;  /* Non-zero to indicate success */
+    return 1; /* Non-zero to indicate success */
 }
 
 void dk_delete_buffer(sgl_backend_t *be, sgl_handle_t handle) {
@@ -48,15 +48,16 @@ void dk_delete_buffer(sgl_backend_t *be, sgl_handle_t handle) {
  * previous and/or next block. Shared by dk_buffer_free() and the deferred-free
  * processing in dk_submit_and_reset() (both return blocks to the same list). */
 void dk_vbo_free_insert(dk_backend_data_t *dk, uint32_t offset, uint32_t size) {
-    if (offset == 0 || size == 0) return;
+    if (offset == 0 || size == 0)
+        return;
 
     /* Only free blocks from the VBO region (not client_array or uniform) */
-    if (offset >= dk->client_array_base) return;
+    if (offset >= dk->client_array_base)
+        return;
 
     /* Find insertion point (keep list sorted by offset) */
     int insertAt = 0;
-    while (insertAt < dk->vbo_free_count &&
-           dk->vbo_free_list[insertAt].offset < offset)
+    while (insertAt < dk->vbo_free_count && dk->vbo_free_list[insertAt].offset < offset)
         insertAt++;
 
     /* Try coalescing with previous block */
@@ -71,21 +72,20 @@ void dk_vbo_free_insert(dk_backend_data_t *dk, uint32_t offset, uint32_t size) {
                 prev->offset + prev->size == dk->vbo_free_list[insertAt].offset) {
                 prev->size += dk->vbo_free_list[insertAt].size;
                 /* Remove the next block */
-                memmove(&dk->vbo_free_list[insertAt],
-                        &dk->vbo_free_list[insertAt + 1],
+                memmove(&dk->vbo_free_list[insertAt], &dk->vbo_free_list[insertAt + 1],
                         (dk->vbo_free_count - insertAt - 1) * sizeof(sgl_vbo_free_block_t));
                 dk->vbo_free_count--;
             }
 
-            SGL_TRACE_BUFFER("buffer_free: coalesced with prev -> offset=%u size=%u (free_count=%d)",
-                             prev->offset, prev->size, dk->vbo_free_count);
+            SGL_TRACE_BUFFER(
+                "buffer_free: coalesced with prev -> offset=%u size=%u (free_count=%d)",
+                prev->offset, prev->size, dk->vbo_free_count);
             return;
         }
     }
 
     /* Try coalescing with next block */
-    if (insertAt < dk->vbo_free_count &&
-        offset + size == dk->vbo_free_list[insertAt].offset) {
+    if (insertAt < dk->vbo_free_count && offset + size == dk->vbo_free_list[insertAt].offset) {
         dk->vbo_free_list[insertAt].offset = offset;
         dk->vbo_free_list[insertAt].size += size;
 
@@ -96,19 +96,19 @@ void dk_vbo_free_insert(dk_backend_data_t *dk, uint32_t offset, uint32_t size) {
 
     /* No coalescing possible — insert new block */
     if (dk->vbo_free_count >= SGL_VBO_FREE_LIST_MAX) {
-        SGL_TRACE_BUFFER("buffer_free: free list full, leaking %u bytes at offset %u", size, offset);
+        SGL_TRACE_BUFFER("buffer_free: free list full, leaking %u bytes at offset %u", size,
+                         offset);
         return;
     }
 
-    memmove(&dk->vbo_free_list[insertAt + 1],
-            &dk->vbo_free_list[insertAt],
+    memmove(&dk->vbo_free_list[insertAt + 1], &dk->vbo_free_list[insertAt],
             (dk->vbo_free_count - insertAt) * sizeof(sgl_vbo_free_block_t));
     dk->vbo_free_list[insertAt].offset = offset;
     dk->vbo_free_list[insertAt].size = size;
     dk->vbo_free_count++;
 
-    SGL_TRACE_BUFFER("buffer_free: added block offset=%u size=%u (free_count=%d)",
-                     offset, size, dk->vbo_free_count);
+    SGL_TRACE_BUFFER("buffer_free: added block offset=%u size=%u (free_count=%d)", offset, size,
+                     dk->vbo_free_count);
 }
 
 void dk_buffer_free(sgl_backend_t *be, uint32_t offset, uint32_t size) {
@@ -117,15 +117,15 @@ void dk_buffer_free(sgl_backend_t *be, uint32_t offset, uint32_t size) {
 
 const void *dk_get_data_cpu_ptr(sgl_backend_t *be, uint32_t offset) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
-    return (const uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock) + offset;
+    return (const uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock) + offset;
 }
 
 /* ============================================================================
  * Buffer Data Upload
  * ============================================================================ */
 
-uint32_t dk_buffer_data(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
-                        GLsizeiptr size, const void *data, GLenum usage) {
+uint32_t dk_buffer_data(sgl_backend_t *be, sgl_handle_t handle, GLenum target, GLsizeiptr size,
+                        const void *data, GLenum usage) {
     (void)handle;
     (void)target;
     (void)usage;
@@ -148,10 +148,8 @@ uint32_t dk_buffer_data(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
                  * waste at the head (the block offset was not 256-aligned),
                  * keep it as its own free block instead of leaking it — it
                  * coalesces with neighbours on a later free. */
-                if (alignment_waste > 0 &&
-                    dk->vbo_free_count < SGL_VBO_FREE_LIST_MAX) {
-                    memmove(&dk->vbo_free_list[i + 2],
-                            &dk->vbo_free_list[i + 1],
+                if (alignment_waste > 0 && dk->vbo_free_count < SGL_VBO_FREE_LIST_MAX) {
+                    memmove(&dk->vbo_free_list[i + 2], &dk->vbo_free_list[i + 1],
                             (dk->vbo_free_count - i - 1) * sizeof(sgl_vbo_free_block_t));
                     dk->vbo_free_list[i].offset = block_offset;
                     dk->vbo_free_list[i].size = alignment_waste;
@@ -169,15 +167,14 @@ uint32_t dk_buffer_data(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
                 dk->vbo_free_list[i].size = alignment_waste;
             } else {
                 /* Remove entire block */
-                memmove(&dk->vbo_free_list[i],
-                        &dk->vbo_free_list[i + 1],
+                memmove(&dk->vbo_free_list[i], &dk->vbo_free_list[i + 1],
                         (dk->vbo_free_count - i - 1) * sizeof(sgl_vbo_free_block_t));
                 dk->vbo_free_count--;
             }
 
             /* Copy data if provided */
             if (data && size > 0) {
-                void *dst = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock) + aligned;
+                void *dst = (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock) + aligned;
                 memcpy(dst, data, size);
                 dk->vbo_data_dirty = true;
             }
@@ -191,14 +188,15 @@ uint32_t dk_buffer_data(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
     /* No free block fits — bump allocate */
     uint32_t aligned_offset = SGL_ALIGN_UP(dk->data_offset, SGL_UNIFORM_ALIGNMENT);
     if (aligned_offset + size > dk->client_array_base) {
-        SGL_ERROR_BACKEND("Buffer allocation failed: out of memory (need %u at offset %u, limit %u)",
-                          (unsigned)size, aligned_offset, dk->client_array_base);
+        SGL_ERROR_BACKEND(
+            "Buffer allocation failed: out of memory (need %u at offset %u, limit %u)",
+            (unsigned)size, aligned_offset, dk->client_array_base);
         return 0;
     }
 
     /* Copy data if provided */
     if (data && size > 0) {
-        void *dst = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock) + aligned_offset;
+        void *dst = (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock) + aligned_offset;
         memcpy(dst, data, size);
         dk->vbo_data_dirty = true;
     }
@@ -222,15 +220,15 @@ uint32_t dk_buffer_data(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
  * glReadPixels), which would corrupt orphaned buffer data during verification.
  * ============================================================================ */
 
-uint32_t dk_buffer_data_orphan(sgl_backend_t *be, GLsizeiptr size,
-                                uint32_t old_offset, uint32_t old_size) {
+uint32_t dk_buffer_data_orphan(sgl_backend_t *be, GLsizeiptr size, uint32_t old_offset,
+                               uint32_t old_size) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
     /* Defer-free old allocation: can't free immediately because in-flight
      * draws may still reference it. Will be freed in dk_submit_and_reset
      * after WaitIdle guarantees the GPU is done. */
     if (old_offset != 0 && old_size != 0 &&
-        old_offset < dk->client_array_base &&  /* Only VBO region blocks */
+        old_offset < dk->client_array_base && /* Only VBO region blocks */
         dk->deferred_free_count < SGL_DEFERRED_FREE_MAX) {
         dk->deferred_free[dk->deferred_free_count].offset = old_offset;
         dk->deferred_free[dk->deferred_free_count].size = old_size;
@@ -252,13 +250,13 @@ uint32_t dk_buffer_data_orphan(sgl_backend_t *be, GLsizeiptr size,
  * Buffer Sub-Data Update
  * ============================================================================ */
 
-void dk_buffer_sub_data(sgl_backend_t *be, sgl_handle_t handle,
-                        uint32_t buffer_offset, GLsizeiptr size, const void *data) {
+void dk_buffer_sub_data(sgl_backend_t *be, sgl_handle_t handle, uint32_t buffer_offset,
+                        GLsizeiptr size, const void *data) {
     (void)handle;
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
     if (data && size > 0) {
-        void *dst = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock) + buffer_offset;
+        void *dst = (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock) + buffer_offset;
         memcpy(dst, data, size);
         dk->vbo_data_dirty = true;
     }

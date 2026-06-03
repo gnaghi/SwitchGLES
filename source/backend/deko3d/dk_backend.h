@@ -30,7 +30,7 @@ typedef struct dk_backend_data {
     /* Command buffers - one per framebuffer slot */
     DkMemBlock cmdbuf_memblock[SGL_FB_NUM];
     DkCmdBuf cmdbufs[SGL_FB_NUM];
-    DkCmdBuf cmdbuf;  /* Active command buffer */
+    DkCmdBuf cmdbuf; /* Active command buffer */
     int current_cmdbuf;
 
     /* Fences for synchronization */
@@ -40,13 +40,14 @@ typedef struct dk_backend_data {
     /* Shader code memory */
     DkMemBlock code_memblock;
     uint32_t code_offset;
-    uint32_t active_shader_count;   /* Track loaded shaders for code memory reset */
-    uint32_t active_program_count;  /* Track linked programs — code memory only resets when both are 0 */
+    uint32_t active_shader_count; /* Track loaded shaders for code memory reset */
+    uint32_t
+        active_program_count; /* Track linked programs — code memory only resets when both are 0 */
 
     /* Data memory (vertices, indices, uniforms) */
     DkMemBlock data_memblock;
     uint32_t data_offset;
-    uint32_t data_offset_watermark;  /* Peak VBO bump allocator usage */
+    uint32_t data_offset_watermark; /* Peak VBO bump allocator usage */
 
     /* VBO free list for memory reclamation */
     sgl_vbo_free_block_t vbo_free_list[SGL_VBO_FREE_LIST_MAX];
@@ -59,7 +60,7 @@ typedef struct dk_backend_data {
     /* Client array region (per-frame, per-slot to avoid GPU race conditions) */
     uint32_t client_array_base;
     uint32_t client_array_offset;
-    uint32_t client_array_slot_end;  /* End boundary for current slot's sub-region */
+    uint32_t client_array_slot_end; /* End boundary for current slot's sub-region */
 
     /* Texture memory */
     DkMemBlock texture_memblock;
@@ -78,15 +79,15 @@ typedef struct dk_backend_data {
     DkGpuAddr image_descriptor_addr;
     DkGpuAddr sampler_descriptor_addr;
     bool descriptors_bound;
-    bool program_bound;     /* true after valid program bound (both VS+FS), skip draw if false */
-    bool cmdbuf_submitted;  /* true after dk_end_frame finishes the cmdbuf */
+    bool program_bound;    /* true after valid program bound (both VS+FS), skip draw if false */
+    bool cmdbuf_submitted; /* true after dk_end_frame finishes the cmdbuf */
 
     /* Swapchain (from surface) */
     DkSwapchain swapchain;
 
     /* Framebuffer images */
     DkImage *framebuffers;
-    DkImage *depth_images[SGL_FB_NUM];  /* Per-slot depth buffers */
+    DkImage *depth_images[SGL_FB_NUM]; /* Per-slot depth buffers */
     int num_framebuffers;
 
     /* Current framebuffer slot */
@@ -100,19 +101,21 @@ typedef struct dk_backend_data {
     DkImage textures[SGL_MAX_TEXTURES];
     DkImageDescriptor texture_descriptors[SGL_MAX_TEXTURES];
     bool texture_initialized[SGL_MAX_TEXTURES];
-    bool texture_is_cubemap[SGL_MAX_TEXTURES];  /* true if texture is cubemap, false if 2D */
-    bool texture_used_as_rt[SGL_MAX_TEXTURES];  /* true if texture was used as FBO render target */
+    bool texture_is_cubemap[SGL_MAX_TEXTURES];   /* true if texture is cubemap, false if 2D */
+    bool texture_used_as_rt[SGL_MAX_TEXTURES];   /* true if texture was used as FBO render target */
     uint8_t cubemap_face_mask[SGL_MAX_TEXTURES]; /* bitmask of uploaded cubemap faces (6 bits) */
-    bool cubemap_needs_barrier[SGL_MAX_TEXTURES]; /* true after cubemap complete, cleared after first barrier */
+    bool cubemap_needs_barrier[SGL_MAX_TEXTURES]; /* true after cubemap complete, cleared after
+                                                     first barrier */
 
     /* Texture dimensions and mipmap info - indexed by texture ID */
     uint32_t texture_width[SGL_MAX_TEXTURES];
     uint32_t texture_height[SGL_MAX_TEXTURES];
     uint32_t texture_mip_levels[SGL_MAX_TEXTURES];
-    uint32_t texture_level_mask[SGL_MAX_TEXTURES];  /* Bitmask of defined mip levels (bit N = level N uploaded) */
+    uint32_t texture_level_mask[SGL_MAX_TEXTURES]; /* Bitmask of defined mip levels (bit N = level N
+                                                      uploaded) */
     DkImageFormat texture_format[SGL_MAX_TEXTURES];
-    GLenum texture_gl_format[SGL_MAX_TEXTURES];  /* Original GL internalformat (for swizzle/bpp) */
-    GLenum texture_gl_type[SGL_MAX_TEXTURES];    /* Original GL type (for packed format bpp) */
+    GLenum texture_gl_format[SGL_MAX_TEXTURES]; /* Original GL internalformat (for swizzle/bpp) */
+    GLenum texture_gl_type[SGL_MAX_TEXTURES];   /* Original GL type (for packed format bpp) */
 
     /* Texture sampler parameters - indexed by texture ID */
     GLenum texture_min_filter[SGL_MAX_TEXTURES];
@@ -122,7 +125,8 @@ typedef struct dk_backend_data {
 
     /* Renderbuffer depth images - indexed by renderbuffer ID */
     DkImage renderbuffer_images[SGL_MAX_RENDERBUFFERS];
-    DkMemBlock renderbuffer_memblocks[SGL_MAX_RENDERBUFFERS];  /* Dedicated memblock per renderbuffer */
+    DkMemBlock
+        renderbuffer_memblocks[SGL_MAX_RENDERBUFFERS]; /* Dedicated memblock per renderbuffer */
     bool renderbuffer_initialized[SGL_MAX_RENDERBUFFERS];
     uint32_t renderbuffer_width[SGL_MAX_RENDERBUFFERS];
     uint32_t renderbuffer_height[SGL_MAX_RENDERBUFFERS];
@@ -143,13 +147,13 @@ typedef struct dk_backend_data {
     bool state_initialized;
 
     /* Current FBO tracking - for debug and clear operations */
-    sgl_handle_t current_fbo;        /* Currently bound FBO (0 = default) */
-    sgl_handle_t current_fbo_color;  /* Color attachment handle (texture or renderbuffer) */
-    sgl_handle_t current_fbo_depth;  /* Depth attachment handle (texture or renderbuffer) */
+    sgl_handle_t current_fbo;         /* Currently bound FBO (0 = default) */
+    sgl_handle_t current_fbo_color;   /* Color attachment handle (texture or renderbuffer) */
+    sgl_handle_t current_fbo_depth;   /* Depth attachment handle (texture or renderbuffer) */
     sgl_handle_t current_fbo_stencil; /* Stencil attachment handle (renderbuffer) */
-    bool current_fbo_color_is_rb;    /* true if color attachment is a renderbuffer */
-    bool current_fbo_depth_is_rb;    /* true if depth attachment is a renderbuffer */
-    bool current_fbo_stencil_is_rb;  /* true if stencil attachment is a renderbuffer */
+    bool current_fbo_color_is_rb;     /* true if color attachment is a renderbuffer */
+    bool current_fbo_depth_is_rb;     /* true if depth attachment is a renderbuffer */
+    bool current_fbo_stencil_is_rb;   /* true if stencil attachment is a renderbuffer */
 
     /* Diagnostic counters (per-frame, reset in dk_begin_frame) */
     uint32_t diag_orphan_flushes;    /* Times dk_submit_and_reset called from orphan overflow */
@@ -161,14 +165,14 @@ typedef struct dk_backend_data {
      * flush_finish tests do up to 2^20 draws without eglSwapBuffers.
      * We periodically flush to avoid cmdbuf (~4MB, ~4K draws) and
      * client_array (~85MB/slot) overflow. */
-    uint32_t draws_since_flush;      /* Draws since last dk_submit_and_reset */
-    bool in_overflow_callback;       /* Re-entrancy guard for overflow callback */
-    bool vbo_data_dirty;             /* true after CPU writes to VBO region — need GPU L2 invalidation */
+    uint32_t draws_since_flush; /* Draws since last dk_submit_and_reset */
+    bool in_overflow_callback;  /* Re-entrancy guard for overflow callback */
+    bool vbo_data_dirty;        /* true after CPU writes to VBO region — need GPU L2 invalidation */
 
-    /* Deferred VBO free list — blocks freed only after GPU sync (WaitIdle).
-     * Used by buffer orphaning: old allocation can't be freed immediately
-     * because in-flight draws may still reference it. */
-    #define SGL_DEFERRED_FREE_MAX 64
+/* Deferred VBO free list — blocks freed only after GPU sync (WaitIdle).
+ * Used by buffer orphaning: old allocation can't be freed immediately
+ * because in-flight draws may still reference it. */
+#define SGL_DEFERRED_FREE_MAX 64
     sgl_vbo_free_block_t deferred_free[SGL_DEFERRED_FREE_MAX];
     int deferred_free_count;
 } dk_backend_data_t;
@@ -189,8 +193,8 @@ DkPrimitive dk_convert_primitive(GLenum mode);
 DkImageFormat dk_convert_format(GLenum internalformat, GLenum format, GLenum type);
 
 /* Vertex attribute helpers */
-void dk_get_attrib_format(GLenum type, GLint size, GLboolean normalized,
-                          DkVtxAttribSize *outSize, DkVtxAttribType *outType);
+void dk_get_attrib_format(GLenum type, GLint size, GLboolean normalized, DkVtxAttribSize *outSize,
+                          DkVtxAttribType *outType);
 GLsizei dk_get_type_size(GLenum type);
 
 #endif /* DK_BACKEND_H */

@@ -36,7 +36,9 @@
 #define DK_ARM_STORE_BARRIER() __asm__ volatile("dsb st" ::: "memory")
 #else
 /* No-op on non-ARM platforms (Windows cross-compilation, etc.) */
-#define DK_ARM_STORE_BARRIER() do {} while(0)
+#define DK_ARM_STORE_BARRIER()                                                                     \
+    do {                                                                                           \
+    } while (0)
 #endif
 
 /* ============================================================================
@@ -47,9 +49,15 @@
 #define DK_DEBUG_VERBOSE 0
 
 #if DK_DEBUG_VERBOSE
-#define DK_VERBOSE_PRINT(...) do { printf(__VA_ARGS__); fflush(stdout); } while(0)
+#define DK_VERBOSE_PRINT(...)                                                                      \
+    do {                                                                                           \
+        printf(__VA_ARGS__);                                                                       \
+        fflush(stdout);                                                                            \
+    } while (0)
 #else
-#define DK_VERBOSE_PRINT(...) do {} while(0)
+#define DK_VERBOSE_PRINT(...)                                                                      \
+    do {                                                                                           \
+    } while (0)
 #endif
 
 /* ============================================================================
@@ -326,8 +334,8 @@ void dk_delete_buffer(sgl_backend_t *be, sgl_handle_t handle);
  * @param usage     GL usage hint
  * @return GPU memory offset of the allocated buffer, or 0 on failure
  */
-uint32_t dk_buffer_data(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
-                        GLsizeiptr size, const void *data, GLenum usage);
+uint32_t dk_buffer_data(sgl_backend_t *be, sgl_handle_t handle, GLenum target, GLsizeiptr size,
+                        const void *data, GLenum usage);
 
 /**
  * Update a portion of a GPU buffer.
@@ -338,8 +346,8 @@ uint32_t dk_buffer_data(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
  * @param size          Size of data to update
  * @param data          Pointer to source data
  */
-void dk_buffer_sub_data(sgl_backend_t *be, sgl_handle_t handle,
-                        uint32_t buffer_offset, GLsizeiptr size, const void *data);
+void dk_buffer_sub_data(sgl_backend_t *be, sgl_handle_t handle, uint32_t buffer_offset,
+                        GLsizeiptr size, const void *data);
 
 /**
  * Allocate a new buffer region for orphaning (from VBO region with deferred free).
@@ -352,8 +360,8 @@ void dk_buffer_sub_data(sgl_backend_t *be, sgl_handle_t handle,
  * @param old_size    Previous allocation size
  * @return Absolute offset into data_memblock, or 0 on failure
  */
-uint32_t dk_buffer_data_orphan(sgl_backend_t *be, GLsizeiptr size,
-                                uint32_t old_offset, uint32_t old_size);
+uint32_t dk_buffer_data_orphan(sgl_backend_t *be, GLsizeiptr size, uint32_t old_offset,
+                               uint32_t old_size);
 
 /**
  * Return a VBO allocation to the free list for reuse.
@@ -391,8 +399,8 @@ void dk_draw_arrays(sgl_backend_t *be, GLenum mode, GLint first, GLsizei count);
  * @param indices   Pointer to indices (client array) or offset if EBO bound
  * @param ebo       Element buffer object handle (0 for client-side indices)
  */
-void dk_draw_elements(sgl_backend_t *be, GLenum mode, GLsizei count,
-                      GLenum type, const void *indices, sgl_handle_t ebo);
+void dk_draw_elements(sgl_backend_t *be, GLenum mode, GLsizei count, GLenum type,
+                      const void *indices, sgl_handle_t ebo);
 
 /**
  * Bind vertex attributes for drawing.
@@ -404,8 +412,8 @@ void dk_draw_elements(sgl_backend_t *be, GLenum mode, GLsizei count,
  * @param first         First vertex index (for offset calculation)
  * @param count         Number of vertices (for size calculation)
  */
-void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attribs,
-                            int num_attribs, GLint first, GLsizei count);
+void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attribs, int num_attribs,
+                            GLint first, GLsizei count);
 
 /* ============================================================================
  * Uniform Operations (dk_uniform.c)
@@ -453,8 +461,7 @@ bool dk_load_shader_file(sgl_backend_t *be, sgl_handle_t handle, const char *pat
  * @param size      Size of binary data in bytes
  * @return true on success, false on failure
  */
-bool dk_load_shader_binary(sgl_backend_t *be, sgl_handle_t handle,
-                           const void *data, size_t size);
+bool dk_load_shader_binary(sgl_backend_t *be, sgl_handle_t handle, const void *data, size_t size);
 
 /**
  * Delete a shader and decrement active shader count.
@@ -484,8 +491,8 @@ void dk_delete_program(sgl_backend_t *be, sgl_handle_t handle);
  * @param fragment_shader   Fragment shader handle
  * @return true on success, false on failure
  */
-bool dk_link_program(sgl_backend_t *be, sgl_handle_t program,
-                     sgl_handle_t vertex_shader, sgl_handle_t fragment_shader);
+bool dk_link_program(sgl_backend_t *be, sgl_handle_t program, sgl_handle_t vertex_shader,
+                     sgl_handle_t fragment_shader);
 
 /**
  * Bind a program for rendering.
@@ -499,13 +506,10 @@ bool dk_link_program(sgl_backend_t *be, sgl_handle_t program,
  * @param fragment_uniforms Fragment stage uniform bindings
  * @param max_uniforms      Maximum number of uniform bindings to process
  */
-void dk_bind_program(sgl_backend_t *be, sgl_handle_t program,
-                     sgl_handle_t vertex_shader, sgl_handle_t fragment_shader,
-                     const sgl_uniform_binding_t *vertex_uniforms,
-                     const sgl_uniform_binding_t *fragment_uniforms,
-                     int max_uniforms,
-                     const sgl_packed_ubo_t *packed_vertex,
-                     const sgl_packed_ubo_t *packed_fragment,
+void dk_bind_program(sgl_backend_t *be, sgl_handle_t program, sgl_handle_t vertex_shader,
+                     sgl_handle_t fragment_shader, const sgl_uniform_binding_t *vertex_uniforms,
+                     const sgl_uniform_binding_t *fragment_uniforms, int max_uniforms,
+                     const sgl_packed_ubo_t *packed_vertex, const sgl_packed_ubo_t *packed_fragment,
                      int max_packed_ubos);
 
 /* ============================================================================
@@ -551,9 +555,8 @@ void dk_invalidate_texture(sgl_backend_t *be, sgl_handle_t handle);
  * @param type              Pixel data type
  * @param pixels            Pointer to pixel data (may be NULL)
  */
-void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
-                         GLenum target, GLint level, GLint internalformat,
-                         GLsizei width, GLsizei height, GLint border,
+void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, GLint level,
+                         GLint internalformat, GLsizei width, GLsizei height, GLint border,
                          GLenum format, GLenum type, const void *pixels);
 
 /**
@@ -571,10 +574,8 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
  * @param type      Pixel data type
  * @param pixels    Pointer to pixel data
  */
-void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
-                             GLenum target, GLint level,
-                             GLint xoffset, GLint yoffset,
-                             GLsizei width, GLsizei height,
+void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, GLint level,
+                             GLint xoffset, GLint yoffset, GLsizei width, GLsizei height,
                              GLenum format, GLenum type, const void *pixels);
 
 /**
@@ -586,8 +587,8 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
  * @param pname     Parameter name (GL_TEXTURE_MIN_FILTER, etc.)
  * @param param     Parameter value
  */
-void dk_texture_parameter(sgl_backend_t *be, sgl_handle_t handle,
-                          GLenum target, GLenum pname, GLint param);
+void dk_texture_parameter(sgl_backend_t *be, sgl_handle_t handle, GLenum target, GLenum pname,
+                          GLint param);
 
 /**
  * Bind a texture to a texture unit for sampling.
@@ -619,9 +620,8 @@ void dk_generate_mipmap(sgl_backend_t *be, sgl_handle_t handle);
  * @param width             Copy width
  * @param height            Copy height
  */
-void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
-                          GLenum target, GLint level, GLenum internalformat,
-                          GLint x, GLint y, GLsizei width, GLsizei height);
+void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, GLint level,
+                          GLenum internalformat, GLint x, GLint y, GLsizei width, GLsizei height);
 
 /**
  * Copy framebuffer to a texture sub-region.
@@ -637,28 +637,25 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
  * @param width     Copy width
  * @param height    Copy height
  */
-void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
-                              GLenum target, GLint level,
-                              GLint xoffset, GLint yoffset,
-                              GLint x, GLint y, GLsizei width, GLsizei height);
+void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, GLint level,
+                              GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei width,
+                              GLsizei height);
 
 /**
  * Upload compressed texture data (glCompressedTexImage2D).
  * Supports ASTC, ETC2, and BC (S3TC) formats natively.
  */
-void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
-                                     GLenum target, GLint level, GLenum internalformat,
-                                     GLsizei width, GLsizei height,
-                                     GLsizei imageSize, const void *data);
+void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
+                                    GLint level, GLenum internalformat, GLsizei width,
+                                    GLsizei height, GLsizei imageSize, const void *data);
 
 /**
  * Update a region of a compressed texture (glCompressedTexSubImage2D).
  */
-void dk_compressed_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
-                                         GLenum target, GLint level,
-                                         GLint xoffset, GLint yoffset,
-                                         GLsizei width, GLsizei height,
-                                         GLenum format, GLsizei imageSize, const void *data);
+void dk_compressed_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
+                                        GLint level, GLint xoffset, GLint yoffset, GLsizei width,
+                                        GLsizei height, GLenum format, GLsizei imageSize,
+                                        const void *data);
 
 /* ============================================================================
  * Framebuffer Operations (dk_framebuffer.c)
@@ -672,9 +669,8 @@ void dk_compressed_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
  * @param color_tex     Color attachment texture handle
  * @param depth_rb      Depth renderbuffer handle (0 for none/default)
  */
-void dk_bind_framebuffer(sgl_backend_t *be, sgl_handle_t handle,
-                         sgl_handle_t color_tex, sgl_handle_t depth_rb,
-                         bool color_is_rb, bool depth_is_rb,
+void dk_bind_framebuffer(sgl_backend_t *be, sgl_handle_t handle, sgl_handle_t color_tex,
+                         sgl_handle_t depth_rb, bool color_is_rb, bool depth_is_rb,
                          sgl_handle_t stencil_rb, bool stencil_is_rb);
 
 /**
@@ -686,8 +682,8 @@ void dk_bind_framebuffer(sgl_backend_t *be, sgl_handle_t handle,
  * @param width             Width in pixels
  * @param height            Height in pixels
  */
-void dk_renderbuffer_storage(sgl_backend_t *be, sgl_handle_t handle,
-                              GLenum internalformat, GLsizei width, GLsizei height);
+void dk_renderbuffer_storage(sgl_backend_t *be, sgl_handle_t handle, GLenum internalformat,
+                             GLsizei width, GLsizei height);
 
 /**
  * Delete a renderbuffer's GPU resources.
@@ -710,12 +706,10 @@ void dk_delete_renderbuffer(sgl_backend_t *be, sgl_handle_t handle);
  * @param mask            GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT, etc.
  * @param filter          GL_NEAREST or GL_LINEAR
  */
-void dk_blit_framebuffer(sgl_backend_t *be,
-                          sgl_handle_t read_fbo, sgl_handle_t read_color_tex,
-                          sgl_handle_t write_fbo, sgl_handle_t write_color_tex,
-                          GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1,
-                          GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1,
-                          GLbitfield mask, GLenum filter);
+void dk_blit_framebuffer(sgl_backend_t *be, sgl_handle_t read_fbo, sgl_handle_t read_color_tex,
+                         sgl_handle_t write_fbo, sgl_handle_t write_color_tex, GLint srcX0,
+                         GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0,
+                         GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter);
 
 /**
  * Read pixels from the current framebuffer.
@@ -729,8 +723,7 @@ void dk_blit_framebuffer(sgl_backend_t *be,
  * @param type      Pixel type (GL_UNSIGNED_BYTE)
  * @param pixels    Destination buffer
  */
-void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y,
-                    GLsizei width, GLsizei height,
+void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y, GLsizei width, GLsizei height,
                     GLenum format, GLenum type, void *pixels);
 
 /* ============================================================================

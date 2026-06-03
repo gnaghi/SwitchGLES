@@ -17,18 +17,18 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#define SGL_CACHE_MAGIC    0x43474C53  /* "SGLC" */
-#define SGL_CACHE_VERSION  7
-#define SGL_CACHE_DIR      "sdmc:/switch/switchgles/shader_cache"
+#define SGL_CACHE_MAGIC 0x43474C53 /* "SGLC" */
+#define SGL_CACHE_VERSION 7
+#define SGL_CACHE_DIR "sdmc:/switch/switchgles/shader_cache"
 
 /* Cache file header (16 bytes) */
 typedef struct {
-    uint32_t magic;       /* SGL_CACHE_MAGIC */
-    uint8_t  version;     /* SGL_CACHE_VERSION */
-    uint8_t  stage;       /* 0=vertex, 4=fragment (DkStage values) */
+    uint32_t magic;  /* SGL_CACHE_MAGIC */
+    uint8_t version; /* SGL_CACHE_VERSION */
+    uint8_t stage;   /* 0=vertex, 4=fragment (DkStage values) */
     uint16_t reserved;
-    uint32_t source_len;  /* Length of the GLSL source (for collision check) */
-    uint32_t dksh_size;   /* Size of the DKSH binary data following the header */
+    uint32_t source_len; /* Length of the GLSL source (for collision check) */
+    uint32_t dksh_size;  /* Size of the DKSH binary data following the header */
 } sgl_cache_header_t;
 
 /* FNV-1a hash — fast, no dependencies, good distribution */
@@ -42,8 +42,7 @@ static uint32_t sgl_hash_fnv1a(const char *str) {
 }
 
 static void sgl_cache_path(uint32_t hash, int stage, char *buf, size_t buf_size) {
-    snprintf(buf, buf_size, SGL_CACHE_DIR "/%08x_%s.dksh",
-             hash, (stage == 0) ? "vert" : "frag");
+    snprintf(buf, buf_size, SGL_CACHE_DIR "/%08x_%s.dksh", hash, (stage == 0) ? "vert" : "frag");
 }
 
 static void ensure_cache_dir(void) {
@@ -52,9 +51,9 @@ static void ensure_cache_dir(void) {
     mkdir(SGL_CACHE_DIR, 0755);
 }
 
-void *sgl_shader_cache_lookup(const char *glsl460_source, int stage,
-                               size_t *out_size) {
-    if (!glsl460_source || !out_size) return NULL;
+void *sgl_shader_cache_lookup(const char *glsl460_source, int stage, size_t *out_size) {
+    if (!glsl460_source || !out_size)
+        return NULL;
 
     uint32_t hash = sgl_hash_fnv1a(glsl460_source);
     uint32_t source_len = (uint32_t)strlen(glsl460_source);
@@ -63,7 +62,8 @@ void *sgl_shader_cache_lookup(const char *glsl460_source, int stage,
     sgl_cache_path(hash, stage, path, sizeof(path));
 
     FILE *f = fopen(path, "rb");
-    if (!f) return NULL;
+    if (!f)
+        return NULL;
 
     /* Read and validate header */
     sgl_cache_header_t header;
@@ -72,13 +72,11 @@ void *sgl_shader_cache_lookup(const char *glsl460_source, int stage,
         return NULL;
     }
 
-    if (header.magic != SGL_CACHE_MAGIC ||
-        header.version != SGL_CACHE_VERSION ||
-        header.stage != (uint8_t)stage ||
-        header.source_len != source_len ||
+    if (header.magic != SGL_CACHE_MAGIC || header.version != SGL_CACHE_VERSION ||
+        header.stage != (uint8_t)stage || header.source_len != source_len ||
         header.dksh_size == 0) {
         fclose(f);
-        return NULL;  /* Stale or invalid cache entry */
+        return NULL; /* Stale or invalid cache entry */
     }
 
     /* Read DKSH binary */
@@ -99,9 +97,10 @@ void *sgl_shader_cache_lookup(const char *glsl460_source, int stage,
     return data;
 }
 
-void sgl_shader_cache_store(const char *glsl460_source, int stage,
-                             const void *dksh_data, size_t dksh_size) {
-    if (!glsl460_source || !dksh_data || dksh_size == 0) return;
+void sgl_shader_cache_store(const char *glsl460_source, int stage, const void *dksh_data,
+                            size_t dksh_size) {
+    if (!glsl460_source || !dksh_data || dksh_size == 0)
+        return;
 
     ensure_cache_dir();
 
@@ -111,7 +110,8 @@ void sgl_shader_cache_store(const char *glsl460_source, int stage,
     sgl_cache_path(hash, stage, path, sizeof(path));
 
     FILE *f = fopen(path, "wb");
-    if (!f) return;  /* SD card full or not mounted — silently skip */
+    if (!f)
+        return; /* SD card full or not mounted — silently skip */
 
     sgl_cache_header_t header;
     header.magic = SGL_CACHE_MAGIC;

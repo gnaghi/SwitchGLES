@@ -53,8 +53,10 @@ bool sgl_state_depth_set_func(sgl_state_depth_t *state, GLenum func) {
 
 bool sgl_state_depth_set_clear(sgl_state_depth_t *state, float depth) {
     /* GL ES 2.0 spec: depth clear value is clamped to [0, 1] */
-    if (depth < 0.0f) depth = 0.0f;
-    if (depth > 1.0f) depth = 1.0f;
+    if (depth < 0.0f)
+        depth = 0.0f;
+    if (depth > 1.0f)
+        depth = 1.0f;
     if (state->clear_depth == depth) {
         return false;
     }
@@ -70,13 +72,12 @@ bool sgl_state_stencil_set_test_enabled(sgl_state_depth_t *state, bool enabled) 
     return true;
 }
 
-bool sgl_state_stencil_set_func(sgl_state_depth_t *state, GLenum face,
-                                 GLenum func, GLint ref, GLuint mask) {
+bool sgl_state_stencil_set_func(sgl_state_depth_t *state, GLenum face, GLenum func, GLint ref,
+                                GLuint mask) {
     bool changed = false;
 
     if (face == GL_FRONT || face == GL_FRONT_AND_BACK) {
-        if (state->front.func != func ||
-            state->front.ref != ref ||
+        if (state->front.func != func || state->front.ref != ref ||
             state->front.func_mask != mask) {
             state->front.func = func;
             state->front.ref = ref;
@@ -86,9 +87,7 @@ bool sgl_state_stencil_set_func(sgl_state_depth_t *state, GLenum face,
     }
 
     if (face == GL_BACK || face == GL_FRONT_AND_BACK) {
-        if (state->back.func != func ||
-            state->back.ref != ref ||
-            state->back.func_mask != mask) {
+        if (state->back.func != func || state->back.ref != ref || state->back.func_mask != mask) {
             state->back.func = func;
             state->back.ref = ref;
             state->back.func_mask = mask;
@@ -99,13 +98,12 @@ bool sgl_state_stencil_set_func(sgl_state_depth_t *state, GLenum face,
     return changed;
 }
 
-bool sgl_state_stencil_set_op(sgl_state_depth_t *state, GLenum face,
-                               GLenum sfail, GLenum dpfail, GLenum dppass) {
+bool sgl_state_stencil_set_op(sgl_state_depth_t *state, GLenum face, GLenum sfail, GLenum dpfail,
+                              GLenum dppass) {
     bool changed = false;
 
     if (face == GL_FRONT || face == GL_FRONT_AND_BACK) {
-        if (state->front.fail_op != sfail ||
-            state->front.zfail_op != dpfail ||
+        if (state->front.fail_op != sfail || state->front.zfail_op != dpfail ||
             state->front.zpass_op != dppass) {
             state->front.fail_op = sfail;
             state->front.zfail_op = dpfail;
@@ -115,8 +113,7 @@ bool sgl_state_stencil_set_op(sgl_state_depth_t *state, GLenum face,
     }
 
     if (face == GL_BACK || face == GL_FRONT_AND_BACK) {
-        if (state->back.fail_op != sfail ||
-            state->back.zfail_op != dpfail ||
+        if (state->back.fail_op != sfail || state->back.zfail_op != dpfail ||
             state->back.zpass_op != dppass) {
             state->back.fail_op = sfail;
             state->back.zfail_op = dpfail;

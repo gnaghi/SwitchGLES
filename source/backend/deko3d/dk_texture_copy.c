@@ -24,14 +24,15 @@
  * failed with white textures. The CPU roundtrip avoids GPU copy issues.
  * ============================================================================ */
 
-void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
-                          GLenum target, GLint level, GLenum internalformat,
-                          GLint x, GLint y, GLsizei width, GLsizei height) {
+void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, GLint level,
+                          GLenum internalformat, GLint x, GLint y, GLsizei width, GLsizei height) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
     bool is_cubemap_face = dk_is_cubemap_face(target);
 
-    if (handle == 0 || handle >= SGL_MAX_TEXTURES) return;
-    if (width <= 0 || height <= 0) return;
+    if (handle == 0 || handle >= SGL_MAX_TEXTURES)
+        return;
+    if (width <= 0 || height <= 0)
+        return;
 
     /* Drain a still-in-flight submitted frame before recording into cmdbuf */
     dk_ensure_recordable(dk);
@@ -74,7 +75,7 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     /* === Step 2: Read framebuffer to CPU-accessible memory ===
      * Same approach as dk_read_pixels (proven to work). */
     size_t pixelBufSize = (size_t)width * (size_t)height * 4;
-    size_t alignedBufSize = SGL_ALIGN_UP(pixelBufSize, SGL_PAGE_ALIGNMENT);  /* 4KB align */
+    size_t alignedBufSize = SGL_ALIGN_UP(pixelBufSize, SGL_PAGE_ALIGNMENT); /* 4KB align */
 
     DkMemBlock readbackMem;
     DkMemBlockMaker memMaker;
@@ -98,8 +99,9 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     dkImageViewDefaults(&srcView, srcImage);
 
     /* Use width*4 as rowLength — matches dk_read_pixels (no extra alignment) */
-    DkImageRect srcRect = { (uint32_t)x, dk_src_y, 0, (uint32_t)width, (uint32_t)height, 1 };
-    DkCopyBuf readbackBuf = { dkMemBlockGetGpuAddr(readbackMem), (uint32_t)(width * 4), (uint32_t)height };
+    DkImageRect srcRect = {(uint32_t)x, dk_src_y, 0, (uint32_t)width, (uint32_t)height, 1};
+    DkCopyBuf readbackBuf = {dkMemBlockGetGpuAddr(readbackMem), (uint32_t)(width * 4),
+                             (uint32_t)height};
 
     dkCmdBufCopyImageToBuffer(dk->cmdbuf, &srcView, &srcRect, &readbackBuf, 0);
 
@@ -114,12 +116,16 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
             uint32_t max_dim = (uint32_t)(width > height ? width : height);
             uint32_t mip_levels = 1;
             uint32_t temp = max_dim;
-            while (temp > 1) { temp >>= 1; mip_levels++; }
+            while (temp > 1) {
+                temp >>= 1;
+                mip_levels++;
+            }
 
             DkImageLayoutMaker layoutMaker;
             dkImageLayoutMakerDefaults(&layoutMaker, dk->device);
             layoutMaker.flags = DkImageFlags_UsageRender | DkImageFlags_Usage2DEngine;
-            layoutMaker.format = dk_convert_format(internalformat, internalformat, GL_UNSIGNED_BYTE);
+            layoutMaker.format =
+                dk_convert_format(internalformat, internalformat, GL_UNSIGNED_BYTE);
             layoutMaker.type = DkImageType_Cubemap;
             layoutMaker.dimensions[0] = width;
             layoutMaker.dimensions[1] = height;
@@ -165,12 +171,16 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
             uint32_t max_dim = (uint32_t)(width > height ? width : height);
             uint32_t mip_levels = 1;
             uint32_t temp = max_dim;
-            while (temp > 1) { temp >>= 1; mip_levels++; }
+            while (temp > 1) {
+                temp >>= 1;
+                mip_levels++;
+            }
 
             DkImageLayoutMaker layoutMaker;
             dkImageLayoutMakerDefaults(&layoutMaker, dk->device);
             layoutMaker.flags = DkImageFlags_UsageRender | DkImageFlags_Usage2DEngine;
-            layoutMaker.format = dk_convert_format(internalformat, internalformat, GL_UNSIGNED_BYTE);
+            layoutMaker.format =
+                dk_convert_format(internalformat, internalformat, GL_UNSIGNED_BYTE);
             layoutMaker.dimensions[0] = width;
             layoutMaker.dimensions[1] = height;
             layoutMaker.dimensions[2] = 1;
@@ -224,8 +234,10 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
         }
         uint32_t expected_w = dk->texture_width[handle] >> level;
         uint32_t expected_h = dk->texture_height[handle] >> level;
-        if (expected_w < 1) expected_w = 1;
-        if (expected_h < 1) expected_h = 1;
+        if (expected_w < 1)
+            expected_w = 1;
+        if (expected_h < 1)
+            expected_h = 1;
         if ((uint32_t)width != expected_w || (uint32_t)height != expected_h) {
             dkMemBlockDestroy(readbackMem);
             return;
@@ -252,7 +264,8 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     uint8_t *gpuData = (uint8_t *)dkMemBlockGetCpuAddr(readbackMem);
     uint32_t dst_bpp = dk_gl_format_bpp(internalformat, GL_UNSIGNED_BYTE);
 
-    uint32_t aligned_row_size = SGL_ALIGN_UP((uint32_t)(width * dst_bpp), DK_LINEAR_STRIDE_ALIGNMENT);
+    uint32_t aligned_row_size =
+        SGL_ALIGN_UP((uint32_t)(width * dst_bpp), DK_LINEAR_STRIDE_ALIGNMENT);
     uint32_t staging_size = aligned_row_size * height;
 
     uint32_t saved_client_offset = dk->client_array_offset;
@@ -263,8 +276,8 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
         return;
     }
 
-    uint8_t *staging = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock)
-                       + dk->client_array_base + stagingOffset;
+    uint8_t *staging =
+        (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock) + dk->client_array_base + stagingOffset;
 
     /* Convert RGBA readback → target format during staging copy */
     size_t src_row_bytes = (size_t)width * 4;
@@ -310,10 +323,10 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr, SGL_MAX_TEXTURES);
     dk->descriptors_bound = true;
 
-    DkGpuAddr stagingAddr = dkMemBlockGetGpuAddr(dk->data_memblock)
-                            + dk->client_array_base + stagingOffset;
-    DkCopyBuf srcBuf = { stagingAddr, aligned_row_size, (uint32_t)height };
-    DkImageRect dstRect = { 0, 0, 0, (uint32_t)width, (uint32_t)height, 1 };
+    DkGpuAddr stagingAddr =
+        dkMemBlockGetGpuAddr(dk->data_memblock) + dk->client_array_base + stagingOffset;
+    DkCopyBuf srcBuf = {stagingAddr, aligned_row_size, (uint32_t)height};
+    DkImageRect dstRect = {0, 0, 0, (uint32_t)width, (uint32_t)height, 1};
 
     dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &texView, &dstRect, 0);
 
@@ -373,9 +386,8 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
     dk_rebind_render_target(dk);
 
-    SGL_TRACE_TEXTURE("copy_tex_image_2d handle=%u target=0x%X (%d,%d) %dx%d%s",
-                      handle, target, x, y, width, height,
-                      is_cubemap_face ? " (cubemap)" : "");
+    SGL_TRACE_TEXTURE("copy_tex_image_2d handle=%u target=0x%X (%d,%d) %dx%d%s", handle, target, x,
+                      y, width, height, is_cubemap_face ? " (cubemap)" : "");
 }
 
 /* ============================================================================
@@ -385,18 +397,19 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
  * Writes to a sub-region of an existing texture.
  * ============================================================================ */
 
-void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
-                              GLenum target, GLint level,
-                              GLint xoffset, GLint yoffset,
-                              GLint x, GLint y, GLsizei width, GLsizei height) {
+void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, GLint level,
+                              GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei width,
+                              GLsizei height) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
-    if (handle == 0 || handle >= SGL_MAX_TEXTURES) return;
+    if (handle == 0 || handle >= SGL_MAX_TEXTURES)
+        return;
     if (!dk->texture_initialized[handle]) {
         SGL_ERROR_BACKEND("copy_tex_sub_image_2d: texture %u not initialized", handle);
         return;
     }
-    if (width <= 0 || height <= 0) return;
+    if (width <= 0 || height <= 0)
+        return;
 
     /* Drain a still-in-flight submitted frame before recording into cmdbuf */
     dk_ensure_recordable(dk);
@@ -458,8 +471,9 @@ void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     DkImageView srcView;
     dkImageViewDefaults(&srcView, srcImage);
 
-    DkImageRect srcRect = { (uint32_t)x, dk_src_y, 0, (uint32_t)width, (uint32_t)height, 1 };
-    DkCopyBuf readbackBuf = { dkMemBlockGetGpuAddr(readbackMem), (uint32_t)(width * 4), (uint32_t)height };
+    DkImageRect srcRect = {(uint32_t)x, dk_src_y, 0, (uint32_t)width, (uint32_t)height, 1};
+    DkCopyBuf readbackBuf = {dkMemBlockGetGpuAddr(readbackMem), (uint32_t)(width * 4),
+                             (uint32_t)height};
 
     dkCmdBufCopyImageToBuffer(dk->cmdbuf, &srcView, &srcRect, &readbackBuf, 0);
 
@@ -470,7 +484,8 @@ void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     GLenum tex_gl_fmt = dk->texture_gl_format[handle];
     uint32_t dst_bpp = dk_gl_format_bpp(tex_gl_fmt, GL_UNSIGNED_BYTE);
 
-    uint32_t aligned_row_size = SGL_ALIGN_UP((uint32_t)(width * dst_bpp), DK_LINEAR_STRIDE_ALIGNMENT);
+    uint32_t aligned_row_size =
+        SGL_ALIGN_UP((uint32_t)(width * dst_bpp), DK_LINEAR_STRIDE_ALIGNMENT);
     uint32_t staging_size = aligned_row_size * height;
 
     uint32_t saved_client_offset = dk->client_array_offset;
@@ -481,8 +496,8 @@ void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
         return;
     }
 
-    uint8_t *staging = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock)
-                       + dk->client_array_base + stagingOffset;
+    uint8_t *staging =
+        (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock) + dk->client_array_base + stagingOffset;
 
     /* Convert RGBA readback → target format */
     size_t src_row_bytes = (size_t)width * 4;
@@ -534,10 +549,11 @@ void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
     /* Destination Y: GL yoffset maps directly to storage row
      * (same convention as glTexSubImage2D upload) */
-    DkGpuAddr stagingAddr = dkMemBlockGetGpuAddr(dk->data_memblock)
-                            + dk->client_array_base + stagingOffset;
-    DkCopyBuf srcBuf = { stagingAddr, aligned_row_size, (uint32_t)height };
-    DkImageRect dstRect = { (uint32_t)xoffset, (uint32_t)yoffset, 0, (uint32_t)width, (uint32_t)height, 1 };
+    DkGpuAddr stagingAddr =
+        dkMemBlockGetGpuAddr(dk->data_memblock) + dk->client_array_base + stagingOffset;
+    DkCopyBuf srcBuf = {stagingAddr, aligned_row_size, (uint32_t)height};
+    DkImageRect dstRect = {(uint32_t)xoffset, (uint32_t)yoffset, 0,
+                           (uint32_t)width,   (uint32_t)height,  1};
 
     dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &dstView, &dstRect, 0);
 
@@ -570,6 +586,6 @@ void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
     dk_rebind_render_target(dk);
 
-    SGL_TRACE_TEXTURE("copy_tex_sub_image_2d handle=%u fb(%d,%d)->tex(%d,%d) %dx%d",
-                      handle, x, y, xoffset, yoffset, width, height);
+    SGL_TRACE_TEXTURE("copy_tex_sub_image_2d handle=%u fb(%d,%d)->tex(%d,%d) %dx%d", handle, x, y,
+                      xoffset, yoffset, width, height);
 }

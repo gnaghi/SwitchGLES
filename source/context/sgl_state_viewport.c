@@ -20,11 +20,8 @@ void sgl_state_viewport_init(sgl_state_viewport_t *state, int width, int height)
     state->scissor_enabled = false;
 }
 
-bool sgl_state_viewport_set(sgl_state_viewport_t *state,
-                             int x, int y, int width, int height) {
-    if (state->viewport_x == x &&
-        state->viewport_y == y &&
-        state->viewport_width == width &&
+bool sgl_state_viewport_set(sgl_state_viewport_t *state, int x, int y, int width, int height) {
+    if (state->viewport_x == x && state->viewport_y == y && state->viewport_width == width &&
         state->viewport_height == height) {
         return false;
     }
@@ -35,13 +32,17 @@ bool sgl_state_viewport_set(sgl_state_viewport_t *state,
     return true;
 }
 
-bool sgl_state_viewport_set_depth_range(sgl_state_viewport_t *state,
-                                         float near_val, float far_val) {
+bool sgl_state_viewport_set_depth_range(sgl_state_viewport_t *state, float near_val,
+                                        float far_val) {
     /* GL ES 2.0 spec: near and far are clamped to [0, 1] */
-    if (near_val < 0.0f) near_val = 0.0f;
-    if (near_val > 1.0f) near_val = 1.0f;
-    if (far_val < 0.0f) far_val = 0.0f;
-    if (far_val > 1.0f) far_val = 1.0f;
+    if (near_val < 0.0f)
+        near_val = 0.0f;
+    if (near_val > 1.0f)
+        near_val = 1.0f;
+    if (far_val < 0.0f)
+        far_val = 0.0f;
+    if (far_val > 1.0f)
+        far_val = 1.0f;
 
     if (state->depth_near == near_val && state->depth_far == far_val) {
         return false;
@@ -51,11 +52,8 @@ bool sgl_state_viewport_set_depth_range(sgl_state_viewport_t *state,
     return true;
 }
 
-bool sgl_state_scissor_set(sgl_state_viewport_t *state,
-                            int x, int y, int width, int height) {
-    if (state->scissor_x == x &&
-        state->scissor_y == y &&
-        state->scissor_width == width &&
+bool sgl_state_scissor_set(sgl_state_viewport_t *state, int x, int y, int width, int height) {
+    if (state->scissor_x == x && state->scissor_y == y && state->scissor_width == width &&
         state->scissor_height == height) {
         return false;
     }

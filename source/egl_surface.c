@@ -14,9 +14,9 @@
 #include <switch.h>
 
 EGLAPI EGLSurface EGLAPIENTRY eglCreateWindowSurface(EGLDisplay dpy, EGLConfig config,
-                                                      EGLNativeWindowType win,
-                                                      const EGLint *attrib_list) {
-    SGL_EGL_VTRACE("eglCreateWindowSurface(%p, %p, %p)", dpy, config, (void*)win);
+                                                     EGLNativeWindowType win,
+                                                     const EGLint *attrib_list) {
+    SGL_EGL_VTRACE("eglCreateWindowSurface(%p, %p, %p)", dpy, config, (void *)win);
     sgl_display *display = (sgl_display *)dpy;
     sgl_config *cfg = (sgl_config *)config;
     (void)attrib_list;
@@ -54,7 +54,8 @@ EGLAPI EGLSurface EGLAPIENTRY eglCreateWindowSurface(EGLDisplay dpy, EGLConfig c
     /* Create framebuffer layout */
     DkImageLayoutMaker imageLayoutMaker;
     dkImageLayoutMakerDefaults(&imageLayoutMaker, display->device);
-    imageLayoutMaker.flags = DkImageFlags_UsageRender | DkImageFlags_UsagePresent | DkImageFlags_Usage2DEngine | DkImageFlags_HwCompression;
+    imageLayoutMaker.flags = DkImageFlags_UsageRender | DkImageFlags_UsagePresent |
+                             DkImageFlags_Usage2DEngine | DkImageFlags_HwCompression;
     imageLayoutMaker.format = DkImageFormat_RGBA8_Unorm;
     imageLayoutMaker.dimensions[0] = surf->width;
     imageLayoutMaker.dimensions[1] = surf->height;
@@ -81,14 +82,16 @@ EGLAPI EGLSurface EGLAPIENTRY eglCreateWindowSurface(EGLDisplay dpy, EGLConfig c
     DkImage const *swapchainImages[SGL_FB_NUM];
     for (int i = 0; i < SGL_FB_NUM; i++) {
         swapchainImages[i] = &surf->framebuffers[i];
-        dkImageInitialize(&surf->framebuffers[i], &fbLayout, surf->framebuffer_memblock, i * fbSize);
+        dkImageInitialize(&surf->framebuffers[i], &fbLayout, surf->framebuffer_memblock,
+                          i * fbSize);
     }
 
     /* Create depth buffers if needed - ONE PER FRAMEBUFFER SLOT for proper sync */
     if (cfg->depth_size > 0) {
         DkImageLayoutMaker depthLayoutMaker;
         dkImageLayoutMakerDefaults(&depthLayoutMaker, display->device);
-        depthLayoutMaker.flags = DkImageFlags_UsageRender | DkImageFlags_Usage2DEngine | DkImageFlags_HwCompression;
+        depthLayoutMaker.flags =
+            DkImageFlags_UsageRender | DkImageFlags_Usage2DEngine | DkImageFlags_HwCompression;
         depthLayoutMaker.format = DkImageFormat_Z24S8;
         depthLayoutMaker.dimensions[0] = surf->width;
         depthLayoutMaker.dimensions[1] = surf->height;
@@ -107,11 +110,13 @@ EGLAPI EGLSurface EGLAPIENTRY eglCreateWindowSurface(EGLDisplay dpy, EGLConfig c
             surf->depthbuffer_memblocks[i] = dkMemBlockCreate(&memBlockMaker);
 
             if (surf->depthbuffer_memblocks[i]) {
-                dkImageInitialize(&surf->depthbuffers[i], &depthLayout, surf->depthbuffer_memblocks[i], 0);
+                dkImageInitialize(&surf->depthbuffers[i], &depthLayout,
+                                  surf->depthbuffer_memblocks[i], 0);
             } else {
                 /* Cleanup previously allocated depth buffers and framebuffer */
                 for (int j = 0; j < i; j++) {
-                    if (surf->depthbuffer_memblocks[j]) dkMemBlockDestroy(surf->depthbuffer_memblocks[j]);
+                    if (surf->depthbuffer_memblocks[j])
+                        dkMemBlockDestroy(surf->depthbuffer_memblocks[j]);
                 }
                 dkMemBlockDestroy(surf->framebuffer_memblock);
                 memset(surf, 0, sizeof(sgl_surface));
@@ -131,14 +136,16 @@ EGLAPI EGLSurface EGLAPIENTRY eglCreateWindowSurface(EGLDisplay dpy, EGLConfig c
     surf->swapchain = NULL;
     for (int attempt = 0; attempt < 3; attempt++) {
         surf->swapchain = dkSwapchainCreate(&swapchainMaker);
-        if (surf->swapchain) break;
-        svcSleepThread(200000000ULL);  /* 200ms */
+        if (surf->swapchain)
+            break;
+        svcSleepThread(200000000ULL); /* 200ms */
     }
 
     if (!surf->swapchain) {
         dkMemBlockDestroy(surf->framebuffer_memblock);
         for (int i = 0; i < SGL_FB_NUM; i++) {
-            if (surf->depthbuffer_memblocks[i]) dkMemBlockDestroy(surf->depthbuffer_memblocks[i]);
+            if (surf->depthbuffer_memblocks[i])
+                dkMemBlockDestroy(surf->depthbuffer_memblocks[i]);
         }
         memset(surf, 0, sizeof(sgl_surface));
         sgl_egl_set_error(EGL_BAD_ALLOC);
@@ -179,8 +186,8 @@ EGLAPI EGLBoolean EGLAPIENTRY eglDestroySurface(EGLDisplay dpy, EGLSurface surfa
     sgl_egl_destroy_surface_now(surf);
     return EGL_TRUE;
 }
-EGLAPI EGLBoolean EGLAPIENTRY eglQuerySurface(EGLDisplay dpy, EGLSurface surface,
-                                               EGLint attribute, EGLint *value) {
+EGLAPI EGLBoolean EGLAPIENTRY eglQuerySurface(EGLDisplay dpy, EGLSurface surface, EGLint attribute,
+                                              EGLint *value) {
     sgl_display *display = (sgl_display *)dpy;
     sgl_surface *surf = (sgl_surface *)surface;
 
@@ -195,12 +202,24 @@ EGLAPI EGLBoolean EGLAPIENTRY eglQuerySurface(EGLDisplay dpy, EGLSurface surface
     }
 
     switch (attribute) {
-        case EGL_WIDTH:  *value = surf->width; break;
-        case EGL_HEIGHT: *value = surf->height; break;
-        case EGL_CONFIG_ID: *value = surf->config_id; break;
-        case EGL_LARGEST_PBUFFER: *value = EGL_FALSE; break;
-        case EGL_RENDER_BUFFER: *value = EGL_BACK_BUFFER; break;
-        case EGL_SWAP_BEHAVIOR: *value = EGL_BUFFER_DESTROYED; break;
+        case EGL_WIDTH:
+            *value = surf->width;
+            break;
+        case EGL_HEIGHT:
+            *value = surf->height;
+            break;
+        case EGL_CONFIG_ID:
+            *value = surf->config_id;
+            break;
+        case EGL_LARGEST_PBUFFER:
+            *value = EGL_FALSE;
+            break;
+        case EGL_RENDER_BUFFER:
+            *value = EGL_BACK_BUFFER;
+            break;
+        case EGL_SWAP_BEHAVIOR:
+            *value = EGL_BUFFER_DESTROYED;
+            break;
         default:
             sgl_egl_set_error(EGL_BAD_ATTRIBUTE);
             return EGL_FALSE;

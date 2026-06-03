@@ -23,7 +23,8 @@ GL_APICALL void GL_APIENTRY glGenFramebuffers(GLsizei n, GLuint *framebuffers) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
-    if (n == 0 || !framebuffers) return;
+    if (n == 0 || !framebuffers)
+        return;
 
     for (GLsizei i = 0; i < n; i++) {
         framebuffers[i] = sgl_res_mgr_alloc_framebuffer(&ctx->res_mgr);
@@ -41,16 +42,24 @@ GL_APICALL void GL_APIENTRY glDeleteFramebuffers(GLsizei n, const GLuint *frameb
     if (!ctx)
         return;
 
-    if (n < 0) { sgl_set_error(ctx, GL_INVALID_VALUE); return; }
-    if (!framebuffers) return;
+    if (n < 0) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+    if (!framebuffers)
+        return;
 
     for (GLsizei i = 0; i < n; i++) {
         GLuint id = framebuffers[i];
-        if (id == 0) continue;
+        if (id == 0)
+            continue;
 
-        if (ctx->bound_framebuffer == id) ctx->bound_framebuffer = 0;
-        if (ctx->bound_read_framebuffer == id) ctx->bound_read_framebuffer = 0;
-        if (ctx->bound_draw_framebuffer == id) ctx->bound_draw_framebuffer = 0;
+        if (ctx->bound_framebuffer == id)
+            ctx->bound_framebuffer = 0;
+        if (ctx->bound_read_framebuffer == id)
+            ctx->bound_read_framebuffer = 0;
+        if (ctx->bound_draw_framebuffer == id)
+            ctx->bound_draw_framebuffer = 0;
 
         /* Rebind default framebuffer if the draw target was deleted */
         if (ctx->bound_framebuffer == 0) {
@@ -59,22 +68,28 @@ GL_APICALL void GL_APIENTRY glDeleteFramebuffers(GLsizei n, const GLuint *frameb
             }
         }
 
-        /* Release FBO references to textures and renderbuffers (may trigger deferred GPU cleanup) */
+        /* Release FBO references to textures and renderbuffers (may trigger deferred GPU cleanup)
+         */
         sgl_framebuffer_t *fbo = GET_FRAMEBUFFER(id);
         if (fbo && fbo->used) {
-            GLuint att_ids[3] = { 0, 0, 0 };
-            bool is_rb[3] = { false, false, false };
-            att_ids[0] = fbo->color_attachment;   is_rb[0] = fbo->color_is_renderbuffer;
-            att_ids[1] = fbo->depth_attachment;    is_rb[1] = fbo->depth_is_renderbuffer;
-            att_ids[2] = fbo->stencil_attachment;  is_rb[2] = fbo->stencil_is_renderbuffer;
+            GLuint att_ids[3] = {0, 0, 0};
+            bool is_rb[3] = {false, false, false};
+            att_ids[0] = fbo->color_attachment;
+            is_rb[0] = fbo->color_is_renderbuffer;
+            att_ids[1] = fbo->depth_attachment;
+            is_rb[1] = fbo->depth_is_renderbuffer;
+            att_ids[2] = fbo->stencil_attachment;
+            is_rb[2] = fbo->stencil_is_renderbuffer;
             for (int a = 0; a < 3; a++) {
-                if (att_ids[a] == 0) continue;
+                if (att_ids[a] == 0)
+                    continue;
                 if (!is_rb[a]) {
                     sgl_texture_t *tex = GET_TEXTURE_ANY(att_ids[a]);
                     if (tex) {
                         tex->fbo_ref_count--;
                         if (tex->delete_pending && tex->fbo_ref_count <= 0) {
-                            if (ctx->backend && ctx->backend->ops && ctx->backend->ops->delete_texture)
+                            if (ctx->backend && ctx->backend->ops &&
+                                ctx->backend->ops->delete_texture)
                                 ctx->backend->ops->delete_texture(ctx->backend, att_ids[a]);
                             sgl_res_mgr_free_texture(&ctx->res_mgr, att_ids[a]);
                         }
@@ -84,7 +99,8 @@ GL_APICALL void GL_APIENTRY glDeleteFramebuffers(GLsizei n, const GLuint *frameb
                     if (rb) {
                         rb->fbo_ref_count--;
                         if (rb->delete_pending && rb->fbo_ref_count <= 0) {
-                            if (ctx->backend && ctx->backend->ops && ctx->backend->ops->delete_renderbuffer)
+                            if (ctx->backend && ctx->backend->ops &&
+                                ctx->backend->ops->delete_renderbuffer)
                                 ctx->backend->ops->delete_renderbuffer(ctx->backend, att_ids[a]);
                             sgl_res_mgr_free_renderbuffer(&ctx->res_mgr, att_ids[a]);
                         }
@@ -98,7 +114,8 @@ GL_APICALL void GL_APIENTRY glDeleteFramebuffers(GLsizei n, const GLuint *frameb
         /* Remove from overflow list if present */
         for (int j = 0; j < ctx->res_mgr.num_overflow_fbos; j++) {
             if (ctx->res_mgr.overflow_fbo_ids[j] == id) {
-                ctx->res_mgr.overflow_fbo_ids[j] = ctx->res_mgr.overflow_fbo_ids[--ctx->res_mgr.num_overflow_fbos];
+                ctx->res_mgr.overflow_fbo_ids[j] =
+                    ctx->res_mgr.overflow_fbo_ids[--ctx->res_mgr.num_overflow_fbos];
                 break;
             }
         }
@@ -111,9 +128,11 @@ GL_APICALL GLboolean GL_APIENTRY glIsFramebuffer(GLuint framebuffer) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return GL_FALSE;
-    if (framebuffer == 0) return GL_FALSE;
+    if (framebuffer == 0)
+        return GL_FALSE;
     sgl_framebuffer_t *fbo = GET_FRAMEBUFFER(framebuffer);
-    if (fbo && fbo->bound) return GL_TRUE;
+    if (fbo && fbo->bound)
+        return GL_TRUE;
     /* Check overflow IDs */
     for (int i = 0; i < ctx->res_mgr.num_overflow_fbos; i++) {
         if (ctx->res_mgr.overflow_fbo_ids[i] == framebuffer)
@@ -128,7 +147,8 @@ GL_APICALL void GL_APIENTRY glBindFramebuffer(GLenum target, GLuint framebuffer)
         return;
     CHECK_BACKEND();
 
-    if (target != GL_FRAMEBUFFER && target != GL_READ_FRAMEBUFFER && target != GL_DRAW_FRAMEBUFFER) {
+    if (target != GL_FRAMEBUFFER && target != GL_READ_FRAMEBUFFER &&
+        target != GL_DRAW_FRAMEBUFFER) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
     }
@@ -145,7 +165,10 @@ GL_APICALL void GL_APIENTRY glBindFramebuffer(GLenum target, GLuint framebuffer)
                 /* Overflow: track for glIsFramebuffer */
                 bool found = false;
                 for (int i = 0; i < ctx->res_mgr.num_overflow_fbos; i++) {
-                    if (ctx->res_mgr.overflow_fbo_ids[i] == framebuffer) { found = true; break; }
+                    if (ctx->res_mgr.overflow_fbo_ids[i] == framebuffer) {
+                        found = true;
+                        break;
+                    }
                 }
                 if (!found && ctx->res_mgr.num_overflow_fbos < SGL_MAX_OVERFLOW_IDS) {
                     ctx->res_mgr.overflow_fbo_ids[ctx->res_mgr.num_overflow_fbos++] = framebuffer;
@@ -154,7 +177,7 @@ GL_APICALL void GL_APIENTRY glBindFramebuffer(GLenum target, GLuint framebuffer)
                 return;
             }
         }
-        fbo_obj->bound = true;  /* Mark as object (for glIsFramebuffer) */
+        fbo_obj->bound = true; /* Mark as object (for glIsFramebuffer) */
     }
 
     /* Save previous draw framebuffer for redundancy check */
@@ -220,26 +243,26 @@ GL_APICALL void GL_APIENTRY glBindFramebuffer(GLenum target, GLuint framebuffer)
                         if (!ctex || !sgl_is_color_renderable(ctex->internal_format))
                             color_ok = false;
                     }
-                    if (!color_ok) color_tex = 0;
+                    if (!color_ok)
+                        color_tex = 0;
                 }
             }
         }
-        ctx->backend->ops->bind_framebuffer(ctx->backend, framebuffer,
-                                             color_tex, depth_rb,
-                                             color_is_rb, depth_is_rb,
-                                             stencil_rb, stencil_is_rb);
+        ctx->backend->ops->bind_framebuffer(ctx->backend, framebuffer, color_tex, depth_rb,
+                                            color_is_rb, depth_is_rb, stencil_rb, stencil_is_rb);
     }
 
     SGL_TRACE_FBO("glBindFramebuffer(0x%X, %u)", target, framebuffer);
 }
 
 GL_APICALL void GL_APIENTRY glFramebufferTexture2D(GLenum target, GLenum attachment,
-                                                     GLenum textarget, GLuint texture, GLint level) {
+                                                   GLenum textarget, GLuint texture, GLint level) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
 
-    if (target != GL_FRAMEBUFFER && target != GL_READ_FRAMEBUFFER && target != GL_DRAW_FRAMEBUFFER) {
+    if (target != GL_FRAMEBUFFER && target != GL_READ_FRAMEBUFFER &&
+        target != GL_DRAW_FRAMEBUFFER) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
     }
@@ -252,9 +275,8 @@ GL_APICALL void GL_APIENTRY glFramebufferTexture2D(GLenum target, GLenum attachm
 
     /* Validate textarget and texture existence */
     if (texture != 0) {
-        if (textarget != GL_TEXTURE_2D &&
-            !(textarget >= GL_TEXTURE_CUBE_MAP_POSITIVE_X &&
-              textarget <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z)) {
+        if (textarget != GL_TEXTURE_2D && !(textarget >= GL_TEXTURE_CUBE_MAP_POSITIVE_X &&
+                                            textarget <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z)) {
             sgl_set_error(ctx, GL_INVALID_ENUM);
             return;
         }
@@ -301,9 +323,18 @@ GL_APICALL void GL_APIENTRY glFramebufferTexture2D(GLenum target, GLenum attachm
     GLuint old_tex_id = 0;
     bool old_is_rb = false;
     switch (attachment) {
-        case GL_COLOR_ATTACHMENT0:  old_tex_id = fbo->color_attachment; old_is_rb = fbo->color_is_renderbuffer; break;
-        case GL_DEPTH_ATTACHMENT:   old_tex_id = fbo->depth_attachment; old_is_rb = fbo->depth_is_renderbuffer; break;
-        case GL_STENCIL_ATTACHMENT: old_tex_id = fbo->stencil_attachment; old_is_rb = fbo->stencil_is_renderbuffer; break;
+        case GL_COLOR_ATTACHMENT0:
+            old_tex_id = fbo->color_attachment;
+            old_is_rb = fbo->color_is_renderbuffer;
+            break;
+        case GL_DEPTH_ATTACHMENT:
+            old_tex_id = fbo->depth_attachment;
+            old_is_rb = fbo->depth_is_renderbuffer;
+            break;
+        case GL_STENCIL_ATTACHMENT:
+            old_tex_id = fbo->stencil_attachment;
+            old_is_rb = fbo->stencil_is_renderbuffer;
+            break;
         default:
             sgl_set_error(ctx, GL_INVALID_ENUM);
             return;
@@ -349,7 +380,8 @@ GL_APICALL void GL_APIENTRY glFramebufferTexture2D(GLenum target, GLenum attachm
             fbo->stencil_is_renderbuffer = false;
             fbo->stencil_textarget = (texture != 0) ? textarget : 0;
             break;
-        default: break; /* Already validated above */
+        default:
+            break; /* Already validated above */
     }
 
     /* Re-sync GPU state after any attachment change.
@@ -359,7 +391,8 @@ GL_APICALL void GL_APIENTRY glFramebufferTexture2D(GLenum target, GLenum attachm
      * previously gated on color_attachment!=0 which broke stencil-only FBOs
      * and recreate_colorbuffer tests. */
     if (ctx->backend && ctx->backend->ops->bind_framebuffer &&
-        (fbo->color_attachment != 0 || fbo->depth_attachment != 0 || fbo->stencil_attachment != 0)) {
+        (fbo->color_attachment != 0 || fbo->depth_attachment != 0 ||
+         fbo->stencil_attachment != 0)) {
         bool color_ok = false;
         if (fbo->color_attachment != 0) {
             if (fbo->color_is_renderbuffer) {
@@ -374,12 +407,10 @@ GL_APICALL void GL_APIENTRY glFramebufferTexture2D(GLenum target, GLenum attachm
          * or if we're detaching (color=0), to let backend know state changed. */
         if (color_ok || fbo->color_attachment == 0) {
             sgl_ensure_frame_ready();
-            ctx->backend->ops->bind_framebuffer(ctx->backend, ctx->bound_framebuffer,
-                                                 fbo->color_attachment, fbo->depth_attachment,
-                                                 fbo->color_is_renderbuffer,
-                                                 fbo->depth_is_renderbuffer,
-                                                 fbo->stencil_attachment,
-                                                 fbo->stencil_is_renderbuffer);
+            ctx->backend->ops->bind_framebuffer(
+                ctx->backend, ctx->bound_framebuffer, fbo->color_attachment, fbo->depth_attachment,
+                fbo->color_is_renderbuffer, fbo->depth_is_renderbuffer, fbo->stencil_attachment,
+                fbo->stencil_is_renderbuffer);
         }
     }
 
@@ -389,11 +420,18 @@ GL_APICALL void GL_APIENTRY glFramebufferTexture2D(GLenum target, GLenum attachm
 /* Helper: check if internalformat is color-renderable */
 static bool sgl_is_color_renderable(GLenum fmt) {
     switch (fmt) {
-        case GL_RGBA4: case GL_RGB5_A1: case GL_RGB565:
-        case GL_RGBA8: case GL_RGB8:
-        case GL_RGBA: case GL_RGB:
-        case GL_LUMINANCE_ALPHA: case GL_LUMINANCE: case GL_ALPHA:
-        case GL_BGRA_EXT: case GL_BGRA8_EXT:
+        case GL_RGBA4:
+        case GL_RGB5_A1:
+        case GL_RGB565:
+        case GL_RGBA8:
+        case GL_RGB8:
+        case GL_RGBA:
+        case GL_RGB:
+        case GL_LUMINANCE_ALPHA:
+        case GL_LUMINANCE:
+        case GL_ALPHA:
+        case GL_BGRA_EXT:
+        case GL_BGRA8_EXT:
             return true;
         default:
             return false;
@@ -405,7 +443,8 @@ static bool sgl_is_color_renderable(GLenum fmt) {
  * OES_depth24: GL_DEPTH_COMPONENT24, GL_DEPTH24_STENCIL8. */
 static bool sgl_is_depth_renderable(GLenum fmt) {
     switch (fmt) {
-        case GL_DEPTH_COMPONENT16: case GL_DEPTH_COMPONENT24:
+        case GL_DEPTH_COMPONENT16:
+        case GL_DEPTH_COMPONENT24:
         case GL_DEPTH24_STENCIL8:
             return true;
         default:
@@ -417,7 +456,8 @@ static bool sgl_is_depth_renderable(GLenum fmt) {
 static bool sgl_is_stencil_renderable(GLenum fmt) {
     switch (fmt) {
         case GL_STENCIL_INDEX8:
-        case GL_DEPTH24_STENCIL8: case GL_DEPTH_STENCIL:
+        case GL_DEPTH24_STENCIL8:
+        case GL_DEPTH_STENCIL:
             return true;
         default:
             return false;
@@ -429,13 +469,14 @@ GL_APICALL GLenum GL_APIENTRY glCheckFramebufferStatus(GLenum target) {
     if (!ctx)
         return 0;
 
-    if (target != GL_FRAMEBUFFER && target != GL_READ_FRAMEBUFFER && target != GL_DRAW_FRAMEBUFFER) {
+    if (target != GL_FRAMEBUFFER && target != GL_READ_FRAMEBUFFER &&
+        target != GL_DRAW_FRAMEBUFFER) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return 0;
     }
 
     if (ctx->bound_framebuffer == 0) {
-        return GL_FRAMEBUFFER_COMPLETE;  /* Default framebuffer always complete */
+        return GL_FRAMEBUFFER_COMPLETE; /* Default framebuffer always complete */
     }
 
     sgl_framebuffer_t *fbo = GET_FRAMEBUFFER(ctx->bound_framebuffer);
@@ -463,7 +504,9 @@ GL_APICALL GLenum GL_APIENTRY glCheckFramebufferStatus(GLenum target) {
             if (!sgl_is_color_renderable(rb->internal_format)) {
                 return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
             }
-            ref_width = rb->width; ref_height = rb->height; has_ref = true;
+            ref_width = rb->width;
+            ref_height = rb->height;
+            has_ref = true;
         } else {
             sgl_texture_t *tex = GET_TEXTURE_ANY(fbo->color_attachment);
             if (!tex || tex->width == 0 || tex->height == 0) {
@@ -472,7 +515,9 @@ GL_APICALL GLenum GL_APIENTRY glCheckFramebufferStatus(GLenum target) {
             if (!sgl_is_color_renderable(tex->internal_format)) {
                 return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
             }
-            ref_width = tex->width; ref_height = tex->height; has_ref = true;
+            ref_width = tex->width;
+            ref_height = tex->height;
+            has_ref = true;
         }
     }
 
@@ -489,7 +534,11 @@ GL_APICALL GLenum GL_APIENTRY glCheckFramebufferStatus(GLenum target) {
             if (has_ref && (rb->width != ref_width || rb->height != ref_height)) {
                 return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
             }
-            if (!has_ref) { ref_width = rb->width; ref_height = rb->height; has_ref = true; }
+            if (!has_ref) {
+                ref_width = rb->width;
+                ref_height = rb->height;
+                has_ref = true;
+            }
         } else {
             /* Texture depth attachments require OES_depth_texture extension,
              * which we don't advertise. Always report INCOMPLETE. */
@@ -522,12 +571,14 @@ GL_APICALL GLenum GL_APIENTRY glCheckFramebufferStatus(GLenum target) {
 }
 
 GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer(GLenum target, GLenum attachment,
-                                                        GLenum renderbuffertarget, GLuint renderbuffer) {
+                                                      GLenum renderbuffertarget,
+                                                      GLuint renderbuffer) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
 
-    if (target != GL_FRAMEBUFFER && target != GL_READ_FRAMEBUFFER && target != GL_DRAW_FRAMEBUFFER) {
+    if (target != GL_FRAMEBUFFER && target != GL_READ_FRAMEBUFFER &&
+        target != GL_DRAW_FRAMEBUFFER) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
     }
@@ -564,13 +615,16 @@ GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer(GLenum target, GLenum atta
     GLuint old_rb_id = 0;
     switch (attachment) {
         case GL_COLOR_ATTACHMENT0:
-            if (fbo->color_is_renderbuffer && fbo->color_attachment != 0) old_rb_id = fbo->color_attachment;
+            if (fbo->color_is_renderbuffer && fbo->color_attachment != 0)
+                old_rb_id = fbo->color_attachment;
             break;
         case GL_DEPTH_ATTACHMENT:
-            if (fbo->depth_is_renderbuffer && fbo->depth_attachment != 0) old_rb_id = fbo->depth_attachment;
+            if (fbo->depth_is_renderbuffer && fbo->depth_attachment != 0)
+                old_rb_id = fbo->depth_attachment;
             break;
         case GL_STENCIL_ATTACHMENT:
-            if (fbo->stencil_is_renderbuffer && fbo->stencil_attachment != 0) old_rb_id = fbo->stencil_attachment;
+            if (fbo->stencil_is_renderbuffer && fbo->stencil_attachment != 0)
+                old_rb_id = fbo->stencil_attachment;
             break;
         case GL_DEPTH_STENCIL_ATTACHMENT:
             /* Will handle both depth and stencil below */
@@ -594,19 +648,35 @@ GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer(GLenum target, GLenum atta
         /* Decrement both depth and stencil old RB refs */
         if (fbo->depth_is_renderbuffer && fbo->depth_attachment != 0) {
             sgl_renderbuffer_t *drb = GET_RENDERBUFFER_ANY(fbo->depth_attachment);
-            if (drb) { drb->fbo_ref_count--; if (drb->delete_pending && drb->fbo_ref_count <= 0) { if (ctx->backend && ctx->backend->ops && ctx->backend->ops->delete_renderbuffer) ctx->backend->ops->delete_renderbuffer(ctx->backend, fbo->depth_attachment); sgl_res_mgr_free_renderbuffer(&ctx->res_mgr, fbo->depth_attachment); } }
+            if (drb) {
+                drb->fbo_ref_count--;
+                if (drb->delete_pending && drb->fbo_ref_count <= 0) {
+                    if (ctx->backend && ctx->backend->ops && ctx->backend->ops->delete_renderbuffer)
+                        ctx->backend->ops->delete_renderbuffer(ctx->backend, fbo->depth_attachment);
+                    sgl_res_mgr_free_renderbuffer(&ctx->res_mgr, fbo->depth_attachment);
+                }
+            }
         }
         if (fbo->stencil_is_renderbuffer && fbo->stencil_attachment != 0 &&
             fbo->stencil_attachment != fbo->depth_attachment) {
             sgl_renderbuffer_t *srb = GET_RENDERBUFFER_ANY(fbo->stencil_attachment);
-            if (srb) { srb->fbo_ref_count--; if (srb->delete_pending && srb->fbo_ref_count <= 0) { if (ctx->backend && ctx->backend->ops && ctx->backend->ops->delete_renderbuffer) ctx->backend->ops->delete_renderbuffer(ctx->backend, fbo->stencil_attachment); sgl_res_mgr_free_renderbuffer(&ctx->res_mgr, fbo->stencil_attachment); } }
+            if (srb) {
+                srb->fbo_ref_count--;
+                if (srb->delete_pending && srb->fbo_ref_count <= 0) {
+                    if (ctx->backend && ctx->backend->ops && ctx->backend->ops->delete_renderbuffer)
+                        ctx->backend->ops->delete_renderbuffer(ctx->backend,
+                                                               fbo->stencil_attachment);
+                    sgl_res_mgr_free_renderbuffer(&ctx->res_mgr, fbo->stencil_attachment);
+                }
+            }
         }
     }
 
     /* Increment ref count on new RB being attached */
     if (renderbuffer != 0) {
         sgl_renderbuffer_t *new_rb = GET_RENDERBUFFER(renderbuffer);
-        if (new_rb) new_rb->fbo_ref_count++;
+        if (new_rb)
+            new_rb->fbo_ref_count++;
     }
 
     switch (attachment) {
@@ -635,7 +705,8 @@ GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer(GLenum target, GLenum atta
             if (renderbuffer != 0) {
                 /* Second ref for the other attachment point */
                 sgl_renderbuffer_t *rb2 = GET_RENDERBUFFER(renderbuffer);
-                if (rb2) rb2->fbo_ref_count++;
+                if (rb2)
+                    rb2->fbo_ref_count++;
             }
             break;
         default:
@@ -647,7 +718,8 @@ GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer(GLenum target, GLenum atta
      * Always re-sync when the FBO has at least one valid attachment —
      * previously gated on color_attachment!=0 which broke stencil-only FBOs. */
     if (ctx->backend && ctx->backend->ops->bind_framebuffer &&
-        (fbo->color_attachment != 0 || fbo->depth_attachment != 0 || fbo->stencil_attachment != 0)) {
+        (fbo->color_attachment != 0 || fbo->depth_attachment != 0 ||
+         fbo->stencil_attachment != 0)) {
         bool color_ok = false;
         if (fbo->color_attachment != 0) {
             if (fbo->color_is_renderbuffer) {
@@ -660,12 +732,10 @@ GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer(GLenum target, GLenum atta
         }
         if (color_ok || fbo->color_attachment == 0) {
             sgl_ensure_frame_ready();
-            ctx->backend->ops->bind_framebuffer(ctx->backend, ctx->bound_framebuffer,
-                                                 fbo->color_attachment, fbo->depth_attachment,
-                                                 fbo->color_is_renderbuffer,
-                                                 fbo->depth_is_renderbuffer,
-                                                 fbo->stencil_attachment,
-                                                 fbo->stencil_is_renderbuffer);
+            ctx->backend->ops->bind_framebuffer(
+                ctx->backend, ctx->bound_framebuffer, fbo->color_attachment, fbo->depth_attachment,
+                fbo->color_is_renderbuffer, fbo->depth_is_renderbuffer, fbo->stencil_attachment,
+                fbo->stencil_is_renderbuffer);
         }
     }
 
@@ -673,16 +743,18 @@ GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer(GLenum target, GLenum atta
 }
 
 GL_APICALL void GL_APIENTRY glGetFramebufferAttachmentParameteriv(GLenum target, GLenum attachment,
-                                                                    GLenum pname, GLint *params) {
+                                                                  GLenum pname, GLint *params) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
 
-    if (target != GL_FRAMEBUFFER && target != GL_READ_FRAMEBUFFER && target != GL_DRAW_FRAMEBUFFER) {
+    if (target != GL_FRAMEBUFFER && target != GL_READ_FRAMEBUFFER &&
+        target != GL_DRAW_FRAMEBUFFER) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
     }
-    if (!params) return;
+    if (!params)
+        return;
 
     /* Default framebuffer (GLES2 §6.1.3): querying attachment parameters on the
      * default framebuffer generates GL_INVALID_OPERATION. */
@@ -759,11 +831,15 @@ GL_APICALL void GL_APIENTRY glGetFramebufferAttachmentParameteriv(GLenum target,
             } else {
                 /* Return the textarget if it was a cubemap face, else 0 */
                 GLenum face = 0;
-                if (attachment == GL_COLOR_ATTACHMENT0) face = fbo->color_textarget;
-                else if (attachment == GL_DEPTH_ATTACHMENT) face = fbo->depth_textarget;
-                else if (attachment == GL_STENCIL_ATTACHMENT) face = fbo->stencil_textarget;
+                if (attachment == GL_COLOR_ATTACHMENT0)
+                    face = fbo->color_textarget;
+                else if (attachment == GL_DEPTH_ATTACHMENT)
+                    face = fbo->depth_textarget;
+                else if (attachment == GL_STENCIL_ATTACHMENT)
+                    face = fbo->stencil_textarget;
                 /* Only return cube face enums, not GL_TEXTURE_2D */
-                if (face >= GL_TEXTURE_CUBE_MAP_POSITIVE_X && face <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z)
+                if (face >= GL_TEXTURE_CUBE_MAP_POSITIVE_X &&
+                    face <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z)
                     *params = face;
                 else
                     *params = 0;
@@ -786,7 +862,8 @@ GL_APICALL void GL_APIENTRY glGenRenderbuffers(GLsizei n, GLuint *renderbuffers)
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
-    if (n == 0 || !renderbuffers) return;
+    if (n == 0 || !renderbuffers)
+        return;
 
     for (GLsizei i = 0; i < n; i++) {
         renderbuffers[i] = sgl_res_mgr_alloc_renderbuffer(&ctx->res_mgr);
@@ -804,12 +881,17 @@ GL_APICALL void GL_APIENTRY glDeleteRenderbuffers(GLsizei n, const GLuint *rende
     if (!ctx)
         return;
 
-    if (n < 0) { sgl_set_error(ctx, GL_INVALID_VALUE); return; }
-    if (!renderbuffers) return;
+    if (n < 0) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+    if (!renderbuffers)
+        return;
 
     for (GLsizei i = 0; i < n; i++) {
         GLuint id = renderbuffers[i];
-        if (id == 0) continue;
+        if (id == 0)
+            continue;
 
         if (ctx->bound_renderbuffer == id) {
             ctx->bound_renderbuffer = 0;
@@ -827,17 +909,20 @@ GL_APICALL void GL_APIENTRY glDeleteRenderbuffers(GLsizei n, const GLuint *rende
                 if (fbo->color_is_renderbuffer && fbo->color_attachment == id) {
                     fbo->color_attachment = 0;
                     detached = true;
-                    if (rb_detach) rb_detach->fbo_ref_count--;
+                    if (rb_detach)
+                        rb_detach->fbo_ref_count--;
                 }
                 if (fbo->depth_is_renderbuffer && fbo->depth_attachment == id) {
                     fbo->depth_attachment = 0;
                     detached = true;
-                    if (rb_detach) rb_detach->fbo_ref_count--;
+                    if (rb_detach)
+                        rb_detach->fbo_ref_count--;
                 }
                 if (fbo->stencil_is_renderbuffer && fbo->stencil_attachment == id) {
                     fbo->stencil_attachment = 0;
                     detached = true;
-                    if (rb_detach) rb_detach->fbo_ref_count--;
+                    if (rb_detach)
+                        rb_detach->fbo_ref_count--;
                 }
             }
         }
@@ -848,12 +933,11 @@ GL_APICALL void GL_APIENTRY glDeleteRenderbuffers(GLsizei n, const GLuint *rende
         if (detached && ctx->backend && ctx->backend->ops->bind_framebuffer) {
             sgl_framebuffer_t *rebind_fbo = GET_FRAMEBUFFER(ctx->bound_framebuffer);
             if (rebind_fbo) {
-                ctx->backend->ops->bind_framebuffer(ctx->backend, ctx->bound_framebuffer,
-                                                     rebind_fbo->color_attachment, rebind_fbo->depth_attachment,
-                                                     rebind_fbo->color_is_renderbuffer,
-                                                     rebind_fbo->depth_is_renderbuffer,
-                                                     rebind_fbo->stencil_attachment,
-                                                     rebind_fbo->stencil_is_renderbuffer);
+                ctx->backend->ops->bind_framebuffer(
+                    ctx->backend, ctx->bound_framebuffer, rebind_fbo->color_attachment,
+                    rebind_fbo->depth_attachment, rebind_fbo->color_is_renderbuffer,
+                    rebind_fbo->depth_is_renderbuffer, rebind_fbo->stencil_attachment,
+                    rebind_fbo->stencil_is_renderbuffer);
             }
         }
 
@@ -864,7 +948,8 @@ GL_APICALL void GL_APIENTRY glDeleteRenderbuffers(GLsizei n, const GLuint *rende
         if (rb && rb->fbo_ref_count > 0) {
             rb->delete_pending = true;
             rb->used = false;
-            SGL_TRACE_FBO("glDeleteRenderbuffers: RB %u deferred (fbo_ref_count=%d)", id, rb->fbo_ref_count);
+            SGL_TRACE_FBO("glDeleteRenderbuffers: RB %u deferred (fbo_ref_count=%d)", id,
+                          rb->fbo_ref_count);
         } else {
             /* Notify backend to flush GPU and free resources */
             if (ctx->backend && ctx->backend->ops->delete_renderbuffer) {
@@ -876,7 +961,8 @@ GL_APICALL void GL_APIENTRY glDeleteRenderbuffers(GLsizei n, const GLuint *rende
         /* Remove from overflow list if present */
         for (int j = 0; j < ctx->res_mgr.num_overflow_rbos; j++) {
             if (ctx->res_mgr.overflow_rbo_ids[j] == id) {
-                ctx->res_mgr.overflow_rbo_ids[j] = ctx->res_mgr.overflow_rbo_ids[--ctx->res_mgr.num_overflow_rbos];
+                ctx->res_mgr.overflow_rbo_ids[j] =
+                    ctx->res_mgr.overflow_rbo_ids[--ctx->res_mgr.num_overflow_rbos];
                 break;
             }
         }
@@ -889,9 +975,11 @@ GL_APICALL GLboolean GL_APIENTRY glIsRenderbuffer(GLuint renderbuffer) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return GL_FALSE;
-    if (renderbuffer == 0) return GL_FALSE;
+    if (renderbuffer == 0)
+        return GL_FALSE;
     sgl_renderbuffer_t *rb = GET_RENDERBUFFER(renderbuffer);
-    if (rb && rb->bound) return GL_TRUE;
+    if (rb && rb->bound)
+        return GL_TRUE;
     /* Check overflow IDs */
     for (int i = 0; i < ctx->res_mgr.num_overflow_rbos; i++) {
         if (ctx->res_mgr.overflow_rbo_ids[i] == renderbuffer)
@@ -922,7 +1010,10 @@ GL_APICALL void GL_APIENTRY glBindRenderbuffer(GLenum target, GLuint renderbuffe
                 /* Overflow: track for glIsRenderbuffer */
                 bool found = false;
                 for (int i = 0; i < ctx->res_mgr.num_overflow_rbos; i++) {
-                    if (ctx->res_mgr.overflow_rbo_ids[i] == renderbuffer) { found = true; break; }
+                    if (ctx->res_mgr.overflow_rbo_ids[i] == renderbuffer) {
+                        found = true;
+                        break;
+                    }
                 }
                 if (!found && ctx->res_mgr.num_overflow_rbos < SGL_MAX_OVERFLOW_IDS) {
                     ctx->res_mgr.overflow_rbo_ids[ctx->res_mgr.num_overflow_rbos++] = renderbuffer;
@@ -931,7 +1022,7 @@ GL_APICALL void GL_APIENTRY glBindRenderbuffer(GLenum target, GLuint renderbuffe
                 return;
             }
         }
-        rb_obj->bound = true;  /* Mark as object (for glIsRenderbuffer) */
+        rb_obj->bound = true; /* Mark as object (for glIsRenderbuffer) */
     }
 
     ctx->bound_renderbuffer = renderbuffer;
@@ -940,7 +1031,7 @@ GL_APICALL void GL_APIENTRY glBindRenderbuffer(GLenum target, GLuint renderbuffe
 }
 
 GL_APICALL void GL_APIENTRY glRenderbufferStorage(GLenum target, GLenum internalformat,
-                                                    GLsizei width, GLsizei height) {
+                                                  GLsizei width, GLsizei height) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
@@ -965,12 +1056,17 @@ GL_APICALL void GL_APIENTRY glRenderbufferStorage(GLenum target, GLenum internal
      * GLES2 core + extensions we advertise (BGRA, depth24).
      * Note: GL_DEPTH_COMPONENT32 not accepted (GL_OES_depth32 not advertised). */
     switch (internalformat) {
-        case GL_RGBA4: case GL_RGB5_A1: case GL_RGB565:
-        case GL_RGBA8: case GL_RGB8:
-        case GL_DEPTH_COMPONENT16: case GL_DEPTH_COMPONENT24:
+        case GL_RGBA4:
+        case GL_RGB5_A1:
+        case GL_RGB565:
+        case GL_RGBA8:
+        case GL_RGB8:
+        case GL_DEPTH_COMPONENT16:
+        case GL_DEPTH_COMPONENT24:
         case GL_DEPTH24_STENCIL8:
         case GL_STENCIL_INDEX8:
-        case GL_BGRA_EXT: case GL_BGRA8_EXT:
+        case GL_BGRA_EXT:
+        case GL_BGRA8_EXT:
             break; /* accepted */
         default:
             sgl_set_error(ctx, GL_INVALID_ENUM);
@@ -995,13 +1091,14 @@ GL_APICALL void GL_APIENTRY glRenderbufferStorage(GLenum target, GLenum internal
     /* Allocate GPU storage for depth/stencil renderbuffers */
     if (ctx->backend->ops->renderbuffer_storage) {
         ctx->backend->ops->renderbuffer_storage(ctx->backend, ctx->bound_renderbuffer,
-                                                 internalformat, width, height);
+                                                internalformat, width, height);
     }
 
     SGL_TRACE_FBO("glRenderbufferStorage(format=0x%X, %dx%d)", internalformat, width, height);
 }
 
-GL_APICALL void GL_APIENTRY glGetRenderbufferParameteriv(GLenum target, GLenum pname, GLint *params) {
+GL_APICALL void GL_APIENTRY glGetRenderbufferParameteriv(GLenum target, GLenum pname,
+                                                         GLint *params) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
@@ -1010,7 +1107,8 @@ GL_APICALL void GL_APIENTRY glGetRenderbufferParameteriv(GLenum target, GLenum p
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
     }
-    if (!params) return;
+    if (!params)
+        return;
 
     if (ctx->bound_renderbuffer == 0) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
@@ -1046,13 +1144,15 @@ GL_APICALL void GL_APIENTRY glGetRenderbufferParameteriv(GLenum target, GLenum p
                 *params = 16;
             else if (rb->internal_format == GL_DEPTH_COMPONENT24 ||
                      rb->internal_format == GL_DEPTH24_STENCIL8)
-                *params = 24;  /* All map to Z24S8 on hardware */
+                *params = 24; /* All map to Z24S8 on hardware */
             else
                 *params = 0;
             break;
         case GL_RENDERBUFFER_STENCIL_SIZE:
             *params = (rb->internal_format == GL_STENCIL_INDEX8 ||
-                       rb->internal_format == GL_DEPTH24_STENCIL8) ? 8 : 0;
+                       rb->internal_format == GL_DEPTH24_STENCIL8)
+                          ? 8
+                          : 0;
             break;
         default:
             sgl_set_error(ctx, GL_INVALID_ENUM);
@@ -1063,7 +1163,7 @@ GL_APICALL void GL_APIENTRY glGetRenderbufferParameteriv(GLenum target, GLenum p
 /* ReadPixels */
 
 GL_APICALL void GL_APIENTRY glReadPixels(GLint x, GLint y, GLsizei width, GLsizei height,
-                                          GLenum format, GLenum type, void *pixels) {
+                                         GLenum format, GLenum type, void *pixels) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
@@ -1074,7 +1174,7 @@ GL_APICALL void GL_APIENTRY glReadPixels(GLint x, GLint y, GLsizei width, GLsize
         return;
     }
     if (!pixels || width == 0 || height == 0) {
-        return;  /* No-op per spec */
+        return; /* No-op per spec */
     }
 
     /* Check framebuffer completeness */
@@ -1092,9 +1192,9 @@ GL_APICALL void GL_APIENTRY glReadPixels(GLint x, GLint y, GLsizei width, GLsize
      * GL_INVALID_ENUM for invalid enum values. */
     if ((format != GL_RGBA && format != GL_BGRA_EXT) || type != GL_UNSIGNED_BYTE) {
         /* Check if format/type are valid GLES2 enums */
-        bool valid_format = (format == GL_RGBA || format == GL_RGB ||
-                             format == GL_LUMINANCE_ALPHA || format == GL_LUMINANCE ||
-                             format == GL_ALPHA || format == GL_BGRA_EXT);
+        bool valid_format =
+            (format == GL_RGBA || format == GL_RGB || format == GL_LUMINANCE_ALPHA ||
+             format == GL_LUMINANCE || format == GL_ALPHA || format == GL_BGRA_EXT);
         bool valid_type = (type == GL_UNSIGNED_BYTE || type == GL_UNSIGNED_SHORT_5_6_5 ||
                            type == GL_UNSIGNED_SHORT_4_4_4_4 || type == GL_UNSIGNED_SHORT_5_5_5_1);
         sgl_set_error(ctx, (valid_format && valid_type) ? GL_INVALID_OPERATION : GL_INVALID_ENUM);
@@ -1111,11 +1211,9 @@ GL_APICALL void GL_APIENTRY glReadPixels(GLint x, GLint y, GLsizei width, GLsize
 
 /* Blit framebuffer (GL_ARB_framebuffer_object / GL 3.0) */
 
-GL_APICALL void GL_APIENTRY glBlitFramebuffer(
-    GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1,
-    GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1,
-    GLbitfield mask, GLenum filter)
-{
+GL_APICALL void GL_APIENTRY glBlitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1,
+                                              GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1,
+                                              GLbitfield mask, GLenum filter) {
     sgl_ensure_frame_ready();
 
     sgl_context_t *ctx = sgl_get_current_context();
@@ -1132,7 +1230,8 @@ GL_APICALL void GL_APIENTRY glBlitFramebuffer(
     sgl_handle_t read_color_tex = 0;
     if (read_fbo != 0) {
         sgl_framebuffer_t *fbo = GET_FRAMEBUFFER(read_fbo);
-        if (fbo) read_color_tex = fbo->color_attachment;
+        if (fbo)
+            read_color_tex = fbo->color_attachment;
     }
 
     /* Resolve draw FBO's color texture */
@@ -1140,25 +1239,23 @@ GL_APICALL void GL_APIENTRY glBlitFramebuffer(
     sgl_handle_t write_color_tex = 0;
     if (write_fbo != 0) {
         sgl_framebuffer_t *fbo = GET_FRAMEBUFFER(write_fbo);
-        if (fbo) write_color_tex = fbo->color_attachment;
+        if (fbo)
+            write_color_tex = fbo->color_attachment;
     }
 
-    ctx->backend->ops->blit_framebuffer(ctx->backend,
-        read_fbo, read_color_tex, write_fbo, write_color_tex,
-        srcX0, srcY0, srcX1, srcY1,
-        dstX0, dstY0, dstX1, dstY1,
-        mask, filter);
+    ctx->backend->ops->blit_framebuffer(ctx->backend, read_fbo, read_color_tex, write_fbo,
+                                        write_color_tex, srcX0, srcY0, srcX1, srcY1, dstX0, dstY0,
+                                        dstX1, dstY1, mask, filter);
 
-    SGL_TRACE_FBO("glBlitFramebuffer(%d,%d,%d,%d -> %d,%d,%d,%d mask=0x%X)",
-                  srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask);
+    SGL_TRACE_FBO("glBlitFramebuffer(%d,%d,%d,%d -> %d,%d,%d,%d mask=0x%X)", srcX0, srcY0, srcX1,
+                  srcY1, dstX0, dstY0, dstX1, dstY1, mask);
 }
 
 /* Multisample renderbuffer stub (falls back to non-multisampled storage) */
 
-GL_APICALL void GL_APIENTRY glRenderbufferStorageMultisample(
-    GLenum target, GLsizei samples, GLenum internalformat,
-    GLsizei width, GLsizei height)
-{
+GL_APICALL void GL_APIENTRY glRenderbufferStorageMultisample(GLenum target, GLsizei samples,
+                                                             GLenum internalformat, GLsizei width,
+                                                             GLsizei height) {
     (void)samples;
     glRenderbufferStorage(target, internalformat, width, height);
 }

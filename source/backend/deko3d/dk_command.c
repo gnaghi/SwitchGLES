@@ -37,8 +37,8 @@ void dk_cmdbuf_overflow_cb(void *userData, DkCmdBuf cmdbuf, size_t minReqSize) {
     }
     dk->in_overflow_callback = true;
 
-    SGL_TRACE_BACKEND("cbAddMem: cmdbuf overflow (need %zu bytes, draws=%u) — flushing",
-                      minReqSize, dk->draws_since_flush);
+    SGL_TRACE_BACKEND("cbAddMem: cmdbuf overflow (need %zu bytes, draws=%u) — flushing", minReqSize,
+                      dk->draws_since_flush);
 
     /* Submit whatever commands have been recorded so far */
     DkCmdList cmdlist = dkCmdBufFinishList(cmdbuf);
@@ -68,7 +68,7 @@ void dk_cmdbuf_overflow_cb(void *userData, DkCmdBuf cmdbuf, size_t minReqSize) {
 
     dkCmdBufBarrier(cmdbuf, DkBarrier_None,
                     DkInvalidateFlags_L2Cache | DkInvalidateFlags_Descriptors |
-                    DkInvalidateFlags_Zcull);
+                        DkInvalidateFlags_Zcull);
 
     dk->in_overflow_callback = false;
 }
@@ -78,7 +78,8 @@ void dk_cmdbuf_overflow_cb(void *userData, DkCmdBuf cmdbuf, size_t minReqSize) {
  * ============================================================================ */
 
 void dk_rebind_default_render_target(dk_backend_data_t *dk) {
-    if (!dk->framebuffers) return;
+    if (!dk->framebuffers)
+        return;
 
     DkImageView colorView;
     dkImageViewDefaults(&colorView, &dk->framebuffers[dk->current_slot]);
@@ -99,7 +100,7 @@ void dk_rebind_render_target(dk_backend_data_t *dk) {
          * glTexImage2D / glRenderbufferStorage resize while attached to FBO. */
         dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
                         DkInvalidateFlags_Image | DkInvalidateFlags_Descriptors |
-                        DkInvalidateFlags_L2Cache | DkInvalidateFlags_Zcull);
+                            DkInvalidateFlags_L2Cache | DkInvalidateFlags_Zcull);
 
         /* Use type flags to pick correct array (avoids renderbuffer/texture ID collision) */
         DkImageView colorView;
@@ -128,7 +129,8 @@ void dk_rebind_render_target(dk_backend_data_t *dk) {
             if (dk->current_fbo_depth_is_rb) {
                 if (dk->current_fbo_depth < SGL_MAX_RENDERBUFFERS &&
                     dk->renderbuffer_initialized[dk->current_fbo_depth]) {
-                    dkImageViewDefaults(&depthView, &dk->renderbuffer_images[dk->current_fbo_depth]);
+                    dkImageViewDefaults(&depthView,
+                                        &dk->renderbuffer_images[dk->current_fbo_depth]);
                     pDepthView = &depthView;
                 }
             } else {
@@ -171,7 +173,7 @@ void dk_flush_sync(dk_backend_data_t *dk) {
  */
 void dk_submit_and_reset(dk_backend_data_t *dk) {
     if (dkQueueIsInErrorState(dk->queue)) {
-        return;  /* Don't submit to an errored queue */
+        return; /* Don't submit to an errored queue */
     }
 
     dk_flush_sync(dk);
@@ -182,8 +184,7 @@ void dk_submit_and_reset(dk_backend_data_t *dk) {
      * in-flight draws that reference them have completed. */
     if (dk->deferred_free_count > 0) {
         for (int i = 0; i < dk->deferred_free_count; i++) {
-            dk_vbo_free_insert(dk, dk->deferred_free[i].offset,
-                               dk->deferred_free[i].size);
+            dk_vbo_free_insert(dk, dk->deferred_free[i].offset, dk->deferred_free[i].size);
         }
         dk->deferred_free_count = 0;
     }
@@ -219,7 +220,7 @@ void dk_submit_and_reset(dk_backend_data_t *dk) {
      * depth operations causing GPU errors in subsequent depth clears/tests. */
     dkCmdBufBarrier(dk->cmdbuf, DkBarrier_None,
                     DkInvalidateFlags_L2Cache | DkInvalidateFlags_Descriptors |
-                    DkInvalidateFlags_Zcull);
+                        DkInvalidateFlags_Zcull);
 }
 
 /*
@@ -239,13 +240,10 @@ void dk_ensure_recordable(dk_backend_data_t *dk) {
     }
 
     dkCmdBufClear(dk->cmdbuf);
-    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0,
-                      SGL_CMD_MEM_SIZE);
+    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
 
-    dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr,
-                                   SGL_MAX_TEXTURES);
-    dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr,
-                                     SGL_MAX_TEXTURES);
+    dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
+    dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr, SGL_MAX_TEXTURES);
     dk->descriptors_bound = true;
 
     dk_rebind_render_target(dk);
@@ -304,7 +302,7 @@ void dk_begin_frame(sgl_backend_t *be, int slot) {
      * start to ensure clean depth state. */
     dkCmdBufBarrier(dk->cmdbuf, DkBarrier_None,
                     DkInvalidateFlags_L2Cache | DkInvalidateFlags_Descriptors |
-                    DkInvalidateFlags_Zcull);
+                        DkInvalidateFlags_Zcull);
 
     SGL_TRACE_BACKEND("begin_frame slot=%d", slot);
 }
@@ -314,16 +312,18 @@ void dk_end_frame(sgl_backend_t *be, int slot) {
 
     /* Check GPU queue error state before submitting — prevents crash */
     if (dkQueueIsInErrorState(dk->queue)) {
-        SGL_ERROR_BACKEND("end_frame: GPU queue in ERROR STATE — skipping submit for slot %d", slot);
-        dk->cmdbuf_submitted = true;  /* Mark as submitted to prevent double-submit */
+        SGL_ERROR_BACKEND("end_frame: GPU queue in ERROR STATE — skipping submit for slot %d",
+                          slot);
+        dk->cmdbuf_submitted = true; /* Mark as submitted to prevent double-submit */
         return;
     }
 
     /* Print diagnostic counters if any anomalies detected */
     if (dk->diag_orphan_flushes > 0 || dk->diag_uniform_overflows > 0) {
-        SGL_TRACE_BACKEND("DIAG frame slot=%d: draws=%u tex_binds=%u ORPHAN_FLUSHES=%u UNIFORM_OVERFLOWS=%u",
-                          slot, dk->diag_draw_count, dk->diag_texture_binds,
-                          dk->diag_orphan_flushes, dk->diag_uniform_overflows);
+        SGL_TRACE_BACKEND(
+            "DIAG frame slot=%d: draws=%u tex_binds=%u ORPHAN_FLUSHES=%u UNIFORM_OVERFLOWS=%u",
+            slot, dk->diag_draw_count, dk->diag_texture_binds, dk->diag_orphan_flushes,
+            dk->diag_uniform_overflows);
     }
 
     /* Signal fence before finishing command list */
@@ -440,7 +440,7 @@ void dk_insert_barrier(sgl_backend_t *be) {
      * reference stale fast-depth data and produce GPU errors. */
     dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
                     DkInvalidateFlags_Image | DkInvalidateFlags_Descriptors |
-                    DkInvalidateFlags_Zcull);
+                        DkInvalidateFlags_Zcull);
 
     SGL_TRACE_BACKEND("insert_barrier");
 }

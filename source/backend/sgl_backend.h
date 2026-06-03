@@ -18,14 +18,14 @@ typedef struct sgl_packed_ubo sgl_packed_ubo_t;
 /* Backend interface */
 struct sgl_backend_ops {
     /* ======== Lifecycle ======== */
-    int  (*init)(sgl_backend_t *be, void *device);
+    int (*init)(sgl_backend_t *be, void *device);
     void (*shutdown)(sgl_backend_t *be);
 
     /* ======== Frame Management ======== */
     void (*begin_frame)(sgl_backend_t *be, int slot);
     void (*end_frame)(sgl_backend_t *be, int slot);
     void (*present)(sgl_backend_t *be, int slot);
-    int  (*acquire_image)(sgl_backend_t *be);
+    int (*acquire_image)(sgl_backend_t *be);
     void (*wait_fence)(sgl_backend_t *be, int slot);
 
     /* ======== State Application ======== */
@@ -40,22 +40,21 @@ struct sgl_backend_ops {
     void (*apply_color_mask)(sgl_backend_t *be, const sgl_color_state_t *state);
 
     /* ======== Clear Operations ======== */
-    void (*clear)(sgl_backend_t *be, GLbitfield mask,
-                  const float *color, float depth, int stencil);
+    void (*clear)(sgl_backend_t *be, GLbitfield mask, const float *color, float depth, int stencil);
 
     /* ======== Buffer Operations ======== */
     sgl_handle_t (*create_buffer)(sgl_backend_t *be);
     void (*delete_buffer)(sgl_backend_t *be, sgl_handle_t handle);
     /* Returns allocated GPU buffer offset, or 0 on failure */
-    uint32_t (*buffer_data)(sgl_backend_t *be, sgl_handle_t handle,
-                            GLenum target, GLsizeiptr size, const void *data, GLenum usage);
-    void (*buffer_sub_data)(sgl_backend_t *be, sgl_handle_t handle,
-                            uint32_t buffer_offset, GLsizeiptr size, const void *data);
+    uint32_t (*buffer_data)(sgl_backend_t *be, sgl_handle_t handle, GLenum target, GLsizeiptr size,
+                            const void *data, GLenum usage);
+    void (*buffer_sub_data)(sgl_backend_t *be, sgl_handle_t handle, uint32_t buffer_offset,
+                            GLsizeiptr size, const void *data);
     /* Allocate a new buffer region for buffer orphaning (glBufferData with data=NULL).
      * Returns absolute offset into data_memblock, or 0 on failure.
      * old_offset/old_size: previous allocation to defer-free after GPU sync. */
-    uint32_t (*buffer_data_orphan)(sgl_backend_t *be, GLsizeiptr size,
-                                    uint32_t old_offset, uint32_t old_size);
+    uint32_t (*buffer_data_orphan)(sgl_backend_t *be, GLsizeiptr size, uint32_t old_offset,
+                                   uint32_t old_size);
     /* Return a VBO allocation to the free list for reuse.
      * Only frees from the static VBO region (not client_array). */
     void (*buffer_free)(sgl_backend_t *be, uint32_t offset, uint32_t size);
@@ -65,116 +64,102 @@ struct sgl_backend_ops {
     /* ======== Texture Operations ======== */
     sgl_handle_t (*create_texture)(sgl_backend_t *be);
     void (*delete_texture)(sgl_backend_t *be, sgl_handle_t handle);
-    void (*texture_image_2d)(sgl_backend_t *be, sgl_handle_t handle,
-                             GLenum target, GLint level, GLint internalformat,
-                             GLsizei width, GLsizei height, GLint border,
+    void (*texture_image_2d)(sgl_backend_t *be, sgl_handle_t handle, GLenum target, GLint level,
+                             GLint internalformat, GLsizei width, GLsizei height, GLint border,
                              GLenum format, GLenum type, const void *pixels);
-    void (*texture_sub_image_2d)(sgl_backend_t *be, sgl_handle_t handle,
-                                 GLenum target, GLint level,
-                                 GLint xoffset, GLint yoffset,
-                                 GLsizei width, GLsizei height,
+    void (*texture_sub_image_2d)(sgl_backend_t *be, sgl_handle_t handle, GLenum target, GLint level,
+                                 GLint xoffset, GLint yoffset, GLsizei width, GLsizei height,
                                  GLenum format, GLenum type, const void *pixels);
-    void (*texture_parameter)(sgl_backend_t *be, sgl_handle_t handle,
-                              GLenum target, GLenum pname, GLint param);
-    void (*bind_texture)(sgl_backend_t *be, GLuint unit, sgl_handle_t handle, int stage); /* stage: -1=both, 0=vertex, 1=fragment */
+    void (*texture_parameter)(sgl_backend_t *be, sgl_handle_t handle, GLenum target, GLenum pname,
+                              GLint param);
+    void (*bind_texture)(sgl_backend_t *be, GLuint unit, sgl_handle_t handle,
+                         int stage); /* stage: -1=both, 0=vertex, 1=fragment */
     void (*generate_mipmap)(sgl_backend_t *be, sgl_handle_t handle);
-    void (*copy_tex_image_2d)(sgl_backend_t *be, sgl_handle_t handle,
-                              GLenum target, GLint level, GLenum internalformat,
-                              GLint x, GLint y, GLsizei width, GLsizei height);
-    void (*copy_tex_sub_image_2d)(sgl_backend_t *be, sgl_handle_t handle,
-                                   GLenum target, GLint level,
-                                   GLint xoffset, GLint yoffset,
-                                   GLint x, GLint y, GLsizei width, GLsizei height);
+    void (*copy_tex_image_2d)(sgl_backend_t *be, sgl_handle_t handle, GLenum target, GLint level,
+                              GLenum internalformat, GLint x, GLint y, GLsizei width,
+                              GLsizei height);
+    void (*copy_tex_sub_image_2d)(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
+                                  GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y,
+                                  GLsizei width, GLsizei height);
 
     /* Compressed texture operations */
-    void (*compressed_texture_image_2d)(sgl_backend_t *be, sgl_handle_t handle,
-                                         GLenum target, GLint level, GLenum internalformat,
-                                         GLsizei width, GLsizei height,
-                                         GLsizei imageSize, const void *data);
-    void (*compressed_texture_sub_image_2d)(sgl_backend_t *be, sgl_handle_t handle,
-                                             GLenum target, GLint level,
-                                             GLint xoffset, GLint yoffset,
-                                             GLsizei width, GLsizei height,
-                                             GLenum format, GLsizei imageSize, const void *data);
+    void (*compressed_texture_image_2d)(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
+                                        GLint level, GLenum internalformat, GLsizei width,
+                                        GLsizei height, GLsizei imageSize, const void *data);
+    void (*compressed_texture_sub_image_2d)(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
+                                            GLint level, GLint xoffset, GLint yoffset,
+                                            GLsizei width, GLsizei height, GLenum format,
+                                            GLsizei imageSize, const void *data);
 
     /* ======== Shader Operations ======== */
     sgl_handle_t (*create_shader)(sgl_backend_t *be, GLenum type);
     void (*delete_shader)(sgl_backend_t *be, sgl_handle_t handle);
-    bool (*load_shader_binary)(sgl_backend_t *be, sgl_handle_t handle,
-                               const void *data, size_t size);
-    bool (*load_shader_file)(sgl_backend_t *be, sgl_handle_t handle,
-                             const char *path);
+    bool (*load_shader_binary)(sgl_backend_t *be, sgl_handle_t handle, const void *data,
+                               size_t size);
+    bool (*load_shader_file)(sgl_backend_t *be, sgl_handle_t handle, const char *path);
 
     /* ======== Program Operations ======== */
     sgl_handle_t (*create_program)(sgl_backend_t *be);
     void (*delete_program)(sgl_backend_t *be, sgl_handle_t handle);
     void (*attach_shader)(sgl_backend_t *be, sgl_handle_t program, sgl_handle_t shader);
     /* Link program - copies shaders to per-program storage */
-    bool (*link_program)(sgl_backend_t *be, sgl_handle_t program,
-                         sgl_handle_t vertex_shader, sgl_handle_t fragment_shader);
+    bool (*link_program)(sgl_backend_t *be, sgl_handle_t program, sgl_handle_t vertex_shader,
+                         sgl_handle_t fragment_shader);
     void (*use_program)(sgl_backend_t *be, sgl_handle_t handle);
     /* Binds shaders AND uniform buffers with pushConstants - call before draw */
-    void (*bind_program)(sgl_backend_t *be, sgl_handle_t program,
-                         sgl_handle_t vertex_shader, sgl_handle_t fragment_shader,
-                         const sgl_uniform_binding_t *vertex_uniforms,
-                         const sgl_uniform_binding_t *fragment_uniforms,
-                         int max_uniforms,
+    void (*bind_program)(sgl_backend_t *be, sgl_handle_t program, sgl_handle_t vertex_shader,
+                         sgl_handle_t fragment_shader, const sgl_uniform_binding_t *vertex_uniforms,
+                         const sgl_uniform_binding_t *fragment_uniforms, int max_uniforms,
                          const sgl_packed_ubo_t *packed_vertex,
-                         const sgl_packed_ubo_t *packed_fragment,
-                         int max_packed_ubos);
+                         const sgl_packed_ubo_t *packed_fragment, int max_packed_ubos);
 
     /* ======== Uniform Operations ======== */
     /* Write uniform data to CPU buffer (backend handles offset allocation) */
-    void (*set_uniform_4f)(sgl_backend_t *be, sgl_handle_t program, GLint location,
-                           GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3);
-    void (*set_uniform_matrix4fv)(sgl_backend_t *be, sgl_handle_t program,
-                                   GLint location, GLsizei count,
-                                   GLboolean transpose, const GLfloat *value);
+    void (*set_uniform_4f)(sgl_backend_t *be, sgl_handle_t program, GLint location, GLfloat v0,
+                           GLfloat v1, GLfloat v2, GLfloat v3);
+    void (*set_uniform_matrix4fv)(sgl_backend_t *be, sgl_handle_t program, GLint location,
+                                  GLsizei count, GLboolean transpose, const GLfloat *value);
     /* Get/set uniform offset for a location */
     uint32_t (*alloc_uniform)(sgl_backend_t *be, uint32_t size);
     void (*write_uniform)(sgl_backend_t *be, uint32_t offset, const void *data, uint32_t size);
 
     /* ======== Vertex Attribute Operations ======== */
-    void (*bind_vertex_attribs)(sgl_backend_t *be,
-                                 const sgl_vertex_attrib_t *attribs,
-                                 int num_attribs, GLint first, GLsizei count);
+    void (*bind_vertex_attribs)(sgl_backend_t *be, const sgl_vertex_attrib_t *attribs,
+                                int num_attribs, GLint first, GLsizei count);
 
     /* ======== Draw Operations ======== */
     void (*draw_arrays)(sgl_backend_t *be, GLenum mode, GLint first, GLsizei count);
-    /* draw_elements: ebo_offset is pre-computed GPU buffer offset if EBO bound, 0 for client indices */
-    void (*draw_elements)(sgl_backend_t *be, GLenum mode, GLsizei count,
-                          GLenum type, const void *indices, uint32_t ebo_offset);
+    /* draw_elements: ebo_offset is pre-computed GPU buffer offset if EBO bound, 0 for client
+     * indices */
+    void (*draw_elements)(sgl_backend_t *be, GLenum mode, GLsizei count, GLenum type,
+                          const void *indices, uint32_t ebo_offset);
 
     /* ======== Framebuffer Operations ======== */
     sgl_handle_t (*create_framebuffer)(sgl_backend_t *be);
     void (*delete_framebuffer)(sgl_backend_t *be, sgl_handle_t handle);
     /* Bind FBO and switch render target (handle=0 for default FB)
      * color_is_rb/depth_is_rb/stencil_is_rb: true if attachment is a renderbuffer */
-    void (*bind_framebuffer)(sgl_backend_t *be, sgl_handle_t handle,
-                              sgl_handle_t color_tex, sgl_handle_t depth_rb,
-                              bool color_is_rb, bool depth_is_rb,
-                              sgl_handle_t stencil_rb, bool stencil_is_rb);
-    void (*framebuffer_texture)(sgl_backend_t *be, sgl_handle_t fbo,
-                                 GLenum attachment, sgl_handle_t texture, GLint level);
+    void (*bind_framebuffer)(sgl_backend_t *be, sgl_handle_t handle, sgl_handle_t color_tex,
+                             sgl_handle_t depth_rb, bool color_is_rb, bool depth_is_rb,
+                             sgl_handle_t stencil_rb, bool stencil_is_rb);
+    void (*framebuffer_texture)(sgl_backend_t *be, sgl_handle_t fbo, GLenum attachment,
+                                sgl_handle_t texture, GLint level);
     GLenum (*check_framebuffer_status)(sgl_backend_t *be, sgl_handle_t handle);
 
     /* ======== Renderbuffer Operations ======== */
     /* Allocate GPU storage for renderbuffer (depth/stencil) */
-    void (*renderbuffer_storage)(sgl_backend_t *be, sgl_handle_t handle,
-                                  GLenum internalformat, GLsizei width, GLsizei height);
+    void (*renderbuffer_storage)(sgl_backend_t *be, sgl_handle_t handle, GLenum internalformat,
+                                 GLsizei width, GLsizei height);
     void (*delete_renderbuffer)(sgl_backend_t *be, sgl_handle_t handle);
 
     /* ======== Blit Operations ======== */
-    void (*blit_framebuffer)(sgl_backend_t *be,
-                              sgl_handle_t read_fbo, sgl_handle_t read_color_tex,
-                              sgl_handle_t write_fbo, sgl_handle_t write_color_tex,
-                              GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1,
-                              GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1,
-                              GLbitfield mask, GLenum filter);
+    void (*blit_framebuffer)(sgl_backend_t *be, sgl_handle_t read_fbo, sgl_handle_t read_color_tex,
+                             sgl_handle_t write_fbo, sgl_handle_t write_color_tex, GLint srcX0,
+                             GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0,
+                             GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter);
 
     /* ======== Read Operations ======== */
-    void (*read_pixels)(sgl_backend_t *be, GLint x, GLint y,
-                        GLsizei width, GLsizei height,
+    void (*read_pixels)(sgl_backend_t *be, GLint x, GLint y, GLsizei width, GLsizei height,
                         GLenum format, GLenum type, void *pixels);
 
     /* ======== Sync Operations ======== */
@@ -191,7 +176,7 @@ struct sgl_backend_ops {
 /* Backend structure */
 struct sgl_backend {
     const sgl_backend_ops_t *ops;
-    void *impl_data;  /* Backend-specific data (e.g., dk_backend_data_t*) */
+    void *impl_data; /* Backend-specific data (e.g., dk_backend_data_t*) */
 };
 
 /* Create/destroy backend */

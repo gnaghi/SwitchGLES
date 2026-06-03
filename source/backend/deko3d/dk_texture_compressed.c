@@ -31,13 +31,13 @@
  * @param imageSize     Size of compressed data in bytes
  * @param data          Compressed texture data
  */
-void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
-                                     GLenum target, GLint level, GLenum internalformat,
-                                     GLsizei width, GLsizei height,
-                                     GLsizei imageSize, const void *data) {
+void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
+                                    GLint level, GLenum internalformat, GLsizei width,
+                                    GLsizei height, GLsizei imageSize, const void *data) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
-    if (handle == 0 || handle >= SGL_MAX_TEXTURES) return;
+    if (handle == 0 || handle >= SGL_MAX_TEXTURES)
+        return;
 
     /* Drain a still-in-flight submitted frame before recording into cmdbuf */
     dk_ensure_recordable(dk);
@@ -57,7 +57,7 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
         if (!dk->texture_initialized[handle]) {
             DkImageLayoutMaker layoutMaker;
             dkImageLayoutMakerDefaults(&layoutMaker, dk->device);
-            layoutMaker.flags = 0;  /* Compressed formats NOT renderable */
+            layoutMaker.flags = 0; /* Compressed formats NOT renderable */
             layoutMaker.format = dkFormat;
             layoutMaker.type = DkImageType_Cubemap;
             layoutMaker.dimensions[0] = width;
@@ -67,7 +67,10 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
             uint32_t max_dim = (uint32_t)(width > height ? width : height);
             uint32_t mip_levels = 1;
             uint32_t temp = max_dim;
-            while (temp > 1) { temp >>= 1; mip_levels++; }
+            while (temp > 1) {
+                temp >>= 1;
+                mip_levels++;
+            }
             layoutMaker.mipLevels = mip_levels;
 
             DkImageLayout layout;
@@ -102,8 +105,8 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
             dk->texture_wrap_s[handle] = GL_REPEAT;
             dk->texture_wrap_t[handle] = GL_REPEAT;
 
-            SGL_TRACE_TEXTURE("compressed cubemap created handle=%u %dx%d mips=%u",
-                              handle, width, height, mip_levels);
+            SGL_TRACE_TEXTURE("compressed cubemap created handle=%u %dx%d mips=%u", handle, width,
+                              height, mip_levels);
         }
 
         /* Validate format and dimension consistency for cubemap faces */
@@ -112,7 +115,7 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
                 internalformat != dk->texture_gl_format[handle] ||
                 (uint32_t)width != dk->texture_width[handle] ||
                 (uint32_t)height != dk->texture_height[handle]) {
-                return;  /* Mismatch → cubemap incomplete */
+                return; /* Mismatch → cubemap incomplete */
             }
         }
 
@@ -120,33 +123,38 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
         if (data && imageSize > 0) {
             DkImage *texImage = &dk->textures[handle];
             uint32_t saved_client_offset = dk->client_array_offset;
-            uint32_t stagingOffset = SGL_ALIGN_UP(dk->client_array_offset, DK_LINEAR_STRIDE_ALIGNMENT);
+            uint32_t stagingOffset =
+                SGL_ALIGN_UP(dk->client_array_offset, DK_LINEAR_STRIDE_ALIGNMENT);
             if (stagingOffset + (uint32_t)imageSize <= dk->uniform_base - dk->client_array_base) {
-                uint8_t *staging = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock)
-                                   + dk->client_array_base + stagingOffset;
+                uint8_t *staging = (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock) +
+                                   dk->client_array_base + stagingOffset;
                 memcpy(staging, data, imageSize);
                 dk->client_array_offset = stagingOffset + (uint32_t)imageSize;
 
                 DkImageView dstView;
                 dkImageViewDefaults(&dstView, texImage);
                 dstView.layerOffset = face_index;
-                if (level > 0) dstView.mipLevelOffset = level;
+                if (level > 0)
+                    dstView.mipLevelOffset = level;
 
                 DkCopyBuf srcBuf;
-                srcBuf.addr = dkMemBlockGetGpuAddr(dk->data_memblock)
-                              + dk->client_array_base + stagingOffset;
+                srcBuf.addr =
+                    dkMemBlockGetGpuAddr(dk->data_memblock) + dk->client_array_base + stagingOffset;
                 srcBuf.rowLength = 0;
                 srcBuf.imageHeight = 0;
 
-                DkImageRect dstRect = { 0, 0, 0, (uint32_t)width, (uint32_t)height, 1 };
+                DkImageRect dstRect = {0, 0, 0, (uint32_t)width, (uint32_t)height, 1};
                 dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &dstView, &dstRect, 0);
 
                 dk_flush_sync(dk);
 
                 dkCmdBufClear(dk->cmdbuf);
-                dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
-                dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
-                dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr, SGL_MAX_TEXTURES);
+                dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0,
+                                  SGL_CMD_MEM_SIZE);
+                dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr,
+                                               SGL_MAX_TEXTURES);
+                dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr,
+                                                 SGL_MAX_TEXTURES);
                 dk->descriptors_bound = true;
 
                 dk_rebind_render_target(dk);
@@ -182,27 +190,29 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
             dk->texture_used_as_rt[handle] = true;
         }
 
-        SGL_TRACE_TEXTURE("compressed cubemap face %d handle=%u level=%d %dx%d",
-                          face_index, handle, level, width, height);
+        SGL_TRACE_TEXTURE("compressed cubemap face %d handle=%u level=%d %dx%d", face_index, handle,
+                          level, width, height);
         return;
     }
 
     /* === Mip level > 0: upload to existing 2D texture === */
     if (level > 0) {
         if (!dk->texture_initialized[handle]) {
-            return;  /* No base level yet — skip silently */
+            return; /* No base level yet — skip silently */
         }
         uint32_t tex_mips = dk->texture_mip_levels[handle];
         if ((uint32_t)level >= tex_mips) {
-            return;  /* Level out of range — texture incomplete, skip */
+            return; /* Level out of range — texture incomplete, skip */
         }
         /* Validate dimensions match expected mip size */
         uint32_t expected_w = dk->texture_width[handle] >> level;
         uint32_t expected_h = dk->texture_height[handle] >> level;
-        if (expected_w < 1) expected_w = 1;
-        if (expected_h < 1) expected_h = 1;
+        if (expected_w < 1)
+            expected_w = 1;
+        if (expected_h < 1)
+            expected_h = 1;
         if ((uint32_t)width != expected_w || (uint32_t)height != expected_h) {
-            return;  /* Dimension mismatch — texture incomplete, skip */
+            return; /* Dimension mismatch — texture incomplete, skip */
         }
         /* Validate format matches base texture */
         if (dkFormat != dk->texture_format[handle]) {
@@ -212,10 +222,11 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
         if (data && imageSize > 0) {
             DkImage *texImage = &dk->textures[handle];
             uint32_t saved_client_offset = dk->client_array_offset;
-            uint32_t stagingOffset = SGL_ALIGN_UP(dk->client_array_offset, DK_LINEAR_STRIDE_ALIGNMENT);
+            uint32_t stagingOffset =
+                SGL_ALIGN_UP(dk->client_array_offset, DK_LINEAR_STRIDE_ALIGNMENT);
             if (stagingOffset + (uint32_t)imageSize <= dk->uniform_base - dk->client_array_base) {
-                uint8_t *staging = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock)
-                                   + dk->client_array_base + stagingOffset;
+                uint8_t *staging = (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock) +
+                                   dk->client_array_base + stagingOffset;
                 memcpy(staging, data, imageSize);
                 dk->client_array_offset = stagingOffset + (uint32_t)imageSize;
 
@@ -224,21 +235,24 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
                 dstView.mipLevelOffset = level;
 
                 DkCopyBuf srcBuf;
-                srcBuf.addr = dkMemBlockGetGpuAddr(dk->data_memblock)
-                              + dk->client_array_base + stagingOffset;
+                srcBuf.addr =
+                    dkMemBlockGetGpuAddr(dk->data_memblock) + dk->client_array_base + stagingOffset;
                 srcBuf.rowLength = 0;
                 srcBuf.imageHeight = 0;
 
-                DkImageRect dstRect = { 0, 0, 0, (uint32_t)width, (uint32_t)height, 1 };
+                DkImageRect dstRect = {0, 0, 0, (uint32_t)width, (uint32_t)height, 1};
                 dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &dstView, &dstRect, 0);
 
                 /* Flush GPU for mip upload (same pattern as non-compressed mips) */
                 dk_flush_sync(dk);
 
                 dkCmdBufClear(dk->cmdbuf);
-                dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
-                dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
-                dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr, SGL_MAX_TEXTURES);
+                dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0,
+                                  SGL_CMD_MEM_SIZE);
+                dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr,
+                                               SGL_MAX_TEXTURES);
+                dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr,
+                                                 SGL_MAX_TEXTURES);
                 dk->descriptors_bound = true;
 
                 dk->client_array_offset = saved_client_offset;
@@ -246,7 +260,8 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
             }
         }
         dk->texture_level_mask[handle] |= (1u << level);
-        SGL_TRACE_TEXTURE("compressed_texture_image_2d handle=%u mip level %d %dx%d", handle, level, width, height);
+        SGL_TRACE_TEXTURE("compressed_texture_image_2d handle=%u mip level %d %dx%d", handle, level,
+                          width, height);
         return;
     }
 
@@ -297,8 +312,8 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
         uint32_t saved_client_offset = dk->client_array_offset;
         uint32_t stagingOffset = SGL_ALIGN_UP(dk->client_array_offset, DK_LINEAR_STRIDE_ALIGNMENT);
         if (stagingOffset + (uint32_t)imageSize <= dk->uniform_base - dk->client_array_base) {
-            uint8_t *staging = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock)
-                               + dk->client_array_base + stagingOffset;
+            uint8_t *staging = (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock) +
+                               dk->client_array_base + stagingOffset;
 
             /* Copy compressed data to staging */
             memcpy(staging, data, imageSize);
@@ -309,12 +324,12 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
             dkImageViewDefaults(&dstView, texImage);
 
             DkCopyBuf srcBuf;
-            srcBuf.addr = dkMemBlockGetGpuAddr(dk->data_memblock)
-                          + dk->client_array_base + stagingOffset;
-            srcBuf.rowLength = 0;  /* Tightly packed */
+            srcBuf.addr =
+                dkMemBlockGetGpuAddr(dk->data_memblock) + dk->client_array_base + stagingOffset;
+            srcBuf.rowLength = 0; /* Tightly packed */
             srcBuf.imageHeight = 0;
 
-            DkImageRect dstRect = { 0, 0, 0, (uint32_t)width, (uint32_t)height, 1 };
+            DkImageRect dstRect = {0, 0, 0, (uint32_t)width, (uint32_t)height, 1};
             dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &dstView, &dstRect, 0);
 
             /* Submit and wait for copy to complete — MUST happen before
@@ -323,9 +338,11 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
             dk_flush_sync(dk);
 
             dkCmdBufClear(dk->cmdbuf);
-            dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+            dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0,
+                              SGL_CMD_MEM_SIZE);
             dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
-            dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr, SGL_MAX_TEXTURES);
+            dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr,
+                                             SGL_MAX_TEXTURES);
             dk->descriptors_bound = true;
 
             dk_rebind_render_target(dk);
@@ -349,7 +366,7 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     dk->texture_height[handle] = height;
     dk->texture_format[handle] = dkFormat;
     dk->texture_gl_format[handle] = internalformat;
-    dk->texture_gl_type[handle] = 0;  /* Compressed — no GL type */
+    dk->texture_gl_type[handle] = 0; /* Compressed — no GL type */
     dk->texture_mip_levels[handle] = mip_levels;
 
     /* Initialize default sampler parameters */
@@ -383,19 +400,21 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
  * @param imageSize     Size of compressed data in bytes
  * @param data          Compressed texture data
  */
-void dk_compressed_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
-                                         GLenum target, GLint level,
-                                         GLint xoffset, GLint yoffset,
-                                         GLsizei width, GLsizei height,
-                                         GLenum format, GLsizei imageSize, const void *data) {
+void dk_compressed_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
+                                        GLint level, GLint xoffset, GLint yoffset, GLsizei width,
+                                        GLsizei height, GLenum format, GLsizei imageSize,
+                                        const void *data) {
     (void)target;
     (void)level;
     (void)format;
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
-    if (handle == 0 || handle >= SGL_MAX_TEXTURES) return;
-    if (!dk->texture_initialized[handle]) return;
-    if (!data || imageSize <= 0) return;
+    if (handle == 0 || handle >= SGL_MAX_TEXTURES)
+        return;
+    if (!dk->texture_initialized[handle])
+        return;
+    if (!data || imageSize <= 0)
+        return;
 
     /* Drain a still-in-flight submitted frame before recording into cmdbuf */
     dk_ensure_recordable(dk);
@@ -410,8 +429,8 @@ void dk_compressed_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
         return;
     }
 
-    uint8_t *staging = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock)
-                       + dk->client_array_base + stagingOffset;
+    uint8_t *staging =
+        (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock) + dk->client_array_base + stagingOffset;
     memcpy(staging, data, imageSize);
     dk->client_array_offset = stagingOffset + (uint32_t)imageSize;
 
@@ -420,8 +439,7 @@ void dk_compressed_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     dkImageViewDefaults(&dstView, texImage);
 
     DkCopyBuf srcBuf;
-    srcBuf.addr = dkMemBlockGetGpuAddr(dk->data_memblock)
-                  + dk->client_array_base + stagingOffset;
+    srcBuf.addr = dkMemBlockGetGpuAddr(dk->data_memblock) + dk->client_array_base + stagingOffset;
     srcBuf.rowLength = 0;
     srcBuf.imageHeight = 0;
 
@@ -434,7 +452,8 @@ void dk_compressed_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     dstRect.depth = 1;
 
     dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &dstView, &dstRect, 0);
-    dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);
+    dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
+                    DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);
     /* Restore — staging data consumed by GPU copy, can be reused */
     dk->client_array_offset = saved_client_offset;
 

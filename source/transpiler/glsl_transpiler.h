@@ -70,21 +70,18 @@ extern "C" {
 /*  Constants                                                                  */
 /* -------------------------------------------------------------------------- */
 
-#define GLSLT_MAX_NAME          64
-#define GLSLT_MAX_UNIFORMS      64
-#define GLSLT_MAX_SAMPLERS      16
-#define GLSLT_MAX_ATTRIBUTES    32
-#define GLSLT_MAX_VARYINGS      32
-#define GLSLT_MAX_BINDINGS      32
+#define GLSLT_MAX_NAME 64
+#define GLSLT_MAX_UNIFORMS 64
+#define GLSLT_MAX_SAMPLERS 16
+#define GLSLT_MAX_ATTRIBUTES 32
+#define GLSLT_MAX_VARYINGS 32
+#define GLSLT_MAX_BINDINGS 32
 
 /* -------------------------------------------------------------------------- */
 /*  Types                                                                      */
 /* -------------------------------------------------------------------------- */
 
-typedef enum {
-    GLSLT_VERTEX   = 0,
-    GLSLT_FRAGMENT = 1
-} glslt_stage_t;
+typedef enum { GLSLT_VERTEX = 0, GLSLT_FRAGMENT = 1 } glslt_stage_t;
 
 typedef enum {
     GLSLT_FLOAT = 0,
@@ -109,38 +106,38 @@ typedef enum {
 
 /* Reflected uniform (non-sampler, packed into UBO) */
 typedef struct {
-    char          name[GLSLT_MAX_NAME];       /* Flattened name for GLSL 4.60 (e.g. "u_var_m0") */
-    char          gles_name[GLSLT_MAX_NAME];  /* Original GLES name for API (e.g. "u_var.m0") */
-    glslt_type_t  type;
-    int           array_size;   /* 0 = scalar, >0 = array[N] */
-    int           binding;      /* UBO binding number */
-    int           offset;       /* byte offset within UBO (std140) */
-    int           size;         /* byte size in UBO (std140) */
+    char name[GLSLT_MAX_NAME];      /* Flattened name for GLSL 4.60 (e.g. "u_var_m0") */
+    char gles_name[GLSLT_MAX_NAME]; /* Original GLES name for API (e.g. "u_var.m0") */
+    glslt_type_t type;
+    int array_size; /* 0 = scalar, >0 = array[N] */
+    int binding;    /* UBO binding number */
+    int offset;     /* byte offset within UBO (std140) */
+    int size;       /* byte size in UBO (std140) */
 } glslt_uniform_t;
 
 /* Reflected sampler */
 typedef struct {
-    char          name[GLSLT_MAX_NAME];       /* Flattened name for GLSL 4.60 (e.g. "s_0") */
-    char          gles_name[GLSLT_MAX_NAME];  /* Original GLES name for API (e.g. "s[0]") */
-    glslt_type_t  type;         /* GLSLT_SAMPLER2D or GLSLT_SAMPLERCUBE */
-    int           binding;      /* sampler binding number */
-    int           array_index;  /* index within sampler array (-1 if not array) */
-    int           array_total;  /* total elements in sampler array (0 if not array) */
+    char name[GLSLT_MAX_NAME];      /* Flattened name for GLSL 4.60 (e.g. "s_0") */
+    char gles_name[GLSLT_MAX_NAME]; /* Original GLES name for API (e.g. "s[0]") */
+    glslt_type_t type;              /* GLSLT_SAMPLER2D or GLSLT_SAMPLERCUBE */
+    int binding;                    /* sampler binding number */
+    int array_index;                /* index within sampler array (-1 if not array) */
+    int array_total;                /* total elements in sampler array (0 if not array) */
 } glslt_sampler_t;
 
 /* Reflected attribute (vertex shader input) */
 typedef struct {
-    char          name[GLSLT_MAX_NAME];
-    glslt_type_t  type;
-    int           location;
+    char name[GLSLT_MAX_NAME];
+    glslt_type_t type;
+    int location;
 } glslt_attribute_t;
 
 /* Reflected varying (VS output / FS input) */
 typedef struct {
-    char          name[GLSLT_MAX_NAME];
-    glslt_type_t  type;
-    int           location;
-    int           array_size;
+    char name[GLSLT_MAX_NAME];
+    glslt_type_t type;
+    int location;
+    int array_size;
 } glslt_varying_t;
 
 /* -------------------------------------------------------------------------- */
@@ -148,16 +145,22 @@ typedef struct {
 /* -------------------------------------------------------------------------- */
 
 typedef struct {
-    int target_version;         /* GLSL version to emit (default: 460) */
-    int ubo_binding;            /* binding number for the UBO (default: 0) */
-    int sampler_binding_start;  /* first binding number for samplers (default: 0) */
+    int target_version;        /* GLSL version to emit (default: 460) */
+    int ubo_binding;           /* binding number for the UBO (default: 0) */
+    int sampler_binding_start; /* first binding number for samplers (default: 0) */
 
     /* Explicit attribute location bindings (from glBindAttribLocation) */
-    struct { char name[GLSLT_MAX_NAME]; int location; } attrib_locations[GLSLT_MAX_BINDINGS];
+    struct {
+        char name[GLSLT_MAX_NAME];
+        int location;
+    } attrib_locations[GLSLT_MAX_BINDINGS];
     int num_attrib_locations;
 
     /* Explicit varying location bindings (from VS transpilation result) */
-    struct { char name[GLSLT_MAX_NAME]; int location; } varying_locations[GLSLT_MAX_BINDINGS];
+    struct {
+        char name[GLSLT_MAX_NAME];
+        int location;
+    } varying_locations[GLSLT_MAX_BINDINGS];
     int num_varying_locations;
 } glslt_options_t;
 
@@ -167,33 +170,33 @@ typedef struct {
 
 typedef struct {
     /* Transpiled source (caller must free with glslt_result_free) */
-    char         *output;
-    int           output_len;
+    char *output;
+    int output_len;
 
     /* Reflection: non-sampler uniforms (packed into one UBO) */
-    glslt_uniform_t  uniforms[GLSLT_MAX_UNIFORMS];
-    int               num_uniforms;
-    int               ubo_binding;      /* which binding the UBO was assigned */
-    int               ubo_total_size;   /* total UBO size in bytes (std140, 16-aligned) */
+    glslt_uniform_t uniforms[GLSLT_MAX_UNIFORMS];
+    int num_uniforms;
+    int ubo_binding;    /* which binding the UBO was assigned */
+    int ubo_total_size; /* total UBO size in bytes (std140, 16-aligned) */
 
     /* Reflection: samplers */
-    glslt_sampler_t   samplers[GLSLT_MAX_SAMPLERS];
-    int               num_samplers;
+    glslt_sampler_t samplers[GLSLT_MAX_SAMPLERS];
+    int num_samplers;
 
     /* Reflection: attributes (vertex shader only) */
     glslt_attribute_t attributes[GLSLT_MAX_ATTRIBUTES];
-    int               num_attributes;
+    int num_attributes;
 
     /* Reflection: varyings */
-    glslt_varying_t   varyings[GLSLT_MAX_VARYINGS];
-    int               num_varyings;
+    glslt_varying_t varyings[GLSLT_MAX_VARYINGS];
+    int num_varyings;
 
     /* Built-in state flags */
-    int           has_depth_range;  /* 1 if shader uses gl_DepthRange (needs runtime population) */
+    int has_depth_range; /* 1 if shader uses gl_DepthRange (needs runtime population) */
 
     /* Status */
-    int           success;      /* 1 = ok, 0 = error */
-    char          error[256];   /* error message if !success */
+    int success;     /* 1 = ok, 0 = error */
+    char error[256]; /* error message if !success */
 } glslt_result_t;
 
 /* -------------------------------------------------------------------------- */
@@ -235,8 +238,7 @@ int glslt_type_std140_align(glslt_type_t type);
  * Returns 1 if valid, 0 if invalid (error message written to error[]).
  * stage: GLSLT_VERTEX or GLSLT_FRAGMENT.
  * Source should be raw GLSL ES 1.00 (not yet transpiled). */
-int glslt_validate_es100(const char *source, glslt_stage_t stage,
-                         char *error, int error_size);
+int glslt_validate_es100(const char *source, glslt_stage_t stage, char *error, int error_size);
 
 #ifdef __cplusplus
 }

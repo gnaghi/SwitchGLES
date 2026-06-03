@@ -54,7 +54,7 @@ bool dk_load_shader_file(sgl_backend_t *be, sgl_handle_t handle, const char *pat
 
     /* Align code offset to 256 bytes */
     uint32_t aligned_offset = SGL_ALIGN_UP(dk->code_offset, SGL_CODE_ALIGNMENT);
-    uint8_t *code_ptr = (uint8_t*)dkMemBlockGetCpuAddr(dk->code_memblock) + aligned_offset;
+    uint8_t *code_ptr = (uint8_t *)dkMemBlockGetCpuAddr(dk->code_memblock) + aligned_offset;
 
     if (fread(code_ptr, 1, size, f) != (size_t)size) {
         fclose(f);
@@ -83,8 +83,8 @@ bool dk_load_shader_file(sgl_backend_t *be, sgl_handle_t handle, const char *pat
     dk->shader_loaded[handle] = true;
     dk->code_offset = aligned_offset + SGL_ALIGN_UP(size, SGL_CODE_ALIGNMENT);
 
-    SGL_TRACE_SHADER("load_shader_file: handle=%u path=%s at 0x%lx (valid, active=%u)",
-                     handle, path, (unsigned long)code_addr, dk->active_shader_count);
+    SGL_TRACE_SHADER("load_shader_file: handle=%u path=%s at 0x%lx (valid, active=%u)", handle,
+                     path, (unsigned long)code_addr, dk->active_shader_count);
     return true;
 }
 
@@ -95,8 +95,7 @@ bool dk_load_shader_file(sgl_backend_t *be, sgl_handle_t handle, const char *pat
  * Same logic as dk_load_shader_file but reads from data/size instead of file.
  * ============================================================================ */
 
-bool dk_load_shader_binary(sgl_backend_t *be, sgl_handle_t handle,
-                           const void *data, size_t size) {
+bool dk_load_shader_binary(sgl_backend_t *be, sgl_handle_t handle, const void *data, size_t size) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
     /* Validate handle */
@@ -118,7 +117,7 @@ bool dk_load_shader_binary(sgl_backend_t *be, sgl_handle_t handle,
     /* Align code offset and size to 256 bytes (DK_SHADER_CODE_ALIGNMENT) */
     uint32_t aligned_offset = SGL_ALIGN_UP(dk->code_offset, SGL_CODE_ALIGNMENT);
     uint32_t aligned_size = (uint32_t)SGL_ALIGN_UP(size, SGL_CODE_ALIGNMENT);
-    uint8_t *code_ptr = (uint8_t*)dkMemBlockGetCpuAddr(dk->code_memblock) + aligned_offset;
+    uint8_t *code_ptr = (uint8_t *)dkMemBlockGetCpuAddr(dk->code_memblock) + aligned_offset;
 
     /* Zero the aligned region first, then copy DKSH data.
      * This matches the pure deko3d libuam test pattern (memset before write).
@@ -134,8 +133,9 @@ bool dk_load_shader_binary(sgl_backend_t *be, sgl_handle_t handle,
 
     /* Validate shader — prevents GPU crash from invalid DKSH data */
     if (!dkShaderIsValid(&dk->dk_shaders[handle])) {
-        SGL_ERROR_BACKEND("load_shader_binary: shader %u INVALID after init (size=%zu at offset=%u)",
-                          handle, size, aligned_offset);
+        SGL_ERROR_BACKEND(
+            "load_shader_binary: shader %u INVALID after init (size=%zu at offset=%u)", handle,
+            size, aligned_offset);
         dk->shader_loaded[handle] = false;
         /* Don't advance code_offset — reclaim the space */
         return false;
@@ -159,8 +159,8 @@ bool dk_load_shader_binary(sgl_backend_t *be, sgl_handle_t handle,
  * COPIES shader data to per-program storage for independent binding.
  * ============================================================================ */
 
-bool dk_link_program(sgl_backend_t *be, sgl_handle_t program,
-                     sgl_handle_t vertex_shader, sgl_handle_t fragment_shader) {
+bool dk_link_program(sgl_backend_t *be, sgl_handle_t program, sgl_handle_t vertex_shader,
+                     sgl_handle_t fragment_shader) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
     /* Validate handles */
@@ -170,8 +170,7 @@ bool dk_link_program(sgl_backend_t *be, sgl_handle_t program,
     }
 
     /* Track whether this program was already linked (for re-link counting) */
-    bool was_linked = dk->program_shader_valid[program][0] &&
-                      dk->program_shader_valid[program][1];
+    bool was_linked = dk->program_shader_valid[program][0] && dk->program_shader_valid[program][1];
 
     /* Initialize program shader slots as invalid */
     dk->program_shader_valid[program][0] = false;
@@ -185,20 +184,21 @@ bool dk_link_program(sgl_backend_t *be, sgl_handle_t program,
     }
 
     /* Copy fragment shader to program storage */
-    if (fragment_shader > 0 && fragment_shader < SGL_MAX_SHADERS && dk->shader_loaded[fragment_shader]) {
+    if (fragment_shader > 0 && fragment_shader < SGL_MAX_SHADERS &&
+        dk->shader_loaded[fragment_shader]) {
         /* Copy the entire DkShader structure */
-        memcpy(&dk->program_shaders[program][1], &dk->dk_shaders[fragment_shader], sizeof(DkShader));
+        memcpy(&dk->program_shaders[program][1], &dk->dk_shaders[fragment_shader],
+               sizeof(DkShader));
         dk->program_shader_valid[program][1] = true;
     }
 
-    SGL_TRACE_SHADER("link_program prog=%u vs=%u(%s) fs=%u(%s)", program,
-                     vertex_shader, dk->program_shader_valid[program][0] ? "ok" : "MISSING",
-                     fragment_shader, dk->program_shader_valid[program][1] ? "ok" : "MISSING");
+    SGL_TRACE_SHADER("link_program prog=%u vs=%u(%s) fs=%u(%s)", program, vertex_shader,
+                     dk->program_shader_valid[program][0] ? "ok" : "MISSING", fragment_shader,
+                     dk->program_shader_valid[program][1] ? "ok" : "MISSING");
 
     /* Both VS and FS required for a valid graphics program */
     if (!dk->program_shader_valid[program][0] || !dk->program_shader_valid[program][1]) {
-        SGL_ERROR_BACKEND("link_program: prog %u missing shaders (vs=%d fs=%d)",
-                          program,
+        SGL_ERROR_BACKEND("link_program: prog %u missing shaders (vs=%d fs=%d)", program,
                           dk->program_shader_valid[program][0],
                           dk->program_shader_valid[program][1]);
         return false;
@@ -219,15 +219,12 @@ bool dk_link_program(sgl_backend_t *be, sgl_handle_t program,
  * - Uses pushConstants to capture uniform data NOW (prevents race conditions)
  * ============================================================================ */
 
-void dk_bind_program(sgl_backend_t *be, sgl_handle_t program,
-                     sgl_handle_t vertex_shader, sgl_handle_t fragment_shader,
-                     const sgl_uniform_binding_t *vertex_uniforms,
-                     const sgl_uniform_binding_t *fragment_uniforms,
-                     int max_uniforms,
-                     const sgl_packed_ubo_t *packed_vertex,
-                     const sgl_packed_ubo_t *packed_fragment,
+void dk_bind_program(sgl_backend_t *be, sgl_handle_t program, sgl_handle_t vertex_shader,
+                     sgl_handle_t fragment_shader, const sgl_uniform_binding_t *vertex_uniforms,
+                     const sgl_uniform_binding_t *fragment_uniforms, int max_uniforms,
+                     const sgl_packed_ubo_t *packed_vertex, const sgl_packed_ubo_t *packed_fragment,
                      int max_packed_ubos) {
-    (void)vertex_shader;  /* Not used - we use per-program shader copies */
+    (void)vertex_shader; /* Not used - we use per-program shader copies */
     (void)fragment_shader;
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
@@ -239,7 +236,7 @@ void dk_bind_program(sgl_backend_t *be, sgl_handle_t program,
     }
 
     /* Bind shaders using per-program copies (captured at link time) */
-    DkShader const* shaders[2];
+    DkShader const *shaders[2];
     int numShaders = 0;
 
     if (dk->program_shader_valid[program][0]) {
@@ -271,7 +268,7 @@ void dk_bind_program(sgl_backend_t *be, sgl_handle_t program,
              * This prevents race conditions when multiple draws use different uniform values
              * in the same command buffer.
              * Use data_size (actual data) not size (256-byte aligned) to avoid reading garbage. */
-            uint8_t *cpu_addr = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock);
+            uint8_t *cpu_addr = (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock);
             void *uniform_data = cpu_addr + dk->uniform_base + ub->offset;
             uint32_t push_size = ub->data_size > 0 ? ub->data_size : ub->size;
             dkCmdBufPushConstants(dk->cmdbuf, gpu_addr, ub->size, 0, push_size, uniform_data);
@@ -287,7 +284,7 @@ void dk_bind_program(sgl_backend_t *be, sgl_handle_t program,
 
             /* CRITICAL: pushConstants captures data NOW
              * Use data_size (actual data) not size (256-byte aligned) to avoid reading garbage. */
-            uint8_t *cpu_addr = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock);
+            uint8_t *cpu_addr = (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock);
             void *uniform_data = cpu_addr + dk->uniform_base + ub->offset;
             uint32_t push_size = ub->data_size > 0 ? ub->data_size : ub->size;
 
@@ -297,10 +294,11 @@ void dk_bind_program(sgl_backend_t *be, sgl_handle_t program,
 
     /* ---- Bind packed UBOs (vertex stage) ---- */
     if (packed_vertex) {
-        uint8_t *cpu_base = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock);
+        uint8_t *cpu_base = (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock);
         for (int i = 0; i < max_packed_ubos; i++) {
             const sgl_packed_ubo_t *packed = &packed_vertex[i];
-            if (!packed->valid || packed->size == 0) continue;
+            if (!packed->valid || packed->size == 0)
+                continue;
 
             uint32_t aligned = SGL_ALIGN_UP(packed->size, SGL_UNIFORM_ALIGNMENT);
             uint32_t offset = dk_alloc_uniform(be, aligned);
@@ -317,10 +315,11 @@ void dk_bind_program(sgl_backend_t *be, sgl_handle_t program,
 
     /* ---- Bind packed UBOs (fragment stage) ---- */
     if (packed_fragment) {
-        uint8_t *cpu_base = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock);
+        uint8_t *cpu_base = (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock);
         for (int i = 0; i < max_packed_ubos; i++) {
             const sgl_packed_ubo_t *packed = &packed_fragment[i];
-            if (!packed->valid || packed->size == 0) continue;
+            if (!packed->valid || packed->size == 0)
+                continue;
 
             uint32_t aligned = SGL_ALIGN_UP(packed->size, SGL_UNIFORM_ALIGNMENT);
             uint32_t offset = dk_alloc_uniform(be, aligned);
@@ -349,8 +348,10 @@ void dk_bind_program(sgl_backend_t *be, sgl_handle_t program,
 void dk_delete_shader(sgl_backend_t *be, sgl_handle_t handle) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
-    if (handle == 0 || handle >= SGL_MAX_SHADERS) return;
-    if (!dk->shader_loaded[handle]) return;
+    if (handle == 0 || handle >= SGL_MAX_SHADERS)
+        return;
+    if (!dk->shader_loaded[handle])
+        return;
 
     dk->shader_loaded[handle] = false;
     if (dk->active_shader_count > 0)
@@ -367,8 +368,8 @@ void dk_delete_shader(sgl_backend_t *be, sgl_handle_t handle) {
     } else if (dk->code_offset > SGL_CODE_MEM_SIZE * 3 / 4) {
         /* Warn if code memory is getting full — helps diagnose leaks */
         SGL_WARN(SGL_LOG_CAT_SHADER, "[SHADER] code memory %u / %u bytes (shaders=%u programs=%u)",
-                 dk->code_offset, SGL_CODE_MEM_SIZE,
-                 dk->active_shader_count, dk->active_program_count);
+                 dk->code_offset, SGL_CODE_MEM_SIZE, dk->active_shader_count,
+                 dk->active_program_count);
     }
 }
 
@@ -382,7 +383,8 @@ void dk_delete_shader(sgl_backend_t *be, sgl_handle_t handle) {
 void dk_delete_program(sgl_backend_t *be, sgl_handle_t handle) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
-    if (handle == 0 || handle >= SGL_MAX_PROGRAMS) return;
+    if (handle == 0 || handle >= SGL_MAX_PROGRAMS)
+        return;
 
     if (dk->active_program_count > 0)
         dk->active_program_count--;

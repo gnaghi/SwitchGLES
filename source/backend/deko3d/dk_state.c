@@ -20,8 +20,8 @@
  * Offsets 112/120 = m_cmdPos/m_cmdEnd pointers in deko3d 0.5.0.
  * GPU method 0x786 = Maxwell IndependentBlend[0].DstAlphaFactor.
  * If the deko3d struct layout changes, this silently breaks. */
-#define DK_CMDBUF_CMDPOS_OFFSET    112  /* DkCmdBuf::m_cmdPos (deko3d 0.5.0) */
-#define DK_CMDBUF_CMDEND_OFFSET    120  /* DkCmdBuf::m_cmdEnd (deko3d 0.5.0) */
+#define DK_CMDBUF_CMDPOS_OFFSET 112 /* DkCmdBuf::m_cmdPos (deko3d 0.5.0) */
+#define DK_CMDBUF_CMDEND_OFFSET 120 /* DkCmdBuf::m_cmdEnd (deko3d 0.5.0) */
 #define NV_BLEND0_DST_ALPHA_METHOD 0x786
 /* Worst-case 32-bit words emitted by the blend recording sequence
  * (BindColorState + BindBlendStates + raw patch + SetBlendConst). Generous. */
@@ -35,7 +35,7 @@
  * Flush when client_array is nearly full. Uniform exhaustion is no longer
  * possible because uniform_offset is reset per-draw (pushConstants captures
  * data in the cmdbuf immediately). cbAddMem callback handles cmdbuf overflow. */
-#define DK_CLIENT_ARRAY_MIN_REMAIN  (64 * 1024)
+#define DK_CLIENT_ARRAY_MIN_REMAIN (64 * 1024)
 
 void dk_apply_viewport(sgl_backend_t *be, const sgl_viewport_state_t *state) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
@@ -59,11 +59,8 @@ void dk_apply_viewport(sgl_backend_t *be, const sgl_viewport_state_t *state) {
     /* DkDeviceFlags_OriginLowerLeft makes deko3d use GL-style coordinates
      * where y=0 is at the bottom of the window. No manual Y-flip needed —
      * GL viewport coordinates pass through directly. */
-    DkViewport viewport = {
-        (float)state->x, (float)state->y,
-        (float)state->width, (float)state->height,
-        state->near_val, state->far_val
-    };
+    DkViewport viewport = {(float)state->x,      (float)state->y, (float)state->width,
+                           (float)state->height, state->near_val, state->far_val};
     dkCmdBufSetViewports(dk->cmdbuf, 0, &viewport, 1);
 
     SGL_TRACE_STATE("apply_viewport %d,%d %dx%d", state->x, state->y, state->width, state->height);
@@ -105,13 +102,24 @@ void dk_apply_scissor(sgl_backend_t *be, const sgl_scissor_state_t *state) {
     }
 
     /* Clip negative coordinates */
-    if (sx < 0) { sw += sx; sx = 0; }
-    if (sy < 0) { sh += sy; sy = 0; }
-    if (sx + sw > (int)rt_width) sw = (int)rt_width - sx;
-    if (sy + sh > (int)rt_height) sh = (int)rt_height - sy;
-    if (sw <= 0 || sh <= 0) { sw = 0; sh = 0; }
+    if (sx < 0) {
+        sw += sx;
+        sx = 0;
+    }
+    if (sy < 0) {
+        sh += sy;
+        sy = 0;
+    }
+    if (sx + sw > (int)rt_width)
+        sw = (int)rt_width - sx;
+    if (sy + sh > (int)rt_height)
+        sh = (int)rt_height - sy;
+    if (sw <= 0 || sh <= 0) {
+        sw = 0;
+        sh = 0;
+    }
 
-    DkScissor scissor = { (uint32_t)sx, (uint32_t)sy, (uint32_t)sw, (uint32_t)sh };
+    DkScissor scissor = {(uint32_t)sx, (uint32_t)sy, (uint32_t)sw, (uint32_t)sh};
     dkCmdBufSetScissors(dk->cmdbuf, 0, &scissor, 1);
 
     SGL_TRACE_STATE("apply_scissor %d,%d %dx%d", state->x, state->y, state->width, state->height);
@@ -131,10 +139,8 @@ void dk_apply_blend(sgl_backend_t *be, const sgl_blend_state_t *state) {
      * would split BindBlendStates from its patch and reset the uniform/client
      * allocators in the middle of state application. */
     if (state->enabled) {
-        uint32_t **pos_ptr =
-            (uint32_t **)((uint8_t *)dk->cmdbuf + DK_CMDBUF_CMDPOS_OFFSET);
-        uint32_t **end_ptr =
-            (uint32_t **)((uint8_t *)dk->cmdbuf + DK_CMDBUF_CMDEND_OFFSET);
+        uint32_t **pos_ptr = (uint32_t **)((uint8_t *)dk->cmdbuf + DK_CMDBUF_CMDPOS_OFFSET);
+        uint32_t **end_ptr = (uint32_t **)((uint8_t *)dk->cmdbuf + DK_CMDBUF_CMDEND_OFFSET);
         if (*pos_ptr + DK_BLEND_SEQ_RESERVE_WORDS > *end_ptr) {
             dk_submit_and_reset(dk);
         }
@@ -154,15 +160,13 @@ void dk_apply_blend(sgl_backend_t *be, const sgl_blend_state_t *state) {
         DkBlendState blendState;
         dkBlendStateDefaults(&blendState);
 
-        dkBlendStateSetFactors(&blendState,
-            dk_convert_blend_factor(state->src_rgb),
-            dk_convert_blend_factor(state->dst_rgb),
-            dk_convert_blend_factor(state->src_alpha),
-            dk_convert_blend_factor(state->dst_alpha));
+        dkBlendStateSetFactors(&blendState, dk_convert_blend_factor(state->src_rgb),
+                               dk_convert_blend_factor(state->dst_rgb),
+                               dk_convert_blend_factor(state->src_alpha),
+                               dk_convert_blend_factor(state->dst_alpha));
 
-        dkBlendStateSetOps(&blendState,
-            dk_convert_blend_op(state->equation_rgb),
-            dk_convert_blend_op(state->equation_alpha));
+        dkBlendStateSetOps(&blendState, dk_convert_blend_op(state->equation_rgb),
+                           dk_convert_blend_op(state->equation_alpha));
 
         dkCmdBufBindBlendStates(dk->cmdbuf, 0, &blendState, 1);
 
@@ -177,7 +181,7 @@ void dk_apply_blend(sgl_backend_t *be, const sgl_blend_state_t *state) {
             uint32_t alpha_dst = (uint32_t)blendState.dstAlphaBlendFactor;
             uint32_t gpu_val = (alpha_dst > 31) ? ((alpha_dst & 0x1f) | 0xc000) : alpha_dst;
             /* NV method header: mode=1(incr), count=1, subchannel=0 */
-            uint32_t cmd[2] = { 0x20010000 | NV_BLEND0_DST_ALPHA_METHOD, gpu_val };
+            uint32_t cmd[2] = {0x20010000 | NV_BLEND0_DST_ALPHA_METHOD, gpu_val};
             uint32_t **pos_ptr = (uint32_t **)((uint8_t *)dk->cmdbuf + DK_CMDBUF_CMDPOS_OFFSET);
             uint32_t **end_ptr = (uint32_t **)((uint8_t *)dk->cmdbuf + DK_CMDBUF_CMDEND_OFFSET);
             uint32_t *pos = *pos_ptr;
@@ -194,8 +198,8 @@ void dk_apply_blend(sgl_backend_t *be, const sgl_blend_state_t *state) {
         }
 
         /* Apply blend constant color */
-        dkCmdBufSetBlendConst(dk->cmdbuf, state->color[0], state->color[1],
-                              state->color[2], state->color[3]);
+        dkCmdBufSetBlendConst(dk->cmdbuf, state->color[0], state->color[1], state->color[2],
+                              state->color[3]);
     }
 
     SGL_TRACE_STATE("apply_blend enabled=%d", state->enabled);
@@ -253,18 +257,14 @@ void dk_apply_depth_stencil(sgl_backend_t *be, const sgl_depth_stencil_state_t *
      * test writes AND clear operations. If we skip this when stencil test is
      * disabled, stale values from a previous draw persist on the GPU, causing
      * incorrect stencil clears and wrong results when stencil is re-enabled. */
-    dkCmdBufSetStencil(dk->cmdbuf, DkFace_Front,
-        (uint8_t)state->stencil_front.write_mask,
-        (uint8_t)state->stencil_front.ref,
-        (uint8_t)state->stencil_front.func_mask);
+    dkCmdBufSetStencil(dk->cmdbuf, DkFace_Front, (uint8_t)state->stencil_front.write_mask,
+                       (uint8_t)state->stencil_front.ref, (uint8_t)state->stencil_front.func_mask);
 
-    dkCmdBufSetStencil(dk->cmdbuf, DkFace_Back,
-        (uint8_t)state->stencil_back.write_mask,
-        (uint8_t)state->stencil_back.ref,
-        (uint8_t)state->stencil_back.func_mask);
+    dkCmdBufSetStencil(dk->cmdbuf, DkFace_Back, (uint8_t)state->stencil_back.write_mask,
+                       (uint8_t)state->stencil_back.ref, (uint8_t)state->stencil_back.func_mask);
 
-    SGL_TRACE_STATE("apply_depth_stencil depth_test=%d stencil_test=%d",
-                    state->depth_test_enabled, state->stencil_test_enabled);
+    SGL_TRACE_STATE("apply_depth_stencil depth_test=%d stencil_test=%d", state->depth_test_enabled,
+                    state->stencil_test_enabled);
 }
 
 /* ============================================================================
@@ -279,10 +279,18 @@ void dk_apply_raster(sgl_backend_t *be, const sgl_raster_state_t *state) {
 
     if (state->cull_enabled) {
         switch (state->cull_mode) {
-            case GL_FRONT:          rasterState.cullMode = DkFace_Front; break;
-            case GL_BACK:           rasterState.cullMode = DkFace_Back; break;
-            case GL_FRONT_AND_BACK: rasterState.cullMode = DkFace_FrontAndBack; break;
-            default:                rasterState.cullMode = DkFace_Back; break;
+            case GL_FRONT:
+                rasterState.cullMode = DkFace_Front;
+                break;
+            case GL_BACK:
+                rasterState.cullMode = DkFace_Back;
+                break;
+            case GL_FRONT_AND_BACK:
+                rasterState.cullMode = DkFace_FrontAndBack;
+                break;
+            default:
+                rasterState.cullMode = DkFace_Back;
+                break;
         }
     } else {
         rasterState.cullMode = DkFace_None;
@@ -301,12 +309,12 @@ void dk_apply_raster(sgl_backend_t *be, const sgl_raster_state_t *state) {
 
     /* Set depth bias values via separate command */
     if (state->polygon_offset_fill_enabled) {
-        dkCmdBufSetDepthBias(dk->cmdbuf, state->polygon_offset_units, 0.0f, state->polygon_offset_factor);
+        dkCmdBufSetDepthBias(dk->cmdbuf, state->polygon_offset_units, 0.0f,
+                             state->polygon_offset_factor);
     }
 
-    SGL_TRACE_STATE("apply_raster cull=%d mode=0x%X front=0x%X polyOffset=%d",
-                    state->cull_enabled, state->cull_mode, state->front_face,
-                    state->polygon_offset_fill_enabled);
+    SGL_TRACE_STATE("apply_raster cull=%d mode=0x%X front=0x%X polyOffset=%d", state->cull_enabled,
+                    state->cull_mode, state->front_face, state->polygon_offset_fill_enabled);
 }
 
 /* ============================================================================
@@ -320,10 +328,14 @@ void dk_apply_color_mask(sgl_backend_t *be, const sgl_color_state_t *state) {
     dkColorWriteStateDefaults(&cwState);
 
     uint32_t mask = 0;
-    if (state->mask[0]) mask |= DkColorMask_R;
-    if (state->mask[1]) mask |= DkColorMask_G;
-    if (state->mask[2]) mask |= DkColorMask_B;
-    if (state->mask[3]) mask |= DkColorMask_A;
+    if (state->mask[0])
+        mask |= DkColorMask_R;
+    if (state->mask[1])
+        mask |= DkColorMask_G;
+    if (state->mask[2])
+        mask |= DkColorMask_B;
+    if (state->mask[3])
+        mask |= DkColorMask_A;
 
     /* Per GLES spec: If the color buffer does not store an alpha component,
      * alpha writes have no effect. Mask out A for RGB/RGB565 FBOs. */
@@ -334,11 +346,15 @@ void dk_apply_color_mask(sgl_backend_t *be, const sgl_color_state_t *state) {
             if (fbo) {
                 GLenum fmt = 0;
                 if (fbo->color_is_renderbuffer) {
-                    sgl_renderbuffer_t *rb = sgl_res_mgr_get_renderbuffer(&ctx->res_mgr, fbo->color_attachment);
-                    if (rb) fmt = rb->internal_format;
+                    sgl_renderbuffer_t *rb =
+                        sgl_res_mgr_get_renderbuffer(&ctx->res_mgr, fbo->color_attachment);
+                    if (rb)
+                        fmt = rb->internal_format;
                 } else {
-                    sgl_texture_t *tex = sgl_res_mgr_get_texture(&ctx->res_mgr, fbo->color_attachment);
-                    if (tex) fmt = tex->internal_format;
+                    sgl_texture_t *tex =
+                        sgl_res_mgr_get_texture(&ctx->res_mgr, fbo->color_attachment);
+                    if (tex)
+                        fmt = tex->internal_format;
                 }
                 if (fmt == GL_RGB || fmt == GL_RGB8 || fmt == GL_RGB565) {
                     mask &= ~DkColorMask_A;
@@ -350,8 +366,8 @@ void dk_apply_color_mask(sgl_backend_t *be, const sgl_color_state_t *state) {
     dkColorWriteStateSetMask(&cwState, 0, mask);
     dkCmdBufBindColorWriteState(dk->cmdbuf, &cwState);
 
-    SGL_TRACE_STATE("apply_color_mask [%d%d%d%d]",
-                    state->mask[0], state->mask[1], state->mask[2], state->mask[3]);
+    SGL_TRACE_STATE("apply_color_mask [%d%d%d%d]", state->mask[0], state->mask[1], state->mask[2],
+                    state->mask[3]);
 }
 
 /* ============================================================================

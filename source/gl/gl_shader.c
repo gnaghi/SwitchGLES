@@ -11,34 +11,53 @@
 
 #ifdef SGL_ENABLE_RUNTIME_COMPILER
 #include <uam.h>
-#include <malloc.h>  /* memalign — needed for 256-byte aligned DKSH buffer */
+#include <malloc.h> /* memalign — needed for 256-byte aligned DKSH buffer */
 #include "../transpiler/glsl_transpiler.h"
 #include "gl_shader_cache.h"
 /* Forward-declare packed uniform API (defined in gl_uniform.c, declared in gl2sgl.h) */
-extern GLboolean sglRegisterPackedUniform(const GLchar *name, GLint stage, GLint binding, GLint byte_offset);
+extern GLboolean sglRegisterPackedUniform(const GLchar *name, GLint stage, GLint binding,
+                                          GLint byte_offset);
 extern void sglSetPackedUBOSize(GLint stage, GLint binding, GLint size);
 
 /* Convert transpiler type enum to GL type enum */
 GLenum glslt_to_gl_type(glslt_type_t type) {
     switch (type) {
-        case GLSLT_FLOAT:      return GL_FLOAT;
-        case GLSLT_VEC2:       return GL_FLOAT_VEC2;
-        case GLSLT_VEC3:       return GL_FLOAT_VEC3;
-        case GLSLT_VEC4:       return GL_FLOAT_VEC4;
-        case GLSLT_INT:        return GL_INT;
-        case GLSLT_IVEC2:      return GL_INT_VEC2;
-        case GLSLT_IVEC3:      return GL_INT_VEC3;
-        case GLSLT_IVEC4:      return GL_INT_VEC4;
-        case GLSLT_BOOL:       return GL_BOOL;
-        case GLSLT_BVEC2:      return GL_BOOL_VEC2;
-        case GLSLT_BVEC3:      return GL_BOOL_VEC3;
-        case GLSLT_BVEC4:      return GL_BOOL_VEC4;
-        case GLSLT_MAT2:       return GL_FLOAT_MAT2;
-        case GLSLT_MAT3:       return GL_FLOAT_MAT3;
-        case GLSLT_MAT4:       return GL_FLOAT_MAT4;
-        case GLSLT_SAMPLER2D:  return GL_SAMPLER_2D;
-        case GLSLT_SAMPLERCUBE:return GL_SAMPLER_CUBE;
-        default:               return GL_FLOAT_VEC4;
+        case GLSLT_FLOAT:
+            return GL_FLOAT;
+        case GLSLT_VEC2:
+            return GL_FLOAT_VEC2;
+        case GLSLT_VEC3:
+            return GL_FLOAT_VEC3;
+        case GLSLT_VEC4:
+            return GL_FLOAT_VEC4;
+        case GLSLT_INT:
+            return GL_INT;
+        case GLSLT_IVEC2:
+            return GL_INT_VEC2;
+        case GLSLT_IVEC3:
+            return GL_INT_VEC3;
+        case GLSLT_IVEC4:
+            return GL_INT_VEC4;
+        case GLSLT_BOOL:
+            return GL_BOOL;
+        case GLSLT_BVEC2:
+            return GL_BOOL_VEC2;
+        case GLSLT_BVEC3:
+            return GL_BOOL_VEC3;
+        case GLSLT_BVEC4:
+            return GL_BOOL_VEC4;
+        case GLSLT_MAT2:
+            return GL_FLOAT_MAT2;
+        case GLSLT_MAT3:
+            return GL_FLOAT_MAT3;
+        case GLSLT_MAT4:
+            return GL_FLOAT_MAT4;
+        case GLSLT_SAMPLER2D:
+            return GL_SAMPLER_2D;
+        case GLSLT_SAMPLERCUBE:
+            return GL_SAMPLER_CUBE;
+        default:
+            return GL_FLOAT_VEC4;
     }
 }
 #endif
@@ -69,7 +88,8 @@ GL_APICALL void GL_APIENTRY glDeleteShader(GLuint shader) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
-    if (shader == 0) return;
+    if (shader == 0)
+        return;
 
     sgl_shader_t *sh = GET_SHADER(shader);
     if (!sh) {
@@ -81,7 +101,8 @@ GL_APICALL void GL_APIENTRY glDeleteShader(GLuint shader) {
      * for deletion. It will be freed when detached from all programs. */
     if (sh->attach_count > 0) {
         sh->delete_pending = true;
-        SGL_TRACE_SHADER("glDeleteShader(%u) - deferred (attach_count=%d)", shader, sh->attach_count);
+        SGL_TRACE_SHADER("glDeleteShader(%u) - deferred (attach_count=%d)", shader,
+                         sh->attach_count);
         return;
     }
 
@@ -101,7 +122,8 @@ GL_APICALL GLboolean GL_APIENTRY glIsShader(GLuint shader) {
     return GET_SHADER(shader) ? GL_TRUE : GL_FALSE;
 }
 
-GL_APICALL void GL_APIENTRY glShaderSource(GLuint shader, GLsizei count, const GLchar *const*string, const GLint *length) {
+GL_APICALL void GL_APIENTRY glShaderSource(GLuint shader, GLsizei count,
+                                           const GLchar *const *string, const GLint *length) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
@@ -128,7 +150,8 @@ GL_APICALL void GL_APIENTRY glShaderSource(GLuint shader, GLsizei count, const G
     /* Calculate total length */
     size_t total = 0;
     for (GLsizei i = 0; i < count; i++) {
-        if (!string[i]) continue;
+        if (!string[i])
+            continue;
         if (length && length[i] >= 0) {
             total += (size_t)length[i];
         } else {
@@ -145,7 +168,8 @@ GL_APICALL void GL_APIENTRY glShaderSource(GLuint shader, GLsizei count, const G
 
     char *dst = sh->source;
     for (GLsizei i = 0; i < count; i++) {
-        if (!string[i]) continue;
+        if (!string[i])
+            continue;
         size_t len;
         if (length && length[i] >= 0) {
             len = (size_t)length[i];
@@ -173,8 +197,8 @@ GL_APICALL void GL_APIENTRY glShaderSource(GLuint shader, GLsizei count, const G
  *
  * Returns true on success. Sets sh->info_log on failure.
  */
-bool sgl_compile_glsl460(sgl_context_t *ctx, GLuint shader_id,
-                                 sgl_shader_t *sh, const char *glsl_source) {
+bool sgl_compile_glsl460(sgl_context_t *ctx, GLuint shader_id, sgl_shader_t *sh,
+                         const char *glsl_source) {
     DkStage stage;
     if (sh->type == GL_VERTEX_SHADER) {
         stage = DkStage_Vertex;
@@ -198,8 +222,8 @@ bool sgl_compile_glsl460(sgl_context_t *ctx, GLuint shader_id,
                 memcpy(aligned, cached_dksh, cached_size);
                 free(cached_dksh);
                 if (ctx->backend && ctx->backend->ops->load_shader_binary) {
-                    cache_ok = ctx->backend->ops->load_shader_binary(
-                        ctx->backend, shader_id, aligned, cached_size);
+                    cache_ok = ctx->backend->ops->load_shader_binary(ctx->backend, shader_id,
+                                                                     aligned, cached_size);
                 }
                 free(aligned);
                 if (cache_ok) {
@@ -225,8 +249,8 @@ bool sgl_compile_glsl460(sgl_context_t *ctx, GLuint shader_id,
     if (compiled) {
         size_t dksh_size = uam_get_code_size(compiler);
 
-        SGL_TRACE_SHADER("RT compile shader %u: DKSH size=%zu align256=%d GPRs=%d",
-                         shader_id, dksh_size, (int)(dksh_size % 256), uam_get_num_gprs(compiler));
+        SGL_TRACE_SHADER("RT compile shader %u: DKSH size=%zu align256=%d GPRs=%d", shader_id,
+                         dksh_size, (int)(dksh_size % 256), uam_get_num_gprs(compiler));
 
         /* CRITICAL: Buffer MUST be 256-byte aligned for libuam's pa256(). */
         size_t alloc_size = SGL_ALIGN_UP(dksh_size, SGL_PAGE_ALIGNMENT);
@@ -239,8 +263,8 @@ bool sgl_compile_glsl460(sgl_context_t *ctx, GLuint shader_id,
             sgl_shader_cache_store(glsl_source, (int)stage, dksh, dksh_size);
 
             if (ctx->backend && ctx->backend->ops->load_shader_binary) {
-                result = ctx->backend->ops->load_shader_binary(
-                    ctx->backend, shader_id, dksh, dksh_size);
+                result =
+                    ctx->backend->ops->load_shader_binary(ctx->backend, shader_id, dksh, dksh_size);
             } else {
                 sh->info_log = strdup("ERROR: Backend does not support shader loading\n");
             }
@@ -273,32 +297,47 @@ bool sgl_compile_glsl460(sgl_context_t *ctx, GLuint shader_id,
 GLenum uam_base_type_to_gl(uint8_t base_type, uint8_t vec_elems, uint8_t mat_cols) {
     if (base_type == 2) { /* GLSL_TYPE_FLOAT */
         if (mat_cols > 1) {
-            if (mat_cols == 2) return GL_FLOAT_MAT2;
-            if (mat_cols == 3) return GL_FLOAT_MAT3;
+            if (mat_cols == 2)
+                return GL_FLOAT_MAT2;
+            if (mat_cols == 3)
+                return GL_FLOAT_MAT3;
             return GL_FLOAT_MAT4;
         }
-        if (vec_elems == 1) return GL_FLOAT;
-        if (vec_elems == 2) return GL_FLOAT_VEC2;
-        if (vec_elems == 3) return GL_FLOAT_VEC3;
+        if (vec_elems == 1)
+            return GL_FLOAT;
+        if (vec_elems == 2)
+            return GL_FLOAT_VEC2;
+        if (vec_elems == 3)
+            return GL_FLOAT_VEC3;
         return GL_FLOAT_VEC4;
     }
     if (base_type == 1) { /* GLSL_TYPE_INT */
-        if (vec_elems == 1) return GL_INT;
-        if (vec_elems == 2) return GL_INT_VEC2;
-        if (vec_elems == 3) return GL_INT_VEC3;
+        if (vec_elems == 1)
+            return GL_INT;
+        if (vec_elems == 2)
+            return GL_INT_VEC2;
+        if (vec_elems == 3)
+            return GL_INT_VEC3;
         return GL_INT_VEC4;
     }
     if (base_type == 11) { /* GLSL_TYPE_BOOL */
-        if (vec_elems == 1) return GL_BOOL;
-        if (vec_elems == 2) return GL_BOOL_VEC2;
-        if (vec_elems == 3) return GL_BOOL_VEC3;
+        if (vec_elems == 1)
+            return GL_BOOL;
+        if (vec_elems == 2)
+            return GL_BOOL_VEC2;
+        if (vec_elems == 3)
+            return GL_BOOL_VEC3;
         return GL_BOOL_VEC4;
     }
-    if (base_type == 12) return GL_SAMPLER_2D; /* GLSL_TYPE_SAMPLER */
-    if (base_type == 0) { /* GLSL_TYPE_UINT — map to int for GLES2 */
-        if (vec_elems == 1) return GL_INT;
-        if (vec_elems == 2) return GL_INT_VEC2;
-        if (vec_elems == 3) return GL_INT_VEC3;
+    if (base_type == 12)
+        return GL_SAMPLER_2D; /* GLSL_TYPE_SAMPLER */
+    if (base_type == 0) {     /* GLSL_TYPE_UINT — map to int for GLES2 */
+        if (vec_elems == 1)
+            return GL_INT;
+        if (vec_elems == 2)
+            return GL_INT_VEC2;
+        if (vec_elems == 3)
+            return GL_INT_VEC3;
         return GL_INT_VEC4;
     }
     return GL_FLOAT_VEC4; /* fallback */
@@ -312,8 +351,7 @@ GLenum uam_base_type_to_gl(uint8_t base_type, uint8_t vec_elems, uint8_t mat_col
  * Returns true on success; sets sh->mesa_meta with metadata.
  * Returns false on failure (caller should fall back to transpiler).
  */
-static bool sgl_compile_es100_mesa(sgl_context_t *ctx, GLuint shader_id,
-                                    sgl_shader_t *sh) {
+static bool sgl_compile_es100_mesa(sgl_context_t *ctx, GLuint shader_id, sgl_shader_t *sh) {
     DkStage stage;
     if (sh->type == GL_VERTEX_SHADER) {
         stage = DkStage_Vertex;
@@ -324,7 +362,8 @@ static bool sgl_compile_es100_mesa(sgl_context_t *ctx, GLuint shader_id,
     }
 
     uam_compiler *compiler = uam_create_compiler(stage);
-    if (!compiler) return false;
+    if (!compiler)
+        return false;
 
     bool compiled = uam_compile_dksh(compiler, sh->source);
     if (!compiled) {
@@ -334,8 +373,7 @@ static bool sgl_compile_es100_mesa(sgl_context_t *ctx, GLuint shader_id,
         const char *mesa_log = uam_get_error_log(compiler);
         if (mesa_log && mesa_log[0]) {
             sh->info_log = strdup(mesa_log);
-            SGL_TRACE_SHADER("shader %u: Mesa direct ES 1.00 rejected: %s",
-                             shader_id, mesa_log);
+            SGL_TRACE_SHADER("shader %u: Mesa direct ES 1.00 rejected: %s", shader_id, mesa_log);
         } else {
             SGL_TRACE_SHADER("shader %u: Mesa direct ES 1.00 compile failed (no error log)",
                              shader_id);
@@ -365,8 +403,8 @@ static bool sgl_compile_es100_mesa(sgl_context_t *ctx, GLuint shader_id,
             meta->uniforms[i].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
             meta->uniforms[i].offset = info.offset;
             meta->uniforms[i].size_bytes = info.size_bytes;
-            meta->uniforms[i].gl_type = uam_base_type_to_gl(info.base_type,
-                info.vector_elements, info.matrix_columns);
+            meta->uniforms[i].gl_type =
+                uam_base_type_to_gl(info.base_type, info.vector_elements, info.matrix_columns);
             meta->uniforms[i].array_elements = info.array_elements;
         }
     }
@@ -391,8 +429,8 @@ static bool sgl_compile_es100_mesa(sgl_context_t *ctx, GLuint shader_id,
             strncpy(meta->inputs[i].name, iinfo.name, SGL_ATTRIB_NAME_MAX - 1);
             meta->inputs[i].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
             meta->inputs[i].location = iinfo.location;
-            meta->inputs[i].gl_type = uam_base_type_to_gl(iinfo.base_type,
-                iinfo.vector_elements, iinfo.matrix_columns);
+            meta->inputs[i].gl_type =
+                uam_base_type_to_gl(iinfo.base_type, iinfo.vector_elements, iinfo.matrix_columns);
         }
     }
 
@@ -426,8 +464,8 @@ static bool sgl_compile_es100_mesa(sgl_context_t *ctx, GLuint shader_id,
         sgl_shader_cache_store(sh->source, (int)stage, dksh, dksh_size);
 
         if (ctx->backend && ctx->backend->ops->load_shader_binary) {
-            result = ctx->backend->ops->load_shader_binary(
-                ctx->backend, shader_id, dksh, dksh_size);
+            result =
+                ctx->backend->ops->load_shader_binary(ctx->backend, shader_id, dksh, dksh_size);
         }
         free(dksh);
     }
@@ -435,7 +473,8 @@ static bool sgl_compile_es100_mesa(sgl_context_t *ctx, GLuint shader_id,
     if (result) {
         /* Free old metadata if any */
         if (sh->mesa_meta) {
-            if (sh->mesa_meta->initial_data) free(sh->mesa_meta->initial_data);
+            if (sh->mesa_meta->initial_data)
+                free(sh->mesa_meta->initial_data);
             free(sh->mesa_meta);
         }
         sh->mesa_meta = meta;
@@ -443,15 +482,18 @@ static bool sgl_compile_es100_mesa(sgl_context_t *ctx, GLuint shader_id,
 
         const char *log = uam_get_error_log(compiler);
         if (log && log[0] != '\0') {
-            if (sh->info_log) free(sh->info_log);
+            if (sh->info_log)
+                free(sh->info_log);
             sh->info_log = strdup(log);
         }
 
-        SGL_TRACE_SHADER("shader %u: Mesa direct ES 1.00 compile OK (%d uniforms, %d samplers, constbuf=%u%s)",
-                         shader_id, num_uniforms, num_samplers, meta->constbuf_size,
-                         remapped ? ", remapped" : "");
+        SGL_TRACE_SHADER(
+            "shader %u: Mesa direct ES 1.00 compile OK (%d uniforms, %d samplers, constbuf=%u%s)",
+            shader_id, num_uniforms, num_samplers, meta->constbuf_size,
+            remapped ? ", remapped" : "");
     } else {
-        if (meta->initial_data) free(meta->initial_data);
+        if (meta->initial_data)
+            free(meta->initial_data);
         free(meta);
     }
 
@@ -468,13 +510,16 @@ static bool sgl_compile_es100_mesa(sgl_context_t *ctx, GLuint shader_id,
 static bool sgl_is_es100_source(const char *source) {
     const char *p = source;
     /* Skip leading whitespace and empty lines */
-    while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+    while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r'))
+        p++;
 
     if (strncmp(p, "#version", 8) == 0) {
         p += 8;
-        while (*p == ' ' || *p == '\t') p++;
+        while (*p == ' ' || *p == '\t')
+            p++;
         int ver = atoi(p);
-        if (ver == 100) return true;
+        if (ver == 100)
+            return true;
         /* #version 300 es could also be transpiled in future */
         return false;
     }
@@ -486,9 +531,8 @@ static bool sgl_is_es100_source(const char *source) {
         strstr(source, "varying ") || strstr(source, "varying\t") ||
         strstr(source, "gl_FragColor") || strstr(source, "gl_FragData") ||
         strstr(source, "precision ") || strstr(source, "precision\t") ||
-        strstr(source, "mediump ") || strstr(source, "mediump\t") ||
-        strstr(source, "highp ") || strstr(source, "highp\t") ||
-        strstr(source, "lowp ") || strstr(source, "lowp\t")) {
+        strstr(source, "mediump ") || strstr(source, "mediump\t") || strstr(source, "highp ") ||
+        strstr(source, "highp\t") || strstr(source, "lowp ") || strstr(source, "lowp\t")) {
         return true;
     }
 
@@ -528,8 +572,7 @@ GL_APICALL void GL_APIENTRY glCompileShader(GLuint shader) {
         /* Run GLES 1.00 semantic validation FIRST — catches constructs that
          * Mesa accepts (it compiles as GLSL 4.60 core) but GLES 1.00 forbids:
          * reserved operators, qualification order, preprocessor restrictions, etc. */
-        glslt_stage_t stage = (sh->type == GL_VERTEX_SHADER)
-                              ? GLSLT_VERTEX : GLSLT_FRAGMENT;
+        glslt_stage_t stage = (sh->type == GL_VERTEX_SHADER) ? GLSLT_VERTEX : GLSLT_FRAGMENT;
         char val_error[256];
         if (!glslt_validate_es100(sh->source, stage, val_error, sizeof(val_error))) {
             sh->compiled = false;
@@ -544,7 +587,8 @@ GL_APICALL void GL_APIENTRY glCompileShader(GLuint shader) {
          * never reach the shader. The transpiler injects synthetic uniforms
          * (sgl_dr_near/far/diff) that work via the packed UBO system. */
         if (strstr(sh->source, "gl_DepthRange")) {
-            SGL_TRACE_SHADER("glCompileShader(%u) - gl_DepthRange detected, using transpiler", shader);
+            SGL_TRACE_SHADER("glCompileShader(%u) - gl_DepthRange detected, using transpiler",
+                             shader);
             goto transpiler_fallback;
         }
 
@@ -573,44 +617,48 @@ GL_APICALL void GL_APIENTRY glCompileShader(GLuint shader) {
                 sh->compiled_via_mesa = true;
                 free(sh->info_log);
                 sh->info_log = NULL;
-                SGL_TRACE_SHADER("glCompileShader(%u) - Mesa rejected (too many attribs), deferring to link", shader);
+                SGL_TRACE_SHADER(
+                    "glCompileShader(%u) - Mesa rejected (too many attribs), deferring to link",
+                    shader);
                 return;
             }
             /* Mesa rejects some valid ES 1.00 constructs (const struct constructors,
              * certain initializer patterns). Allow transpiler fallback for these.
              * Pattern: any error about const/initializer/constant. */
-            if (strstr(sh->info_log, "initializer") ||
-                strstr(sh->info_log, "constant") ||
+            if (strstr(sh->info_log, "initializer") || strstr(sh->info_log, "constant") ||
                 strstr(sh->info_log, "const ")) {
                 free(sh->info_log);
                 sh->info_log = NULL;
-                SGL_TRACE_SHADER("glCompileShader(%u) - Mesa const issue, trying transpiler", shader);
+                SGL_TRACE_SHADER("glCompileShader(%u) - Mesa const issue, trying transpiler",
+                                 shader);
                 /* Fall through to transpiler below */
             } else {
                 sh->compiled = false;
-                SGL_TRACE_SHADER("glCompileShader(%u) - Mesa rejected with errors, no transpiler fallback", shader);
+                SGL_TRACE_SHADER(
+                    "glCompileShader(%u) - Mesa rejected with errors, no transpiler fallback",
+                    shader);
                 return;
             }
         }
         SGL_TRACE_SHADER("glCompileShader(%u) - Mesa failed silently, trying transpiler", shader);
-transpiler_fallback:
-        {
-            glslt_options_t topts;
-            glslt_options_init(&topts);
-            glslt_result_t tres = glslt_transpile(sh->source, stage, &topts);
-            if (tres.success) {
-                sh->needs_transpile = true;
-                sh->compiled = true;
-                SGL_TRACE_SHADER("glCompileShader(%u) - transpiler fallback OK", shader);
-                glslt_result_free(&tres);
-            } else {
-                /* Both Mesa and transpiler rejected — shader is genuinely invalid */
-                sh->compiled = false;
-                sh->info_log = strdup(tres.error);
-                SGL_TRACE_SHADER("glCompileShader(%u) - transpiler also failed: %s", shader, tres.error);
-                glslt_result_free(&tres);
-            }
+    transpiler_fallback: {
+        glslt_options_t topts;
+        glslt_options_init(&topts);
+        glslt_result_t tres = glslt_transpile(sh->source, stage, &topts);
+        if (tres.success) {
+            sh->needs_transpile = true;
+            sh->compiled = true;
+            SGL_TRACE_SHADER("glCompileShader(%u) - transpiler fallback OK", shader);
+            glslt_result_free(&tres);
+        } else {
+            /* Both Mesa and transpiler rejected — shader is genuinely invalid */
+            sh->compiled = false;
+            sh->info_log = strdup(tres.error);
+            SGL_TRACE_SHADER("glCompileShader(%u) - transpiler also failed: %s", shader,
+                             tres.error);
+            glslt_result_free(&tres);
         }
+    }
         return;
     }
 
@@ -630,7 +678,8 @@ GL_APICALL void GL_APIENTRY glGetShaderiv(GLuint shader, GLenum pname, GLint *pa
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
-    if (!params) return;
+    if (!params)
+        return;
 
     sgl_shader_t *sh = GET_SHADER(shader);
     if (!sh) {
@@ -660,7 +709,8 @@ GL_APICALL void GL_APIENTRY glGetShaderiv(GLuint shader, GLenum pname, GLint *pa
     }
 }
 
-GL_APICALL void GL_APIENTRY glGetShaderInfoLog(GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *infoLog) {
+GL_APICALL void GL_APIENTRY glGetShaderInfoLog(GLuint shader, GLsizei bufSize, GLsizei *length,
+                                               GLchar *infoLog) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
@@ -673,27 +723,35 @@ GL_APICALL void GL_APIENTRY glGetShaderInfoLog(GLuint shader, GLsizei bufSize, G
     sgl_shader_t *sh = GET_SHADER(shader);
     if (!sh) {
         sgl_set_error(ctx, GET_PROGRAM(shader) ? GL_INVALID_OPERATION : GL_INVALID_VALUE);
-        if (length) *length = 0;
-        if (infoLog && bufSize > 0) infoLog[0] = '\0';
+        if (length)
+            *length = 0;
+        if (infoLog && bufSize > 0)
+            infoLog[0] = '\0';
         return;
     }
 
     if (sh->info_log && sh->info_log[0]) {
         GLsizei log_len = (GLsizei)strlen(sh->info_log);
         GLsizei copy_len = (bufSize > 0) ? (bufSize - 1) : 0;
-        if (copy_len > log_len) copy_len = log_len;
+        if (copy_len > log_len)
+            copy_len = log_len;
         if (infoLog && bufSize > 0) {
-            if (copy_len > 0) memcpy(infoLog, sh->info_log, copy_len);
+            if (copy_len > 0)
+                memcpy(infoLog, sh->info_log, copy_len);
             infoLog[copy_len] = '\0';
         }
-        if (length) *length = copy_len;
+        if (length)
+            *length = copy_len;
     } else {
-        if (length) *length = 0;
-        if (infoLog && bufSize > 0) infoLog[0] = '\0';
+        if (length)
+            *length = 0;
+        if (infoLog && bufSize > 0)
+            infoLog[0] = '\0';
     }
 }
 
-GL_APICALL void GL_APIENTRY glGetShaderSource(GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *source) {
+GL_APICALL void GL_APIENTRY glGetShaderSource(GLuint shader, GLsizei bufSize, GLsizei *length,
+                                              GLchar *source) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
@@ -706,33 +764,42 @@ GL_APICALL void GL_APIENTRY glGetShaderSource(GLuint shader, GLsizei bufSize, GL
     sgl_shader_t *sh = GET_SHADER(shader);
     if (!sh) {
         sgl_set_error(ctx, GET_PROGRAM(shader) ? GL_INVALID_OPERATION : GL_INVALID_VALUE);
-        if (length) *length = 0;
-        if (source && bufSize > 0) source[0] = '\0';
+        if (length)
+            *length = 0;
+        if (source && bufSize > 0)
+            source[0] = '\0';
         return;
     }
 
     if (sh->source && sh->source[0]) {
         GLsizei src_len = (GLsizei)strlen(sh->source);
         GLsizei copy_len = (bufSize > 0) ? (bufSize - 1) : 0;
-        if (copy_len > src_len) copy_len = src_len;
+        if (copy_len > src_len)
+            copy_len = src_len;
         if (source && bufSize > 0) {
-            if (copy_len > 0) memcpy(source, sh->source, copy_len);
+            if (copy_len > 0)
+                memcpy(source, sh->source, copy_len);
             source[copy_len] = '\0';
         }
-        if (length) *length = copy_len;
+        if (length)
+            *length = copy_len;
     } else {
-        if (length) *length = 0;
-        if (source && bufSize > 0) source[0] = '\0';
+        if (length)
+            *length = 0;
+        if (source && bufSize > 0)
+            source[0] = '\0';
     }
 }
 
 /* Load pre-compiled shader from file - delegates to backend */
 bool sgl_load_shader_from_file(GLuint shader_id, const char *path) {
     sgl_context_t *ctx = sgl_get_current_context();
-    if (!ctx || !ctx->backend || !ctx->backend->ops) return false;
+    if (!ctx || !ctx->backend || !ctx->backend->ops)
+        return false;
 
     sgl_shader_t *shader = sgl_res_mgr_get_shader(&ctx->res_mgr, shader_id);
-    if (!shader) return false;
+    if (!shader)
+        return false;
 
     /* Call backend to load shader */
     if (ctx->backend->ops->load_shader_file) {

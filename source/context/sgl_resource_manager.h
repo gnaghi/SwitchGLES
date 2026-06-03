@@ -11,8 +11,8 @@
 /* GLES spec: shaders and programs share a single name namespace.
  * gl_name_type[] tracks what each ID was allocated as, so
  * GET_SHADER(program_id) correctly returns NULL and vice versa. */
-#define SGL_NAME_FREE    0
-#define SGL_NAME_SHADER  1
+#define SGL_NAME_FREE 0
+#define SGL_NAME_SHADER 1
 #define SGL_NAME_PROGRAM 2
 
 /* Overflow tracking for IDs outside normal array range.
@@ -68,7 +68,8 @@ sgl_program_t *sgl_res_mgr_get_program(sgl_resource_manager_t *mgr, GLuint id);
 GLuint sgl_res_mgr_alloc_texture(sgl_resource_manager_t *mgr);
 void sgl_res_mgr_free_texture(sgl_resource_manager_t *mgr, GLuint id);
 sgl_texture_t *sgl_res_mgr_get_texture(sgl_resource_manager_t *mgr, GLuint id);
-sgl_texture_t *sgl_res_mgr_get_texture_any(sgl_resource_manager_t *mgr, GLuint id); /* includes delete_pending */
+sgl_texture_t *sgl_res_mgr_get_texture_any(sgl_resource_manager_t *mgr,
+                                           GLuint id); /* includes delete_pending */
 
 /* Framebuffer operations */
 GLuint sgl_res_mgr_alloc_framebuffer(sgl_resource_manager_t *mgr);
@@ -79,6 +80,7 @@ sgl_framebuffer_t *sgl_res_mgr_get_framebuffer(sgl_resource_manager_t *mgr, GLui
 GLuint sgl_res_mgr_alloc_renderbuffer(sgl_resource_manager_t *mgr);
 void sgl_res_mgr_free_renderbuffer(sgl_resource_manager_t *mgr, GLuint id);
 sgl_renderbuffer_t *sgl_res_mgr_get_renderbuffer(sgl_resource_manager_t *mgr, GLuint id);
-sgl_renderbuffer_t *sgl_res_mgr_get_renderbuffer_any(sgl_resource_manager_t *mgr, GLuint id); /* includes delete_pending */
+sgl_renderbuffer_t *sgl_res_mgr_get_renderbuffer_any(sgl_resource_manager_t *mgr,
+                                                     GLuint id); /* includes delete_pending */
 
 #endif /* SGL_RESOURCE_MANAGER_H */

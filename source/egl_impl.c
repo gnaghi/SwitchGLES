@@ -11,7 +11,7 @@
 #include <GLES2/gl2sgl.h>
 #include <string.h>
 #include <stdio.h>
-#include <switch.h>  /* svcSleepThread */
+#include <switch.h> /* svcSleepThread */
 
 /* SGL_EGL_VERBOSE / SGL_EGL_VTRACE moved to egl_internal.h (shared). */
 
@@ -19,8 +19,7 @@
 sgl_egl_state g_sgl = {0};
 
 /* Ensure last_error starts as EGL_SUCCESS (0x3000), not 0 */
-__attribute__((constructor))
-static void sgl_init_egl_error(void) {
+__attribute__((constructor)) static void sgl_init_egl_error(void) {
     g_sgl.last_error = EGL_SUCCESS;
 }
 
@@ -47,7 +46,8 @@ void sgl_ensure_frame_ready(void) {
     }
 
     dk_backend_data_t *dk = ctx->backend ? (dk_backend_data_t *)ctx->backend->impl_data : NULL;
-    if (!dk) return;
+    if (!dk)
+        return;
 
     /* Acquire next framebuffer (blocks until available) */
     int slot = dkQueueAcquireImage(dk->queue, surf->swapchain);
@@ -93,32 +93,39 @@ void sgl_ensure_frame_ready(void) {
     if (ctx->bound_framebuffer != 0 && ctx->backend->ops->bind_framebuffer) {
         sgl_framebuffer_t *fbo = sgl_res_mgr_get_framebuffer(&ctx->res_mgr, ctx->bound_framebuffer);
         if (fbo && fbo->color_attachment != 0) {
-            ctx->backend->ops->bind_framebuffer(ctx->backend, ctx->bound_framebuffer,
-                                                 fbo->color_attachment, fbo->depth_attachment,
-                                                 fbo->color_is_renderbuffer, fbo->depth_is_renderbuffer,
-                                                 fbo->stencil_attachment, fbo->stencil_is_renderbuffer);
+            ctx->backend->ops->bind_framebuffer(
+                ctx->backend, ctx->bound_framebuffer, fbo->color_attachment, fbo->depth_attachment,
+                fbo->color_is_renderbuffer, fbo->depth_is_renderbuffer, fbo->stencil_attachment,
+                fbo->stencil_is_renderbuffer);
         }
     }
 
     /* Set viewport and scissor — OriginLowerLeft handles Y-flip natively.
      * No manual Y-flip needed, matching dk_apply_viewport/dk_apply_scissor. */
-    DkViewport viewport = {
-        (float)ctx->viewport_state.viewport_x,
-        (float)ctx->viewport_state.viewport_y,
-        (float)ctx->viewport_state.viewport_width,
-        (float)ctx->viewport_state.viewport_height,
-        ctx->viewport_state.depth_near, ctx->viewport_state.depth_far
-    };
+    DkViewport viewport = {(float)ctx->viewport_state.viewport_x,
+                           (float)ctx->viewport_state.viewport_y,
+                           (float)ctx->viewport_state.viewport_width,
+                           (float)ctx->viewport_state.viewport_height,
+                           ctx->viewport_state.depth_near,
+                           ctx->viewport_state.depth_far};
 
     int sc_sx = ctx->viewport_state.scissor_x;
     int sc_sy = ctx->viewport_state.scissor_y;
     int sc_sw = ctx->viewport_state.scissor_width;
     int sc_sh = ctx->viewport_state.scissor_height;
-    if (sc_sx < 0) { sc_sw += sc_sx; sc_sx = 0; }
-    if (sc_sy < 0) { sc_sh += sc_sy; sc_sy = 0; }
-    if (sc_sw < 0) sc_sw = 0;
-    if (sc_sh < 0) sc_sh = 0;
-    DkScissor scissor = { (uint32_t)sc_sx, (uint32_t)sc_sy, (uint32_t)sc_sw, (uint32_t)sc_sh };
+    if (sc_sx < 0) {
+        sc_sw += sc_sx;
+        sc_sx = 0;
+    }
+    if (sc_sy < 0) {
+        sc_sh += sc_sy;
+        sc_sy = 0;
+    }
+    if (sc_sw < 0)
+        sc_sw = 0;
+    if (sc_sh < 0)
+        sc_sh = 0;
+    DkScissor scissor = {(uint32_t)sc_sx, (uint32_t)sc_sy, (uint32_t)sc_sw, (uint32_t)sc_sh};
 
     dkCmdBufSetViewports(dk->cmdbuf, 0, &viewport, 1);
     dkCmdBufSetScissors(dk->cmdbuf, 0, &scissor, 1);
@@ -164,12 +171,13 @@ void sgl_ensure_frame_ready(void) {
 EGLAPI EGLint EGLAPIENTRY eglGetError(void) {
     EGLint error = g_sgl.last_error;
     g_sgl.last_error = EGL_SUCCESS;
-    if (error != EGL_SUCCESS) SGL_EGL_VTRACE("eglGetError() = 0x%04x", error);
+    if (error != EGL_SUCCESS)
+        SGL_EGL_VTRACE("eglGetError() = 0x%04x", error);
     return error;
 }
 
 EGLAPI EGLDisplay EGLAPIENTRY eglGetDisplay(EGLNativeDisplayType display_id) {
-    SGL_EGL_VTRACE("eglGetDisplay(%p)", (void*)(uintptr_t)display_id);
+    SGL_EGL_VTRACE("eglGetDisplay(%p)", (void *)(uintptr_t)display_id);
     (void)display_id;
     return (EGLDisplay)&g_sgl.display;
 }
@@ -184,8 +192,10 @@ EGLAPI EGLBoolean EGLAPIENTRY eglInitialize(EGLDisplay dpy, EGLint *major, EGLin
     }
 
     if (display->initialized) {
-        if (major) *major = display->major_version;
-        if (minor) *minor = display->minor_version;
+        if (major)
+            *major = display->major_version;
+        if (minor)
+            *minor = display->minor_version;
         return EGL_TRUE;
     }
 
@@ -200,8 +210,9 @@ EGLAPI EGLBoolean EGLAPIENTRY eglInitialize(EGLDisplay dpy, EGLint *major, EGLin
 
         for (int attempt = 0; attempt < 3; attempt++) {
             display->device = dkDeviceCreate(&deviceMaker);
-            if (display->device) break;
-            svcSleepThread(200000000ULL);  /* 200ms */
+            if (display->device)
+                break;
+            svcSleepThread(200000000ULL); /* 200ms */
         }
     }
 
@@ -241,8 +252,10 @@ EGLAPI EGLBoolean EGLAPIENTRY eglInitialize(EGLDisplay dpy, EGLint *major, EGLin
     display->minor_version = 4;
     display->initialized = true;
 
-    if (major) *major = display->major_version;
-    if (minor) *minor = display->minor_version;
+    if (major)
+        *major = display->major_version;
+    if (minor)
+        *minor = display->minor_version;
 
     return EGL_TRUE;
 }
@@ -346,9 +359,12 @@ GL_APICALL void GL_APIENTRY sglShutdown(void) {
 
     for (int i = 0; i < SGL_MAX_SURFACES; i++) {
         sgl_surface *s = &g_sgl.surfaces[i];
-        if (!s->used) continue;
-        if (s->swapchain) dkSwapchainDestroy(s->swapchain);
-        if (s->framebuffer_memblock) dkMemBlockDestroy(s->framebuffer_memblock);
+        if (!s->used)
+            continue;
+        if (s->swapchain)
+            dkSwapchainDestroy(s->swapchain);
+        if (s->framebuffer_memblock)
+            dkMemBlockDestroy(s->framebuffer_memblock);
         for (int j = 0; j < SGL_FB_NUM; j++) {
             if (s->depthbuffer_memblocks[j])
                 dkMemBlockDestroy(s->depthbuffer_memblocks[j]);
@@ -370,7 +386,7 @@ GL_APICALL void GL_APIENTRY sglShutdown(void) {
     SGL_TRACE_EGL("sglShutdown: device destroyed, GPU released");
 }
 
-EGLAPI const char * EGLAPIENTRY eglQueryString(EGLDisplay dpy, EGLint name) {
+EGLAPI const char *EGLAPIENTRY eglQueryString(EGLDisplay dpy, EGLint name) {
     sgl_display *display = (sgl_display *)dpy;
 
     if (!sgl_egl_display_valid(display)) {
@@ -379,10 +395,14 @@ EGLAPI const char * EGLAPIENTRY eglQueryString(EGLDisplay dpy, EGLint name) {
     }
 
     switch (name) {
-        case EGL_VENDOR:      return "SwitchGLES";
-        case EGL_VERSION:     return "1.4 SwitchGLES";
-        case EGL_EXTENSIONS:  return "";
-        case EGL_CLIENT_APIS: return "OpenGL_ES";
+        case EGL_VENDOR:
+            return "SwitchGLES";
+        case EGL_VERSION:
+            return "1.4 SwitchGLES";
+        case EGL_EXTENSIONS:
+            return "";
+        case EGL_CLIENT_APIS:
+            return "OpenGL_ES";
         default:
             sgl_egl_set_error(EGL_BAD_PARAMETER);
             return NULL;
@@ -415,7 +435,6 @@ static sgl_surface *sgl_egl_get_surface(EGLSurface surface) {
     return NULL;
 }
 
-
 /* Actually tear down a surface's GPU resources and free the slot. Shared by the
  * immediate-destroy path and deferred reaping from eglMakeCurrent. */
 void sgl_egl_destroy_surface_now(sgl_surface *surf) {
@@ -431,15 +450,21 @@ void sgl_egl_destroy_surface_now(sgl_surface *surf) {
      * memset below cannot leave a dangling draw_surface/read_surface. */
     for (int i = 0; i < SGL_MAX_CONTEXTS; i++) {
         sgl_context_t *c = &g_sgl.contexts[i];
-        if (!c->used) continue;
-        if (c->draw_surface == surf) c->draw_surface = NULL;
-        if (c->read_surface == surf) c->read_surface = NULL;
+        if (!c->used)
+            continue;
+        if (c->draw_surface == surf)
+            c->draw_surface = NULL;
+        if (c->read_surface == surf)
+            c->read_surface = NULL;
     }
 
-    if (surf->swapchain) dkSwapchainDestroy(surf->swapchain);
-    if (surf->framebuffer_memblock) dkMemBlockDestroy(surf->framebuffer_memblock);
+    if (surf->swapchain)
+        dkSwapchainDestroy(surf->swapchain);
+    if (surf->framebuffer_memblock)
+        dkMemBlockDestroy(surf->framebuffer_memblock);
     for (int i = 0; i < SGL_FB_NUM; i++) {
-        if (surf->depthbuffer_memblocks[i]) dkMemBlockDestroy(surf->depthbuffer_memblocks[i]);
+        if (surf->depthbuffer_memblocks[i])
+            dkMemBlockDestroy(surf->depthbuffer_memblocks[i]);
     }
 
     memset(surf, 0, sizeof(sgl_surface));
@@ -461,8 +486,8 @@ void sgl_egl_destroy_context_now(sgl_context_t *ctx) {
  * from eglMakeCurrent once the current binding has changed: any prior
  * context/surface flagged delete_pending that is no longer current is torn down
  * now (EGL §3.5.4 / §3.7.2). prev_draw/prev_read may alias or be NULL. */
-static void sgl_egl_reap_deferred(sgl_context_t *prev_ctx,
-                                  sgl_surface *prev_draw, sgl_surface *prev_read) {
+static void sgl_egl_reap_deferred(sgl_context_t *prev_ctx, sgl_surface *prev_draw,
+                                  sgl_surface *prev_read) {
     sgl_context_t *cur = sgl_get_current_context();
 
     if (prev_draw && prev_draw->used && prev_draw->delete_pending &&
@@ -478,12 +503,8 @@ static void sgl_egl_reap_deferred(sgl_context_t *prev_ctx,
     }
 }
 
-
-
-
-
-EGLAPI EGLBoolean EGLAPIENTRY eglMakeCurrent(EGLDisplay dpy, EGLSurface draw,
-                                              EGLSurface read, EGLContext context) {
+EGLAPI EGLBoolean EGLAPIENTRY eglMakeCurrent(EGLDisplay dpy, EGLSurface draw, EGLSurface read,
+                                             EGLContext context) {
     SGL_EGL_VTRACE("eglMakeCurrent(%p, %p, %p, %p)", dpy, draw, read, context);
     sgl_display *display = (sgl_display *)dpy;
     sgl_surface *draw_surf = (sgl_surface *)draw;
@@ -554,7 +575,8 @@ EGLAPI EGLBoolean EGLAPIENTRY eglMakeCurrent(EGLDisplay dpy, EGLSurface draw,
     if (draw_surf) {
         dk->framebuffers = draw_surf->framebuffers;
         for (int i = 0; i < SGL_FB_NUM; i++) {
-            dk->depth_images[i] = draw_surf->depthbuffer_memblocks[i] ? &draw_surf->depthbuffers[i] : NULL;
+            dk->depth_images[i] =
+                draw_surf->depthbuffer_memblocks[i] ? &draw_surf->depthbuffers[i] : NULL;
         }
         dk->num_framebuffers = SGL_FB_NUM;
         dk->swapchain = draw_surf->swapchain;
@@ -649,8 +671,10 @@ EGLAPI EGLBoolean EGLAPIENTRY eglSwapInterval(EGLDisplay dpy, EGLint interval) {
 
     /* Clamp to [EGL_MIN_SWAP_INTERVAL, EGL_MAX_SWAP_INTERVAL] (0..4 here);
      * a negative interval would otherwise wrap to a huge uint32_t. */
-    if (interval < 0) interval = 0;
-    if (interval > 4) interval = 4;
+    if (interval < 0)
+        interval = 0;
+    if (interval > 4)
+        interval = 4;
 
     sgl_surface *surf = ctx->draw_surface;
     if (surf->swapchain) {
@@ -673,9 +697,12 @@ EGLAPI EGLDisplay EGLAPIENTRY eglGetCurrentDisplay(void) {
 }
 
 EGLAPI EGLSurface EGLAPIENTRY eglGetCurrentSurface(EGLint readdraw) {
-    if (!sgl_get_current_context()) return EGL_NO_SURFACE;
-    if (readdraw == EGL_DRAW) return (EGLSurface)sgl_get_current_context()->draw_surface;
-    if (readdraw == EGL_READ) return (EGLSurface)sgl_get_current_context()->read_surface;
+    if (!sgl_get_current_context())
+        return EGL_NO_SURFACE;
+    if (readdraw == EGL_DRAW)
+        return (EGLSurface)sgl_get_current_context()->draw_surface;
+    if (readdraw == EGL_READ)
+        return (EGLSurface)sgl_get_current_context()->read_surface;
     sgl_egl_set_error(EGL_BAD_PARAMETER);
     return EGL_NO_SURFACE;
 }
@@ -715,41 +742,65 @@ EGLAPI EGLBoolean EGLAPIENTRY eglReleaseThread(void) {
  * Stub Functions
  * ============================================================================ */
 
-EGLAPI EGLBoolean EGLAPIENTRY eglWaitGL(void) { return eglWaitClient(); }
-EGLAPI EGLBoolean EGLAPIENTRY eglWaitNative(EGLint engine) { (void)engine; return EGL_TRUE; }
+EGLAPI EGLBoolean EGLAPIENTRY eglWaitGL(void) {
+    return eglWaitClient();
+}
+EGLAPI EGLBoolean EGLAPIENTRY eglWaitNative(EGLint engine) {
+    (void)engine;
+    return EGL_TRUE;
+}
 
-EGLAPI EGLBoolean EGLAPIENTRY eglCopyBuffers(EGLDisplay dpy, EGLSurface surface, EGLNativePixmapType target) {
-    (void)dpy; (void)surface; (void)target;
+EGLAPI EGLBoolean EGLAPIENTRY eglCopyBuffers(EGLDisplay dpy, EGLSurface surface,
+                                             EGLNativePixmapType target) {
+    (void)dpy;
+    (void)surface;
+    (void)target;
     sgl_egl_set_error(EGL_BAD_NATIVE_PIXMAP);
     return EGL_FALSE;
 }
 
-EGLAPI EGLSurface EGLAPIENTRY eglCreatePbufferSurface(EGLDisplay dpy, EGLConfig config, const EGLint *attrib_list) {
-    (void)dpy; (void)config; (void)attrib_list;
+EGLAPI EGLSurface EGLAPIENTRY eglCreatePbufferSurface(EGLDisplay dpy, EGLConfig config,
+                                                      const EGLint *attrib_list) {
+    (void)dpy;
+    (void)config;
+    (void)attrib_list;
     sgl_egl_set_error(EGL_BAD_MATCH);
     return EGL_NO_SURFACE;
 }
 
-EGLAPI EGLSurface EGLAPIENTRY eglCreatePixmapSurface(EGLDisplay dpy, EGLConfig config, EGLNativePixmapType pixmap, const EGLint *attrib_list) {
-    (void)dpy; (void)config; (void)pixmap; (void)attrib_list;
+EGLAPI EGLSurface EGLAPIENTRY eglCreatePixmapSurface(EGLDisplay dpy, EGLConfig config,
+                                                     EGLNativePixmapType pixmap,
+                                                     const EGLint *attrib_list) {
+    (void)dpy;
+    (void)config;
+    (void)pixmap;
+    (void)attrib_list;
     sgl_egl_set_error(EGL_BAD_NATIVE_PIXMAP);
     return EGL_NO_SURFACE;
 }
 
-
-EGLAPI EGLBoolean EGLAPIENTRY eglSurfaceAttrib(EGLDisplay dpy, EGLSurface surface, EGLint attribute, EGLint value) {
-    (void)dpy; (void)surface; (void)attribute; (void)value;
+EGLAPI EGLBoolean EGLAPIENTRY eglSurfaceAttrib(EGLDisplay dpy, EGLSurface surface, EGLint attribute,
+                                               EGLint value) {
+    (void)dpy;
+    (void)surface;
+    (void)attribute;
+    (void)value;
     return EGL_TRUE;
 }
 
 EGLAPI EGLBoolean EGLAPIENTRY eglBindTexImage(EGLDisplay dpy, EGLSurface surface, EGLint buffer) {
-    (void)dpy; (void)surface; (void)buffer;
+    (void)dpy;
+    (void)surface;
+    (void)buffer;
     sgl_egl_set_error(EGL_BAD_SURFACE);
     return EGL_FALSE;
 }
 
-EGLAPI EGLBoolean EGLAPIENTRY eglReleaseTexImage(EGLDisplay dpy, EGLSurface surface, EGLint buffer) {
-    (void)dpy; (void)surface; (void)buffer;
+EGLAPI EGLBoolean EGLAPIENTRY eglReleaseTexImage(EGLDisplay dpy, EGLSurface surface,
+                                                 EGLint buffer) {
+    (void)dpy;
+    (void)surface;
+    (void)buffer;
     sgl_egl_set_error(EGL_BAD_SURFACE);
     return EGL_FALSE;
 }
@@ -763,8 +814,10 @@ EGLAPI EGLBoolean EGLAPIENTRY eglReleaseTexImage(EGLDisplay dpy, EGLSurface surf
 /* Forward-declare stubs for functions not in GLES2 headers */
 GL_APICALL void GL_APIENTRY glFogf(GLenum pname, GLfloat param);
 GL_APICALL void GL_APIENTRY glFogfv(GLenum pname, const GLfloat *params);
-GL_APICALL void GL_APIENTRY glBlitFramebuffer(GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum);
-GL_APICALL void GL_APIENTRY glRenderbufferStorageMultisample(GLenum, GLsizei, GLenum, GLsizei, GLsizei);
+GL_APICALL void GL_APIENTRY glBlitFramebuffer(GLint, GLint, GLint, GLint, GLint, GLint, GLint,
+                                              GLint, GLbitfield, GLenum);
+GL_APICALL void GL_APIENTRY glRenderbufferStorageMultisample(GLenum, GLsizei, GLenum, GLsizei,
+                                                             GLsizei);
 GL_APICALL const GLubyte *GL_APIENTRY glGetStringi(GLenum name, GLuint index);
 GL_APICALL void GL_APIENTRY glInsertEventMarkerEXT(GLsizei length, const GLchar *marker);
 GL_APICALL void GL_APIENTRY glPushGroupMarkerEXT(GLsizei length, const GLchar *marker);
@@ -775,7 +828,7 @@ typedef struct {
     void (*func)(void);
 } sgl_proc_entry_t;
 
-#define PROC_ENTRY(fn) { #fn, (void(*)(void))fn }
+#define PROC_ENTRY(fn) {#fn, (void (*)(void))fn}
 
 static const sgl_proc_entry_t s_proc_table[] = {
     /* QGL_1_1_PROCS */
@@ -947,13 +1000,14 @@ static const sgl_proc_entry_t s_proc_table[] = {
     PROC_ENTRY(glPushGroupMarkerEXT),
     PROC_ENTRY(glPopGroupMarkerEXT),
 
-    { NULL, NULL }
-};
+    {NULL, NULL}};
 
 #undef PROC_ENTRY
 
-EGLAPI __eglMustCastToProperFunctionPointerType EGLAPIENTRY eglGetProcAddress(const char *procname) {
-    if (!procname) return NULL;
+EGLAPI
+    __eglMustCastToProperFunctionPointerType EGLAPIENTRY eglGetProcAddress(const char *procname) {
+    if (!procname)
+        return NULL;
     for (const sgl_proc_entry_t *e = s_proc_table; e->name; e++) {
         if (strcmp(e->name, procname) == 0)
             return (__eglMustCastToProperFunctionPointerType)e->func;
@@ -961,70 +1015,110 @@ EGLAPI __eglMustCastToProperFunctionPointerType EGLAPIENTRY eglGetProcAddress(co
     return NULL;
 }
 
-EGLAPI EGLSurface EGLAPIENTRY eglCreatePbufferFromClientBuffer(EGLDisplay dpy, EGLenum buftype, EGLClientBuffer buffer, EGLConfig config, const EGLint *attrib_list) {
-    (void)dpy; (void)buftype; (void)buffer; (void)config; (void)attrib_list;
+EGLAPI EGLSurface EGLAPIENTRY eglCreatePbufferFromClientBuffer(EGLDisplay dpy, EGLenum buftype,
+                                                               EGLClientBuffer buffer,
+                                                               EGLConfig config,
+                                                               const EGLint *attrib_list) {
+    (void)dpy;
+    (void)buftype;
+    (void)buffer;
+    (void)config;
+    (void)attrib_list;
     sgl_egl_set_error(EGL_BAD_PARAMETER);
     return EGL_NO_SURFACE;
 }
 
 /* ---- EGL 1.5 stubs (SwitchGLES implements EGL 1.4 only) ---- */
 
-EGLAPI EGLint EGLAPIENTRY eglClientWaitSync(EGLDisplay dpy, EGLSync sync, EGLint flags, EGLTime timeout) {
-    (void)dpy; (void)sync; (void)flags; (void)timeout;
+EGLAPI EGLint EGLAPIENTRY eglClientWaitSync(EGLDisplay dpy, EGLSync sync, EGLint flags,
+                                            EGLTime timeout) {
+    (void)dpy;
+    (void)sync;
+    (void)flags;
+    (void)timeout;
     sgl_egl_set_error(EGL_BAD_DISPLAY);
     return EGL_FALSE;
 }
 
-EGLAPI EGLImage EGLAPIENTRY eglCreateImage(EGLDisplay dpy, EGLContext ctx, EGLenum target, EGLClientBuffer buffer, const EGLAttrib *attrib_list) {
-    (void)dpy; (void)ctx; (void)target; (void)buffer; (void)attrib_list;
+EGLAPI EGLImage EGLAPIENTRY eglCreateImage(EGLDisplay dpy, EGLContext ctx, EGLenum target,
+                                           EGLClientBuffer buffer, const EGLAttrib *attrib_list) {
+    (void)dpy;
+    (void)ctx;
+    (void)target;
+    (void)buffer;
+    (void)attrib_list;
     sgl_egl_set_error(EGL_BAD_DISPLAY);
     return EGL_NO_IMAGE;
 }
 
-EGLAPI EGLSurface EGLAPIENTRY eglCreatePlatformPixmapSurface(EGLDisplay dpy, EGLConfig config, void *native_pixmap, const EGLAttrib *attrib_list) {
-    (void)dpy; (void)config; (void)native_pixmap; (void)attrib_list;
+EGLAPI EGLSurface EGLAPIENTRY eglCreatePlatformPixmapSurface(EGLDisplay dpy, EGLConfig config,
+                                                             void *native_pixmap,
+                                                             const EGLAttrib *attrib_list) {
+    (void)dpy;
+    (void)config;
+    (void)native_pixmap;
+    (void)attrib_list;
     sgl_egl_set_error(EGL_BAD_DISPLAY);
     return EGL_NO_SURFACE;
 }
 
-EGLAPI EGLSurface EGLAPIENTRY eglCreatePlatformWindowSurface(EGLDisplay dpy, EGLConfig config, void *native_window, const EGLAttrib *attrib_list) {
-    (void)dpy; (void)config; (void)native_window; (void)attrib_list;
+EGLAPI EGLSurface EGLAPIENTRY eglCreatePlatformWindowSurface(EGLDisplay dpy, EGLConfig config,
+                                                             void *native_window,
+                                                             const EGLAttrib *attrib_list) {
+    (void)dpy;
+    (void)config;
+    (void)native_window;
+    (void)attrib_list;
     sgl_egl_set_error(EGL_BAD_DISPLAY);
     return EGL_NO_SURFACE;
 }
 
-EGLAPI EGLSync EGLAPIENTRY eglCreateSync(EGLDisplay dpy, EGLenum type, const EGLAttrib *attrib_list) {
-    (void)dpy; (void)type; (void)attrib_list;
+EGLAPI EGLSync EGLAPIENTRY eglCreateSync(EGLDisplay dpy, EGLenum type,
+                                         const EGLAttrib *attrib_list) {
+    (void)dpy;
+    (void)type;
+    (void)attrib_list;
     sgl_egl_set_error(EGL_BAD_DISPLAY);
     return EGL_NO_SYNC;
 }
 
 EGLAPI EGLBoolean EGLAPIENTRY eglDestroyImage(EGLDisplay dpy, EGLImage image) {
-    (void)dpy; (void)image;
+    (void)dpy;
+    (void)image;
     sgl_egl_set_error(EGL_BAD_DISPLAY);
     return EGL_FALSE;
 }
 
 EGLAPI EGLBoolean EGLAPIENTRY eglDestroySync(EGLDisplay dpy, EGLSync sync) {
-    (void)dpy; (void)sync;
+    (void)dpy;
+    (void)sync;
     sgl_egl_set_error(EGL_BAD_DISPLAY);
     return EGL_FALSE;
 }
 
-EGLAPI EGLDisplay EGLAPIENTRY eglGetPlatformDisplay(EGLenum platform, void *native_display, const EGLAttrib *attrib_list) {
-    (void)platform; (void)native_display; (void)attrib_list;
+EGLAPI EGLDisplay EGLAPIENTRY eglGetPlatformDisplay(EGLenum platform, void *native_display,
+                                                    const EGLAttrib *attrib_list) {
+    (void)platform;
+    (void)native_display;
+    (void)attrib_list;
     sgl_egl_set_error(EGL_BAD_PARAMETER);
     return EGL_NO_DISPLAY;
 }
 
-EGLAPI EGLBoolean EGLAPIENTRY eglGetSyncAttrib(EGLDisplay dpy, EGLSync sync, EGLint attribute, EGLAttrib *value) {
-    (void)dpy; (void)sync; (void)attribute; (void)value;
+EGLAPI EGLBoolean EGLAPIENTRY eglGetSyncAttrib(EGLDisplay dpy, EGLSync sync, EGLint attribute,
+                                               EGLAttrib *value) {
+    (void)dpy;
+    (void)sync;
+    (void)attribute;
+    (void)value;
     sgl_egl_set_error(EGL_BAD_DISPLAY);
     return EGL_FALSE;
 }
 
 EGLAPI EGLBoolean EGLAPIENTRY eglWaitSync(EGLDisplay dpy, EGLSync sync, EGLint flags) {
-    (void)dpy; (void)sync; (void)flags;
+    (void)dpy;
+    (void)sync;
+    (void)flags;
     sgl_egl_set_error(EGL_BAD_DISPLAY);
     return EGL_FALSE;
 }

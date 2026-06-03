@@ -51,7 +51,7 @@ typedef struct sgl_surface {
     bool used;
     EGLint width;
     EGLint height;
-    EGLint config_id;   /* config the surface was created with (for EGL_CONFIG_ID) */
+    EGLint config_id; /* config the surface was created with (for EGL_CONFIG_ID) */
 
     /* deko3d swapchain */
     DkSwapchain swapchain;
@@ -111,9 +111,15 @@ extern sgl_egl_state g_sgl;
 #include <stdio.h>
 #define SGL_EGL_VERBOSE 0
 #if SGL_EGL_VERBOSE
-#define SGL_EGL_VTRACE(fmt, ...) do { printf("[SGL] " fmt "\n", ##__VA_ARGS__); fflush(stdout); } while(0)
+#define SGL_EGL_VTRACE(fmt, ...)                                                                   \
+    do {                                                                                           \
+        printf("[SGL] " fmt "\n", ##__VA_ARGS__);                                                  \
+        fflush(stdout);                                                                            \
+    } while (0)
 #else
-#define SGL_EGL_VTRACE(fmt, ...) do {} while(0)
+#define SGL_EGL_VTRACE(fmt, ...)                                                                   \
+    do {                                                                                           \
+    } while (0)
 #endif
 
 /* EGL internal helpers */

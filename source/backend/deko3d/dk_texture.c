@@ -20,7 +20,6 @@
 #include "../../context/sgl_context.h"
 #include "dk_texture_internal.h"
 
-
 /* Compute source row stride accounting for GL_UNPACK_ALIGNMENT.
  * Per GLES2 spec, each row starts at a multiple of unpack_alignment bytes. */
 static inline uint32_t dk_src_row_stride(int width, int bpp) {
@@ -32,9 +31,8 @@ static inline uint32_t dk_src_row_stride(int width, int bpp) {
 
 /* Swizzle BGRA → RGBA (swap B and R channels, 4 bytes per pixel).
  * Used when GL_BGRA_EXT textures are stored as RGBA8 internally. */
-static void dk_swizzle_bgra_to_rgba(uint8_t *staging, const uint8_t *src,
-                                      int width, int height,
-                                      uint32_t aligned_row_size) {
+static void dk_swizzle_bgra_to_rgba(uint8_t *staging, const uint8_t *src, int width, int height,
+                                    uint32_t aligned_row_size) {
     for (int y = 0; y < height; y++) {
         uint8_t *dst_row = staging + y * aligned_row_size;
         const uint8_t *src_row = src + y * dk_src_row_stride(width, 4);
@@ -49,9 +47,8 @@ static void dk_swizzle_bgra_to_rgba(uint8_t *staging, const uint8_t *src,
 
 /* Expand RGB half-float (3x fp16) to RGBA half-float (4x fp16, alpha=1.0).
  * IEEE 754 half-float 1.0 = 0x3C00. */
-static void dk_expand_rgb16f_to_rgba16f(uint8_t *staging, const uint8_t *src,
-                                          int width, int height,
-                                          uint32_t aligned_row_size) {
+static void dk_expand_rgb16f_to_rgba16f(uint8_t *staging, const uint8_t *src, int width, int height,
+                                        uint32_t aligned_row_size) {
     const uint16_t one_fp16 = 0x3C00;
     for (int y = 0; y < height; y++) {
         uint16_t *dst_row = (uint16_t *)(staging + y * aligned_row_size);
@@ -67,23 +64,21 @@ static void dk_expand_rgb16f_to_rgba16f(uint8_t *staging, const uint8_t *src,
 
 /* Unpack packed 16-bit pixel formats to RGBA8.
  * Returns true if unpacking was performed, false if not a packed format. */
-static bool dk_unpack_packed_to_rgba8(uint8_t *staging, const uint8_t *src,
-                                       int width, int height,
-                                       uint32_t aligned_row_size,
-                                       GLenum format, GLenum type) {
+static bool dk_unpack_packed_to_rgba8(uint8_t *staging, const uint8_t *src, int width, int height,
+                                      uint32_t aligned_row_size, GLenum format, GLenum type) {
     if (type == GL_UNSIGNED_SHORT_5_6_5 && format == GL_RGB) {
         for (int y = 0; y < height; y++) {
             uint8_t *dst_row = staging + y * aligned_row_size;
-            const uint16_t *src_row = (const uint16_t*)(src + y * dk_src_row_stride(width, 2));
+            const uint16_t *src_row = (const uint16_t *)(src + y * dk_src_row_stride(width, 2));
             for (int x = 0; x < width; x++) {
                 uint16_t p = src_row[x];
                 uint8_t r = (uint8_t)((p >> 11) & 0x1F);
                 uint8_t g = (uint8_t)((p >> 5) & 0x3F);
                 uint8_t b = (uint8_t)(p & 0x1F);
-                dst_row[x*4+0] = (r << 3) | (r >> 2);  /* expand 5-bit to 8-bit */
-                dst_row[x*4+1] = (g << 2) | (g >> 4);  /* expand 6-bit to 8-bit */
-                dst_row[x*4+2] = (b << 3) | (b >> 2);  /* expand 5-bit to 8-bit */
-                dst_row[x*4+3] = 255;
+                dst_row[x * 4 + 0] = (r << 3) | (r >> 2); /* expand 5-bit to 8-bit */
+                dst_row[x * 4 + 1] = (g << 2) | (g >> 4); /* expand 6-bit to 8-bit */
+                dst_row[x * 4 + 2] = (b << 3) | (b >> 2); /* expand 5-bit to 8-bit */
+                dst_row[x * 4 + 3] = 255;
             }
         }
         return true;
@@ -91,17 +86,17 @@ static bool dk_unpack_packed_to_rgba8(uint8_t *staging, const uint8_t *src,
     if (type == GL_UNSIGNED_SHORT_4_4_4_4 && format == GL_RGBA) {
         for (int y = 0; y < height; y++) {
             uint8_t *dst_row = staging + y * aligned_row_size;
-            const uint16_t *src_row = (const uint16_t*)(src + y * dk_src_row_stride(width, 2));
+            const uint16_t *src_row = (const uint16_t *)(src + y * dk_src_row_stride(width, 2));
             for (int x = 0; x < width; x++) {
                 uint16_t p = src_row[x];
                 uint8_t r = (uint8_t)((p >> 12) & 0xF);
                 uint8_t g = (uint8_t)((p >> 8) & 0xF);
                 uint8_t b = (uint8_t)((p >> 4) & 0xF);
                 uint8_t a = (uint8_t)(p & 0xF);
-                dst_row[x*4+0] = (r << 4) | r;  /* expand 4-bit to 8-bit */
-                dst_row[x*4+1] = (g << 4) | g;
-                dst_row[x*4+2] = (b << 4) | b;
-                dst_row[x*4+3] = (a << 4) | a;
+                dst_row[x * 4 + 0] = (r << 4) | r; /* expand 4-bit to 8-bit */
+                dst_row[x * 4 + 1] = (g << 4) | g;
+                dst_row[x * 4 + 2] = (b << 4) | b;
+                dst_row[x * 4 + 3] = (a << 4) | a;
             }
         }
         return true;
@@ -109,17 +104,17 @@ static bool dk_unpack_packed_to_rgba8(uint8_t *staging, const uint8_t *src,
     if (type == GL_UNSIGNED_SHORT_5_5_5_1 && format == GL_RGBA) {
         for (int y = 0; y < height; y++) {
             uint8_t *dst_row = staging + y * aligned_row_size;
-            const uint16_t *src_row = (const uint16_t*)(src + y * dk_src_row_stride(width, 2));
+            const uint16_t *src_row = (const uint16_t *)(src + y * dk_src_row_stride(width, 2));
             for (int x = 0; x < width; x++) {
                 uint16_t p = src_row[x];
                 uint8_t r = (uint8_t)((p >> 11) & 0x1F);
                 uint8_t g = (uint8_t)((p >> 6) & 0x1F);
                 uint8_t b = (uint8_t)((p >> 1) & 0x1F);
                 uint8_t a = (uint8_t)(p & 0x1);
-                dst_row[x*4+0] = (r << 3) | (r >> 2);  /* expand 5-bit to 8-bit */
-                dst_row[x*4+1] = (g << 3) | (g >> 2);
-                dst_row[x*4+2] = (b << 3) | (b >> 2);
-                dst_row[x*4+3] = a ? 255 : 0;          /* expand 1-bit to 8-bit */
+                dst_row[x * 4 + 0] = (r << 3) | (r >> 2); /* expand 5-bit to 8-bit */
+                dst_row[x * 4 + 1] = (g << 3) | (g >> 2);
+                dst_row[x * 4 + 2] = (b << 3) | (b >> 2);
+                dst_row[x * 4 + 3] = a ? 255 : 0; /* expand 1-bit to 8-bit */
             }
         }
         return true;
@@ -131,9 +126,9 @@ static bool dk_unpack_packed_to_rgba8(uint8_t *staging, const uint8_t *src,
  * conversion by GL format/type: packed->RGBA8, BGRA->RGBA, RGB16F->RGBA16F,
  * RGB8->RGBA8, or a plain bpp-per-pixel row copy (RGBA/LUMINANCE/ALPHA/...).
  * Shared by every glTexImage2D/SubImage2D upload path in this file. */
-static void dk_convert_to_staging(uint8_t *staging, const uint8_t *src,
-                                  int width, int height, uint32_t aligned_row_size,
-                                  uint32_t bpp, GLenum format, GLenum type) {
+static void dk_convert_to_staging(uint8_t *staging, const uint8_t *src, int width, int height,
+                                  uint32_t aligned_row_size, uint32_t bpp, GLenum format,
+                                  GLenum type) {
     if (dk_unpack_packed_to_rgba8(staging, src, width, height, aligned_row_size, format, type)) {
         /* Packed format unpacked to RGBA8 */
     } else if (format == GL_BGRA_EXT && type == GL_UNSIGNED_BYTE) {
@@ -155,11 +150,11 @@ static void dk_convert_to_staging(uint8_t *staging, const uint8_t *src,
     } else {
         /* RGBA, LUMINANCE, ALPHA, LUMINANCE_ALPHA: copy bpp bytes per pixel */
         for (int y = 0; y < height; y++) {
-            memcpy(staging + y * aligned_row_size, src + y * dk_src_row_stride(width, bpp), width * bpp);
+            memcpy(staging + y * aligned_row_size, src + y * dk_src_row_stride(width, bpp),
+                   width * bpp);
         }
     }
 }
-
 
 /* ============================================================================
  * Descriptor Memory Helpers
@@ -173,10 +168,9 @@ static void dk_convert_to_staging(uint8_t *staging, const uint8_t *src,
 /* Write the image descriptor for a texture handle directly to GPU descriptor memory */
 void dk_write_image_descriptor_to_gpu(dk_backend_data_t *dk, sgl_handle_t handle) {
     uint8_t *desc_cpu = (uint8_t *)dkMemBlockGetCpuAddr(dk->descriptor_memblock);
-    memcpy(desc_cpu + handle * sizeof(DkImageDescriptor),
-           &dk->texture_descriptors[handle],
+    memcpy(desc_cpu + handle * sizeof(DkImageDescriptor), &dk->texture_descriptors[handle],
            sizeof(DkImageDescriptor));
-    DK_ARM_STORE_BARRIER();  /* Flush CPU write buffer to DRAM before GPU reads */
+    DK_ARM_STORE_BARRIER(); /* Flush CPU write buffer to DRAM before GPU reads */
 }
 
 /* Build and write the sampler descriptor for a texture handle directly to GPU descriptor memory */
@@ -227,16 +221,28 @@ void dk_write_sampler_descriptor_to_gpu(dk_backend_data_t *dk, sgl_handle_t hand
 
     /* Convert GL wrap modes to deko3d */
     switch (dk->texture_wrap_s[handle]) {
-        case GL_REPEAT:         sampler.wrapMode[0] = DkWrapMode_Repeat; break;
-        case GL_MIRRORED_REPEAT: sampler.wrapMode[0] = DkWrapMode_MirroredRepeat; break;
+        case GL_REPEAT:
+            sampler.wrapMode[0] = DkWrapMode_Repeat;
+            break;
+        case GL_MIRRORED_REPEAT:
+            sampler.wrapMode[0] = DkWrapMode_MirroredRepeat;
+            break;
         case GL_CLAMP_TO_EDGE:
-        default:                sampler.wrapMode[0] = DkWrapMode_ClampToEdge; break;
+        default:
+            sampler.wrapMode[0] = DkWrapMode_ClampToEdge;
+            break;
     }
     switch (dk->texture_wrap_t[handle]) {
-        case GL_REPEAT:         sampler.wrapMode[1] = DkWrapMode_Repeat; break;
-        case GL_MIRRORED_REPEAT: sampler.wrapMode[1] = DkWrapMode_MirroredRepeat; break;
+        case GL_REPEAT:
+            sampler.wrapMode[1] = DkWrapMode_Repeat;
+            break;
+        case GL_MIRRORED_REPEAT:
+            sampler.wrapMode[1] = DkWrapMode_MirroredRepeat;
+            break;
         case GL_CLAMP_TO_EDGE:
-        default:                sampler.wrapMode[1] = DkWrapMode_ClampToEdge; break;
+        default:
+            sampler.wrapMode[1] = DkWrapMode_ClampToEdge;
+            break;
     }
     sampler.wrapMode[2] = DkWrapMode_ClampToEdge;
 
@@ -255,10 +261,9 @@ void dk_write_sampler_descriptor_to_gpu(dk_backend_data_t *dk, sgl_handle_t hand
     /* Write directly to GPU descriptor memory */
     uint8_t *desc_cpu = (uint8_t *)dkMemBlockGetCpuAddr(dk->descriptor_memblock);
     uint32_t sampler_region_offset = SGL_MAX_TEXTURES * sizeof(DkImageDescriptor);
-    memcpy(desc_cpu + sampler_region_offset + handle * sizeof(DkSamplerDescriptor),
-           &samplerDesc,
+    memcpy(desc_cpu + sampler_region_offset + handle * sizeof(DkSamplerDescriptor), &samplerDesc,
            sizeof(DkSamplerDescriptor));
-    DK_ARM_STORE_BARRIER();  /* Flush CPU write buffer to DRAM before GPU reads */
+    DK_ARM_STORE_BARRIER(); /* Flush CPU write buffer to DRAM before GPU reads */
 }
 
 /* ============================================================================
@@ -296,14 +301,15 @@ uint32_t dk_texture_alloc(dk_backend_data_t *dk, uint32_t alignment, uint32_t si
     /* No free block fits — bump allocate */
     uint32_t aligned_offset = (dk->texture_offset + alignment - 1) & ~(alignment - 1);
     if (aligned_offset + size > SGL_TEXTURE_MEM_SIZE) {
-        return UINT32_MAX;  /* Out of memory */
+        return UINT32_MAX; /* Out of memory */
     }
     dk->texture_offset = aligned_offset + size;
     return aligned_offset;
 }
 
 void dk_texture_free(dk_backend_data_t *dk, uint32_t offset, uint32_t size) {
-    if (offset == 0 || size == 0) return;
+    if (offset == 0 || size == 0)
+        return;
 
     /* Find sorted insertion point */
     int insertAt = 0;
@@ -335,7 +341,8 @@ void dk_texture_free(dk_backend_data_t *dk, uint32_t offset, uint32_t size) {
     }
 
     /* No coalescing — insert new block */
-    if (dk->tex_free_count >= SGL_TEX_FREE_LIST_MAX) return;
+    if (dk->tex_free_count >= SGL_TEX_FREE_LIST_MAX)
+        return;
 
     memmove(&dk->tex_free_list[insertAt + 1], &dk->tex_free_list[insertAt],
             (dk->tex_free_count - insertAt) * sizeof(sgl_vbo_free_block_t));
@@ -346,8 +353,10 @@ void dk_texture_free(dk_backend_data_t *dk, uint32_t offset, uint32_t size) {
 
 void dk_delete_texture(sgl_backend_t *be, sgl_handle_t handle) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
-    if (handle == 0 || handle >= SGL_MAX_TEXTURES) return;
-    if (!dk->texture_initialized[handle]) return;
+    if (handle == 0 || handle >= SGL_MAX_TEXTURES)
+        return;
+    if (!dk->texture_initialized[handle])
+        return;
 
     /* Return GPU memory to texture free-list */
     uint32_t offset = dk->texture_gpu_offset[handle];
@@ -381,7 +390,8 @@ void dk_delete_texture(sgl_backend_t *be, sgl_handle_t handle) {
  * attachment. GPU memory is NOT freed (old FBO still references it). */
 void dk_invalidate_texture(sgl_backend_t *be, sgl_handle_t handle) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
-    if (handle == 0 || handle >= SGL_MAX_TEXTURES) return;
+    if (handle == 0 || handle >= SGL_MAX_TEXTURES)
+        return;
     dk->texture_initialized[handle] = false;
 }
 
@@ -396,16 +406,16 @@ void dk_invalidate_texture(sgl_backend_t *be, sgl_handle_t handle) {
 void dk_apply_format_swizzle(DkImageView *view, GLenum gl_format) {
     switch (gl_format) {
         case GL_LUMINANCE:
-            view->swizzle[0] = DkImageSwizzle_Red;   /* R = L */
-            view->swizzle[1] = DkImageSwizzle_Red;   /* G = L */
-            view->swizzle[2] = DkImageSwizzle_Red;   /* B = L */
-            view->swizzle[3] = DkImageSwizzle_One;   /* A = 1.0 */
+            view->swizzle[0] = DkImageSwizzle_Red; /* R = L */
+            view->swizzle[1] = DkImageSwizzle_Red; /* G = L */
+            view->swizzle[2] = DkImageSwizzle_Red; /* B = L */
+            view->swizzle[3] = DkImageSwizzle_One; /* A = 1.0 */
             break;
         case GL_ALPHA:
-            view->swizzle[0] = DkImageSwizzle_Zero;  /* R = 0 */
-            view->swizzle[1] = DkImageSwizzle_Zero;  /* G = 0 */
-            view->swizzle[2] = DkImageSwizzle_Zero;  /* B = 0 */
-            view->swizzle[3] = DkImageSwizzle_Red;   /* A = stored in R channel */
+            view->swizzle[0] = DkImageSwizzle_Zero; /* R = 0 */
+            view->swizzle[1] = DkImageSwizzle_Zero; /* G = 0 */
+            view->swizzle[2] = DkImageSwizzle_Zero; /* B = 0 */
+            view->swizzle[3] = DkImageSwizzle_Red;  /* A = stored in R channel */
             break;
         case GL_LUMINANCE_ALPHA:
             view->swizzle[0] = DkImageSwizzle_Red;   /* R = L (stored in R) */
@@ -418,7 +428,8 @@ void dk_apply_format_swizzle(DkImageView *view, GLenum gl_format) {
              * Per GLES2 §3.7.14, table 3.12: RGB texture has A=1.0 */
             view->swizzle[3] = DkImageSwizzle_One;
             break;
-        default: break; /* RGBA: default swizzle is identity */
+        default:
+            break; /* RGBA: default swizzle is identity */
     }
 }
 
@@ -428,16 +439,25 @@ void dk_apply_format_swizzle(DkImageView *view, GLenum gl_format) {
 uint32_t dk_gl_format_bpp(GLenum gl_format, GLenum gl_type) {
     if (gl_type == GL_HALF_FLOAT_OES) {
         switch (gl_format) {
-            case GL_LUMINANCE: case GL_ALPHA: return 2;
-            case GL_LUMINANCE_ALPHA: return 4;
-            case GL_RGB: return 8; /* expanded to RGBA16F = 4x2 bytes */
-            default: return 8;     /* RGBA = 4x2 bytes */
+            case GL_LUMINANCE:
+            case GL_ALPHA:
+                return 2;
+            case GL_LUMINANCE_ALPHA:
+                return 4;
+            case GL_RGB:
+                return 8; /* expanded to RGBA16F = 4x2 bytes */
+            default:
+                return 8; /* RGBA = 4x2 bytes */
         }
     }
     switch (gl_format) {
-        case GL_LUMINANCE: case GL_ALPHA: return 1;
-        case GL_LUMINANCE_ALPHA: return 2;
-        default: return 4; /* RGBA, RGB, and packed formats (all expanded to RGBA8) */
+        case GL_LUMINANCE:
+        case GL_ALPHA:
+            return 1;
+        case GL_LUMINANCE_ALPHA:
+            return 2;
+        default:
+            return 4; /* RGBA, RGB, and packed formats (all expanded to RGBA8) */
     }
 }
 
@@ -446,8 +466,7 @@ uint32_t dk_gl_format_bpp(GLenum gl_format, GLenum gl_type) {
  * ============================================================================ */
 
 bool dk_is_cubemap_face(GLenum target) {
-    return target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X &&
-           target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z;
+    return target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X && target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z;
 }
 
 int dk_cubemap_face_index(GLenum target) {
@@ -458,10 +477,9 @@ int dk_cubemap_face_index(GLenum target) {
  * Cubemap Texture Upload (internal)
  * ============================================================================ */
 
-static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
-                                    GLenum target, GLint internalformat,
-                                    GLsizei width, GLsizei height,
-                                    GLenum format, GLenum type, const void *pixels) {
+static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle, GLenum target,
+                                   GLint internalformat, GLsizei width, GLsizei height,
+                                   GLenum format, GLenum type, const void *pixels) {
     int face_index = dk_cubemap_face_index(target);
 
     /* Create cubemap GPU image on first face upload (allocates memory for all 6 faces) */
@@ -504,7 +522,7 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
         dk->texture_gpu_size[handle] = (uint32_t)texSize;
         dk->texture_initialized[handle] = true;
         dk->texture_is_cubemap[handle] = true;
-        dk->cubemap_face_mask[handle] = 0;  /* No faces uploaded yet */
+        dk->cubemap_face_mask[handle] = 0; /* No faces uploaded yet */
         dk->cubemap_needs_barrier[handle] = false;
 
         dk->texture_width[handle] = width;
@@ -514,7 +532,7 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
         dk->texture_gl_format[handle] = (GLenum)internalformat;
         dk->texture_gl_type[handle] = type;
 
-        dk->texture_min_filter[handle] = GL_NEAREST_MIPMAP_LINEAR;  /* GL default */
+        dk->texture_min_filter[handle] = GL_NEAREST_MIPMAP_LINEAR; /* GL default */
         dk->texture_mag_filter[handle] = GL_LINEAR;
         dk->texture_wrap_s[handle] = GL_REPEAT;
         dk->texture_wrap_t[handle] = GL_REPEAT;
@@ -523,8 +541,8 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
          * This follows the GLOVE pattern where GPU resources are fully initialized
          * before creating the sampling descriptor. */
 
-        SGL_TRACE_TEXTURE("cubemap created handle=%u %dx%d mips=%u (descriptor deferred)",
-                          handle, width, height, mip_levels);
+        SGL_TRACE_TEXTURE("cubemap created handle=%u %dx%d mips=%u (descriptor deferred)", handle,
+                          width, height, mip_levels);
     }
 
     /* Validate format and dimension consistency for all faces.
@@ -563,9 +581,9 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
             return;
         }
 
-        uint8_t *staging = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock)
-                           + dk->client_array_base + stagingOffset;
-        const uint8_t *src = (const uint8_t*)pixels;
+        uint8_t *staging = (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock) +
+                           dk->client_array_base + stagingOffset;
+        const uint8_t *src = (const uint8_t *)pixels;
 
         /* Copy pixels to staging buffer */
         dk_convert_to_staging(staging, src, width, height, aligned_row_size, bpp, format, type);
@@ -575,14 +593,14 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
         /* Create image view targeting specific face */
         DkImageView faceView;
         dkImageViewDefaults(&faceView, texImage);
-        faceView.type = DkImageType_2D;  /* Upload as 2D slice */
+        faceView.type = DkImageType_2D; /* Upload as 2D slice */
         faceView.layerOffset = face_index;
         faceView.layerCount = 1;
 
-        DkGpuAddr stagingAddr = dkMemBlockGetGpuAddr(dk->data_memblock)
-                                + dk->client_array_base + stagingOffset;
-        DkCopyBuf srcBuf = { stagingAddr, aligned_row_size, (uint32_t)height };
-        DkImageRect dstRect = { 0, 0, 0, (uint32_t)width, (uint32_t)height, 1 };
+        DkGpuAddr stagingAddr =
+            dkMemBlockGetGpuAddr(dk->data_memblock) + dk->client_array_base + stagingOffset;
+        DkCopyBuf srcBuf = {stagingAddr, aligned_row_size, (uint32_t)height};
+        DkImageRect dstRect = {0, 0, 0, (uint32_t)width, (uint32_t)height, 1};
 
         dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &faceView, &dstRect, 0);
 
@@ -605,8 +623,8 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
         dk->cubemap_face_mask[handle] |= (1 << face_index);
         dk->texture_level_mask[handle] |= (1u << 0);
 
-        SGL_TRACE_TEXTURE("cubemap face %d uploaded handle=%u (mask=0x%02X)",
-                          face_index, handle, dk->cubemap_face_mask[handle]);
+        SGL_TRACE_TEXTURE("cubemap face %d uploaded handle=%u (mask=0x%02X)", face_index, handle,
+                          dk->cubemap_face_mask[handle]);
 
         /* GLOVE pattern: Create descriptor only after ALL 6 faces are uploaded.
          * This ensures the cubemap image is fully populated before creating
@@ -630,7 +648,7 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
              * reads through L2 cache. Without invalidation, the sampler may read
              * stale (zero) data from L2 instead of the freshly DMA'd face data. */
             dk->cubemap_needs_barrier[handle] = true;
-            dk->texture_used_as_rt[handle] = true;  /* Belt-and-suspenders: also set RT flag */
+            dk->texture_used_as_rt[handle] = true; /* Belt-and-suspenders: also set RT flag */
 
             SGL_TRACE_TEXTURE("cubemap COMPLETE handle=%u - descriptor created, barrier pending",
                               handle);
@@ -675,14 +693,14 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
  * Texture Image Upload (glTexImage2D) - 2D textures
  * ============================================================================ */
 
-void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
-                         GLenum target, GLint level, GLint internalformat,
-                         GLsizei width, GLsizei height, GLint border,
+void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, GLint level,
+                         GLint internalformat, GLsizei width, GLsizei height, GLint border,
                          GLenum format, GLenum type, const void *pixels) {
     (void)border;
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
-    if (handle == 0 || handle >= SGL_MAX_TEXTURES) return;
+    if (handle == 0 || handle >= SGL_MAX_TEXTURES)
+        return;
 
     /* Drain a still-in-flight submitted frame before recording into cmdbuf */
     dk_ensure_recordable(dk);
@@ -690,9 +708,9 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     /* Handle cubemap faces separately */
     if (dk_is_cubemap_face(target)) {
         if (level == 0) {
-            dk_cubemap_face_upload(dk, handle, target, internalformat, width, height, format, type, pixels);
-        } else if (dk_is_cubemap_face(target) && level > 0 &&
-                   !dk->texture_initialized[handle]) {
+            dk_cubemap_face_upload(dk, handle, target, internalformat, width, height, format, type,
+                                   pixels);
+        } else if (dk_is_cubemap_face(target) && level > 0 && !dk->texture_initialized[handle]) {
             /* Cubemap face at mip level > 0 before ANY level 0 face.
              * GLES2 spec allows defining mip levels in any order.
              * Create the cubemap at inferred level-0 dimensions.
@@ -703,33 +721,38 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
              * the dimension check (dEQP texture.completeness.cube.extra_level). */
             int w0 = width << level;
             int h0 = height << level;
-            if (w0 < 1) w0 = 1;
-            if (h0 < 1) h0 = 1;
+            if (w0 < 1)
+                w0 = 1;
+            if (h0 < 1)
+                h0 = 1;
             if (w0 > 8192 || h0 > 8192) {
                 /* Inferred dimensions exceed GPU max — this level is beyond
                  * the valid mip chain. Per GLES2 §3.7.10, extra levels don't
                  * affect completeness. Silently skip. */
                 return;
             }
-            SGL_TRACE_TEXTURE("cubemap mip level %d before level 0, creating %dx%d base", level, w0, h0);
+            SGL_TRACE_TEXTURE("cubemap mip level %d before level 0, creating %dx%d base", level, w0,
+                              h0);
 
             /* Create cubemap via dk_cubemap_face_upload with NULL pixels at level-0 dimensions.
              * This initializes the DkImage with correct dimensions/mip count.
              * Pass NULL pixels so no data is uploaded — only storage is allocated. */
-            dk_cubemap_face_upload(dk, handle, target, internalformat,
-                                   (GLsizei)w0, (GLsizei)h0, format, type, NULL);
+            dk_cubemap_face_upload(dk, handle, target, internalformat, (GLsizei)w0, (GLsizei)h0,
+                                   format, type, NULL);
 
             /* Now fall through to the level > 0 upload below */
             if (dk->texture_initialized[handle] && dk->texture_is_cubemap[handle]) {
                 /* Upload the mip level data */
                 uint32_t tex_mips = dk->texture_mip_levels[handle];
                 if ((uint32_t)level >= tex_mips) {
-                    return;  /* return inside cubemap block */
+                    return; /* return inside cubemap block */
                 }
                 uint32_t expected_w = dk->texture_width[handle] >> level;
                 uint32_t expected_h = dk->texture_height[handle] >> level;
-                if (expected_w < 1) expected_w = 1;
-                if (expected_h < 1) expected_h = 1;
+                if (expected_w < 1)
+                    expected_w = 1;
+                if (expected_h < 1)
+                    expected_h = 1;
                 if ((uint32_t)width != expected_w || (uint32_t)height != expected_h) {
                     return;
                 }
@@ -743,13 +766,15 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
                     uint32_t staging_size = aligned_row_size * height;
 
                     uint32_t saved_client_offset = dk->client_array_offset;
-                    uint32_t stagingOffset = SGL_ALIGN_UP(dk->client_array_offset, DK_LINEAR_STRIDE_ALIGNMENT);
+                    uint32_t stagingOffset =
+                        SGL_ALIGN_UP(dk->client_array_offset, DK_LINEAR_STRIDE_ALIGNMENT);
                     if (stagingOffset + staging_size <= dk->uniform_base - dk->client_array_base) {
-                        uint8_t *staging = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock)
-                                           + dk->client_array_base + stagingOffset;
-                        const uint8_t *src = (const uint8_t*)pixels;
+                        uint8_t *staging = (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock) +
+                                           dk->client_array_base + stagingOffset;
+                        const uint8_t *src = (const uint8_t *)pixels;
 
-                        dk_convert_to_staging(staging, src, width, height, aligned_row_size, bpp, format, type);
+                        dk_convert_to_staging(staging, src, width, height, aligned_row_size, bpp,
+                                              format, type);
 
                         dk->client_array_offset = stagingOffset + staging_size;
 
@@ -760,19 +785,22 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
                         faceView.layerCount = 1;
                         faceView.mipLevelOffset = level;
 
-                        DkGpuAddr stagingAddr = dkMemBlockGetGpuAddr(dk->data_memblock)
-                                                + dk->client_array_base + stagingOffset;
-                        DkCopyBuf srcBuf = { stagingAddr, aligned_row_size, (uint32_t)height };
-                        DkImageRect dstRect = { 0, 0, 0, (uint32_t)width, (uint32_t)height, 1 };
+                        DkGpuAddr stagingAddr = dkMemBlockGetGpuAddr(dk->data_memblock) +
+                                                dk->client_array_base + stagingOffset;
+                        DkCopyBuf srcBuf = {stagingAddr, aligned_row_size, (uint32_t)height};
+                        DkImageRect dstRect = {0, 0, 0, (uint32_t)width, (uint32_t)height, 1};
 
                         dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &faceView, &dstRect, 0);
 
                         dk_flush_sync(dk);
 
                         dkCmdBufClear(dk->cmdbuf);
-                        dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
-                        dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
-                        dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr, SGL_MAX_TEXTURES);
+                        dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0,
+                                          SGL_CMD_MEM_SIZE);
+                        dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr,
+                                                       SGL_MAX_TEXTURES);
+                        dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr,
+                                                         SGL_MAX_TEXTURES);
                         dk->descriptors_bound = true;
                         dk->client_array_offset = saved_client_offset;
                         dk_rebind_render_target(dk);
@@ -786,18 +814,24 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
             /* Level > 0: upload mip data to existing cubemap.
              * Validate level, dimensions, and format before uploading. */
             uint32_t tex_mips = dk->texture_mip_levels[handle];
-            if ((uint32_t)level >= tex_mips) return;
+            if ((uint32_t)level >= tex_mips)
+                return;
             uint32_t expected_w = dk->texture_width[handle] >> level;
             uint32_t expected_h = dk->texture_height[handle] >> level;
-            if (expected_w < 1) expected_w = 1;
-            if (expected_h < 1) expected_h = 1;
-            if ((uint32_t)width != expected_w || (uint32_t)height != expected_h) return;
+            if (expected_w < 1)
+                expected_w = 1;
+            if (expected_h < 1)
+                expected_h = 1;
+            if ((uint32_t)width != expected_w || (uint32_t)height != expected_h)
+                return;
             DkImageFormat levelFormat = dk_convert_format(internalformat, format, type);
-            if (levelFormat != dk->texture_format[handle]) return;
+            if (levelFormat != dk->texture_format[handle])
+                return;
             /* Also check GL format — RGB and RGBA both map to RGBA8_Unorm,
              * so DkImageFormat alone can't distinguish them. Per GLES2 §3.7.10,
              * all mip levels must share the same internal format. */
-            if ((GLenum)internalformat != dk->texture_gl_format[handle]) return;
+            if ((GLenum)internalformat != dk->texture_gl_format[handle])
+                return;
 
             if (pixels) {
                 int face_index = dk_cubemap_face_index(target);
@@ -808,13 +842,15 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
                 uint32_t staging_size = aligned_row_size * height;
 
                 uint32_t saved_client_offset = dk->client_array_offset;
-                uint32_t stagingOffset = SGL_ALIGN_UP(dk->client_array_offset, DK_LINEAR_STRIDE_ALIGNMENT);
+                uint32_t stagingOffset =
+                    SGL_ALIGN_UP(dk->client_array_offset, DK_LINEAR_STRIDE_ALIGNMENT);
                 if (stagingOffset + staging_size <= dk->uniform_base - dk->client_array_base) {
-                    uint8_t *staging = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock)
-                                       + dk->client_array_base + stagingOffset;
-                    const uint8_t *src = (const uint8_t*)pixels;
+                    uint8_t *staging = (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock) +
+                                       dk->client_array_base + stagingOffset;
+                    const uint8_t *src = (const uint8_t *)pixels;
 
-                    dk_convert_to_staging(staging, src, width, height, aligned_row_size, bpp, format, type);
+                    dk_convert_to_staging(staging, src, width, height, aligned_row_size, bpp,
+                                          format, type);
 
                     dk->client_array_offset = stagingOffset + staging_size;
 
@@ -825,19 +861,22 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
                     faceView.layerCount = 1;
                     faceView.mipLevelOffset = level;
 
-                    DkGpuAddr stagingAddr = dkMemBlockGetGpuAddr(dk->data_memblock)
-                                            + dk->client_array_base + stagingOffset;
-                    DkCopyBuf srcBuf = { stagingAddr, aligned_row_size, (uint32_t)height };
-                    DkImageRect dstRect = { 0, 0, 0, (uint32_t)width, (uint32_t)height, 1 };
+                    DkGpuAddr stagingAddr = dkMemBlockGetGpuAddr(dk->data_memblock) +
+                                            dk->client_array_base + stagingOffset;
+                    DkCopyBuf srcBuf = {stagingAddr, aligned_row_size, (uint32_t)height};
+                    DkImageRect dstRect = {0, 0, 0, (uint32_t)width, (uint32_t)height, 1};
 
                     dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &faceView, &dstRect, 0);
 
                     dk_flush_sync(dk);
 
                     dkCmdBufClear(dk->cmdbuf);
-                    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
-                    dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
-                    dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr, SGL_MAX_TEXTURES);
+                    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0,
+                                      SGL_CMD_MEM_SIZE);
+                    dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr,
+                                                   SGL_MAX_TEXTURES);
+                    dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr,
+                                                     SGL_MAX_TEXTURES);
                     dk->descriptors_bound = true;
                     dk->client_array_offset = saved_client_offset;
                     dk_rebind_render_target(dk);
@@ -861,15 +900,21 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
              * Level-0 dimensions: w0 = width << level, h0 = height << level */
             int w0 = width << level;
             int h0 = height << level;
-            if (w0 < 1) w0 = 1;
-            if (h0 < 1) h0 = 1;
-            SGL_TRACE_TEXTURE("texture_image_2d: level %d before level 0, creating %dx%d base", level, w0, h0);
+            if (w0 < 1)
+                w0 = 1;
+            if (h0 < 1)
+                h0 = 1;
+            SGL_TRACE_TEXTURE("texture_image_2d: level %d before level 0, creating %dx%d base",
+                              level, w0, h0);
 
             DkImageFormat newFmt = dk_convert_format(internalformat, format, type);
             uint32_t max_dim = (uint32_t)(w0 > h0 ? w0 : h0);
             uint32_t mip_levels = 1;
             uint32_t temp = max_dim;
-            while (temp > 1) { temp >>= 1; mip_levels++; }
+            while (temp > 1) {
+                temp >>= 1;
+                mip_levels++;
+            }
 
             DkImageLayoutMaker layoutMaker;
             dkImageLayoutMakerDefaults(&layoutMaker, dk->device);
@@ -927,8 +972,10 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
         }
         uint32_t expected_w = dk->texture_width[handle] >> level;
         uint32_t expected_h = dk->texture_height[handle] >> level;
-        if (expected_w < 1) expected_w = 1;
-        if (expected_h < 1) expected_h = 1;
+        if (expected_w < 1)
+            expected_w = 1;
+        if (expected_h < 1)
+            expected_h = 1;
         if ((uint32_t)width != expected_w || (uint32_t)height != expected_h) {
             /* Dimensions mismatch — texture will be incomplete, skip upload */
             return;
@@ -951,15 +998,17 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
             uint32_t row_size = width * bpp;
             uint32_t aligned_row_size = SGL_ALIGN_UP(row_size, DK_LINEAR_STRIDE_ALIGNMENT);
             uint32_t staging_size = aligned_row_size * height;
-            const uint8_t *src = (const uint8_t*)pixels;
+            const uint8_t *src = (const uint8_t *)pixels;
 
             uint32_t saved_client_offset = dk->client_array_offset;
-            uint32_t stagingOffset = SGL_ALIGN_UP(dk->client_array_offset, DK_LINEAR_STRIDE_ALIGNMENT);
+            uint32_t stagingOffset =
+                SGL_ALIGN_UP(dk->client_array_offset, DK_LINEAR_STRIDE_ALIGNMENT);
             if (stagingOffset + staging_size <= dk->uniform_base - dk->client_array_base) {
-                uint8_t *staging = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock)
-                                   + dk->client_array_base + stagingOffset;
+                uint8_t *staging = (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock) +
+                                   dk->client_array_base + stagingOffset;
 
-                dk_convert_to_staging(staging, src, width, height, aligned_row_size, bpp, format, type);
+                dk_convert_to_staging(staging, src, width, height, aligned_row_size, bpp, format,
+                                      type);
 
                 dk->client_array_offset = stagingOffset + staging_size;
 
@@ -968,21 +1017,24 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
                 imageView.mipLevelOffset = level;
                 dk_apply_format_swizzle(&imageView, dk->texture_gl_format[handle]);
 
-                DkGpuAddr stagingAddr = dkMemBlockGetGpuAddr(dk->data_memblock)
-                                        + dk->client_array_base + stagingOffset;
-                DkCopyBuf srcBuf = { stagingAddr, aligned_row_size, (uint32_t)height };
-                DkImageRect dstRect = { 0, 0, 0, (uint32_t)width, (uint32_t)height, 1 };
+                DkGpuAddr stagingAddr =
+                    dkMemBlockGetGpuAddr(dk->data_memblock) + dk->client_array_base + stagingOffset;
+                DkCopyBuf srcBuf = {stagingAddr, aligned_row_size, (uint32_t)height};
+                DkImageRect dstRect = {0, 0, 0, (uint32_t)width, (uint32_t)height, 1};
 
                 dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &imageView, &dstRect, 0);
 
                 dk_flush_sync(dk);
 
                 dkCmdBufClear(dk->cmdbuf);
-                dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+                dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0,
+                                  SGL_CMD_MEM_SIZE);
 
                 /* Re-bind descriptor sets after cmdbuf clear (matches legacy pattern) */
-                dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
-                dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr, SGL_MAX_TEXTURES);
+                dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr,
+                                               SGL_MAX_TEXTURES);
+                dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr,
+                                                 SGL_MAX_TEXTURES);
                 dk->descriptors_bound = true;
 
                 dk->client_array_offset = saved_client_offset;
@@ -991,7 +1043,8 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
         }
         /* Mark this mip level as defined for completeness tracking */
         dk->texture_level_mask[handle] |= (1u << level);
-        SGL_TRACE_TEXTURE("texture_image_2d handle=%u mip level %d %dx%d", handle, level, width, height);
+        SGL_TRACE_TEXTURE("texture_image_2d handle=%u mip level %d %dx%d", handle, level, width,
+                          height);
         return;
     }
 
@@ -1001,8 +1054,7 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
     /* Reuse existing DkImage if same dimensions and format (e.g. cinematic frames).
      * This avoids exhausting the texture bump allocator on every-frame glTexImage2D. */
-    bool reuse_image = dk->texture_initialized[handle] &&
-                       !dk->texture_is_cubemap[handle] &&
+    bool reuse_image = dk->texture_initialized[handle] && !dk->texture_is_cubemap[handle] &&
                        dk->texture_width[handle] == (uint32_t)width &&
                        dk->texture_height[handle] == (uint32_t)height &&
                        dk->texture_format[handle] == newFormat;
@@ -1014,8 +1066,8 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
          * on glTexImage2D resize while attached to FBO). Must flush GPU first if the
          * texture is currently bound as a render target. */
         if (dk->texture_initialized[handle] && dk->texture_gpu_size[handle] > 0) {
-            if (dk->current_fbo != 0 &&
-                dk->current_fbo_color == handle && !dk->current_fbo_color_is_rb) {
+            if (dk->current_fbo != 0 && dk->current_fbo_color == handle &&
+                !dk->current_fbo_color_is_rb) {
                 dk_submit_and_reset(dk);
             }
             dk_texture_free(dk, dk->texture_gpu_offset[handle], dk->texture_gpu_size[handle]);
@@ -1038,7 +1090,7 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
         layoutMaker.dimensions[0] = width;
         layoutMaker.dimensions[1] = height;
         layoutMaker.dimensions[2] = 1;
-        layoutMaker.mipLevels = mip_levels;  /* Allocate space for all mip levels */
+        layoutMaker.mipLevels = mip_levels; /* Allocate space for all mip levels */
 
         DkImageLayout layout;
         dkImageLayoutInitialize(&layout, &layoutMaker);
@@ -1056,7 +1108,7 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
         dk->texture_gpu_offset[handle] = aligned_offset;
         dk->texture_gpu_size[handle] = (uint32_t)texSize;
         dk->texture_initialized[handle] = true;
-        dk->texture_is_cubemap[handle] = false;  /* This is a 2D texture */
+        dk->texture_is_cubemap[handle] = false; /* This is a 2D texture */
 
         /* Store texture dimensions and format for glGenerateMipmap */
         dk->texture_width[handle] = width;
@@ -1067,8 +1119,8 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
         dk->texture_gl_type[handle] = type;
 
         /* Initialize default sampler parameters (GL defaults) */
-        dk->texture_min_filter[handle] = GL_NEAREST_MIPMAP_LINEAR;  /* GL default */
-        dk->texture_mag_filter[handle] = GL_LINEAR;                  /* GL default */
+        dk->texture_min_filter[handle] = GL_NEAREST_MIPMAP_LINEAR; /* GL default */
+        dk->texture_mag_filter[handle] = GL_LINEAR;                /* GL default */
         dk->texture_wrap_s[handle] = GL_REPEAT;
         dk->texture_wrap_t[handle] = GL_REPEAT;
 
@@ -1112,14 +1164,14 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
         uint32_t aligned_row_size = SGL_ALIGN_UP(row_size, DK_LINEAR_STRIDE_ALIGNMENT);
         uint32_t staging_size = aligned_row_size * height;
 
-        const uint8_t *src = (const uint8_t*)pixels;
+        const uint8_t *src = (const uint8_t *)pixels;
 
         /* Use client array region as staging */
         uint32_t saved_client_offset = dk->client_array_offset;
         uint32_t stagingOffset = SGL_ALIGN_UP(dk->client_array_offset, DK_LINEAR_STRIDE_ALIGNMENT);
         if (stagingOffset + staging_size <= dk->uniform_base - dk->client_array_base) {
-            uint8_t *staging = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock)
-                               + dk->client_array_base + stagingOffset;
+            uint8_t *staging = (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock) +
+                               dk->client_array_base + stagingOffset;
 
             /* Copy pixel data to staging buffer with proper stride.
              *
@@ -1133,10 +1185,10 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
             dk->client_array_offset = stagingOffset + staging_size;
 
             /* Copy staging to texture */
-            DkGpuAddr stagingAddr = dkMemBlockGetGpuAddr(dk->data_memblock)
-                                    + dk->client_array_base + stagingOffset;
-            DkCopyBuf srcBuf = { stagingAddr, aligned_row_size, (uint32_t)height };
-            DkImageRect dstRect = { 0, 0, 0, (uint32_t)width, (uint32_t)height, 1 };
+            DkGpuAddr stagingAddr =
+                dkMemBlockGetGpuAddr(dk->data_memblock) + dk->client_array_base + stagingOffset;
+            DkCopyBuf srcBuf = {stagingAddr, aligned_row_size, (uint32_t)height};
+            DkImageRect dstRect = {0, 0, 0, (uint32_t)width, (uint32_t)height, 1};
 
             dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &imageView, &dstRect, 0);
 
@@ -1145,11 +1197,13 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
             /* Reset command buffer for continued use */
             dkCmdBufClear(dk->cmdbuf);
-            dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+            dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0,
+                              SGL_CMD_MEM_SIZE);
 
             /* Re-bind descriptor sets after cmdbuf clear (matches legacy pattern) */
             dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
-            dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr, SGL_MAX_TEXTURES);
+            dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr,
+                                             SGL_MAX_TEXTURES);
             dk->descriptors_bound = true;
 
             /* Staging data consumed by GPU copy — restore offset to free staging space */
@@ -1172,19 +1226,19 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
  * Texture Sub-Image Update (glTexSubImage2D)
  * ============================================================================ */
 
-void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
-                             GLenum target, GLint level,
-                             GLint xoffset, GLint yoffset,
-                             GLsizei width, GLsizei height,
+void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, GLint level,
+                             GLint xoffset, GLint yoffset, GLsizei width, GLsizei height,
                              GLenum format, GLenum type, const void *pixels) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
-    if (handle == 0 || handle >= SGL_MAX_TEXTURES) return;
+    if (handle == 0 || handle >= SGL_MAX_TEXTURES)
+        return;
     if (!dk->texture_initialized[handle]) {
         SGL_ERROR_BACKEND("texture_sub_image_2d: texture %u not initialized", handle);
         return;
     }
-    if (!pixels) return;
+    if (!pixels)
+        return;
 
     /* Drain a still-in-flight submitted frame before recording into cmdbuf */
     dk_ensure_recordable(dk);
@@ -1198,7 +1252,7 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     uint32_t aligned_row_size = SGL_ALIGN_UP(row_size, DK_LINEAR_STRIDE_ALIGNMENT);
     uint32_t staging_size = aligned_row_size * height;
 
-    const uint8_t *src = (const uint8_t*)pixels;
+    const uint8_t *src = (const uint8_t *)pixels;
 
     /* Use client array region as staging */
     uint32_t saved_client_offset = dk->client_array_offset;
@@ -1208,8 +1262,8 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
         return;
     }
 
-    uint8_t *staging = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock)
-                       + dk->client_array_base + stagingOffset;
+    uint8_t *staging =
+        (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock) + dk->client_array_base + stagingOffset;
 
     /* Copy pixel data to staging buffer with proper stride.
      * No Y-flip needed - texture storage matches GL row order (see glTexImage2D comment). */
@@ -1235,11 +1289,12 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
      * GL yoffset maps directly to storage row offset. */
     uint32_t dk_yoffset = (uint32_t)yoffset;
 
-    DkGpuAddr stagingAddr = dkMemBlockGetGpuAddr(dk->data_memblock)
-                            + dk->client_array_base + stagingOffset;
-    DkCopyBuf srcBuf = { stagingAddr, aligned_row_size, (uint32_t)height };
+    DkGpuAddr stagingAddr =
+        dkMemBlockGetGpuAddr(dk->data_memblock) + dk->client_array_base + stagingOffset;
+    DkCopyBuf srcBuf = {stagingAddr, aligned_row_size, (uint32_t)height};
     /* Note: DkImageRect is { x, y, z, width, height, depth } */
-    DkImageRect dstRect = { (uint32_t)xoffset, dk_yoffset, dst_z, (uint32_t)width, (uint32_t)height, 1 };
+    DkImageRect dstRect = {(uint32_t)xoffset, dk_yoffset,       dst_z,
+                           (uint32_t)width,   (uint32_t)height, 1};
 
     dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &imageView, &dstRect, 0);
 
@@ -1267,34 +1322,45 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
      * the freshly uploaded data. Critical for cinematic video frames. */
     dk->texture_used_as_rt[handle] = true;
 
-    SGL_TRACE_TEXTURE("texture_sub_image_2d handle=%u target=0x%X offset=(%d,%d) %dx%d",
-                      handle, target, xoffset, yoffset, width, height);
+    SGL_TRACE_TEXTURE("texture_sub_image_2d handle=%u target=0x%X offset=(%d,%d) %dx%d", handle,
+                      target, xoffset, yoffset, width, height);
 }
 
 /* ============================================================================
  * Texture Parameter Setting (glTexParameteri)
  * ============================================================================ */
 
-void dk_texture_parameter(sgl_backend_t *be, sgl_handle_t handle,
-                          GLenum target, GLenum pname, GLint param) {
+void dk_texture_parameter(sgl_backend_t *be, sgl_handle_t handle, GLenum target, GLenum pname,
+                          GLint param) {
     (void)target;
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
-    if (handle == 0 || handle >= SGL_MAX_TEXTURES) return;
+    if (handle == 0 || handle >= SGL_MAX_TEXTURES)
+        return;
 
     /* Check if value actually changed — avoid redundant GPU memory writes.
      * sgl_prepare_draw calls texture_parameter for every draw; early-out
      * when the value hasn't changed avoids 1500+ needless memcpy's per frame. */
     GLenum *stored = NULL;
     switch (pname) {
-        case GL_TEXTURE_MIN_FILTER: stored = &dk->texture_min_filter[handle]; break;
-        case GL_TEXTURE_MAG_FILTER: stored = &dk->texture_mag_filter[handle]; break;
-        case GL_TEXTURE_WRAP_S:     stored = &dk->texture_wrap_s[handle]; break;
-        case GL_TEXTURE_WRAP_T:     stored = &dk->texture_wrap_t[handle]; break;
-        default: return;
+        case GL_TEXTURE_MIN_FILTER:
+            stored = &dk->texture_min_filter[handle];
+            break;
+        case GL_TEXTURE_MAG_FILTER:
+            stored = &dk->texture_mag_filter[handle];
+            break;
+        case GL_TEXTURE_WRAP_S:
+            stored = &dk->texture_wrap_s[handle];
+            break;
+        case GL_TEXTURE_WRAP_T:
+            stored = &dk->texture_wrap_t[handle];
+            break;
+        default:
+            return;
     }
 
-    if (*stored == (GLenum)param) return;  /* No change */
+    if (*stored == (GLenum)param)
+        return; /* No change */
     *stored = (GLenum)param;
 
     /* Parameter changed — rebuild sampler descriptor and write to GPU memory.
@@ -1344,14 +1410,18 @@ void dk_create_black_texture(dk_backend_data_t *dk) {
 
     /* Upload black pixel (0,0,0,255) via staging */
     uint32_t soff = SGL_ALIGN_UP(dk->client_array_offset, DK_LINEAR_STRIDE_ALIGNMENT);
-    uint8_t *stg = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock) + dk->client_array_base + soff;
-    stg[0] = 0; stg[1] = 0; stg[2] = 0; stg[3] = 255;
+    uint8_t *stg =
+        (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock) + dk->client_array_base + soff;
+    stg[0] = 0;
+    stg[1] = 0;
+    stg[2] = 0;
+    stg[3] = 255;
 
     DkImageView biv;
     dkImageViewDefaults(&biv, &dk->textures[bh]);
     DkGpuAddr sAddr = dkMemBlockGetGpuAddr(dk->data_memblock) + dk->client_array_base + soff;
-    DkCopyBuf srcBuf = { sAddr, 4, 1 };
-    DkImageRect dstRect = { 0, 0, 0, 1, 1, 1 };
+    DkCopyBuf srcBuf = {sAddr, 4, 1};
+    DkImageRect dstRect = {0, 0, 0, 1, 1, 1};
     dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &biv, &dstRect, 0);
 
     dk_flush_sync(dk);
@@ -1373,7 +1443,7 @@ void dk_create_black_texture(dk_backend_data_t *dk) {
     dk->texture_width[bh] = 1;
     dk->texture_height[bh] = 1;
     dk->texture_mip_levels[bh] = 1;
-    dk->texture_level_mask[bh] = 1;  /* Level 0 defined */
+    dk->texture_level_mask[bh] = 1; /* Level 0 defined */
     dk->texture_gpu_offset[bh] = boff;
     dk->texture_gpu_size[bh] = (uint32_t)bsz;
 
@@ -1403,18 +1473,22 @@ void dk_create_black_texture(dk_backend_data_t *dk) {
 
         /* Upload black pixel to all 6 faces */
         uint32_t csoff = SGL_ALIGN_UP(dk->client_array_offset, DK_LINEAR_STRIDE_ALIGNMENT);
-        uint8_t *cstg = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock) + dk->client_array_base + csoff;
-        cstg[0] = 0; cstg[1] = 0; cstg[2] = 0; cstg[3] = 255;
+        uint8_t *cstg =
+            (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock) + dk->client_array_base + csoff;
+        cstg[0] = 0;
+        cstg[1] = 0;
+        cstg[2] = 0;
+        cstg[3] = 255;
 
         DkGpuAddr csAddr = dkMemBlockGetGpuAddr(dk->data_memblock) + dk->client_array_base + csoff;
-        DkCopyBuf csrcBuf = { csAddr, 4, 1 };
+        DkCopyBuf csrcBuf = {csAddr, 4, 1};
         for (int face = 0; face < 6; face++) {
             DkImageView civ;
             dkImageViewDefaults(&civ, &dk->textures[ch]);
             civ.type = DkImageType_2D;
             civ.layerOffset = face;
             civ.layerCount = 1;
-            DkImageRect cdstRect = { 0, 0, 0, 1, 1, 1 };
+            DkImageRect cdstRect = {0, 0, 0, 1, 1, 1};
             dkCmdBufCopyBufferToImage(dk->cmdbuf, &csrcBuf, &civ, &cdstRect, 0);
         }
 
@@ -1449,11 +1523,13 @@ void dk_create_black_texture(dk_backend_data_t *dk) {
 /* Check if a texture is complete per GLES2 §3.7.10.
  * Incomplete textures must sample as (0,0,0,1). */
 static bool dk_texture_is_complete(dk_backend_data_t *dk, sgl_handle_t handle) {
-    if (!dk->texture_initialized[handle]) return false;
+    if (!dk->texture_initialized[handle])
+        return false;
 
     uint32_t w = dk->texture_width[handle];
     uint32_t h = dk->texture_height[handle];
-    if (w == 0 || h == 0) return false;
+    if (w == 0 || h == 0)
+        return false;
 
     /* Cubemap: all 6 faces must be defined */
     if (dk->texture_is_cubemap[handle] && dk->cubemap_face_mask[handle] != 0x3F)
@@ -1470,14 +1546,13 @@ static bool dk_texture_is_complete(dk_backend_data_t *dk, sgl_handle_t handle) {
     }
 
     GLenum min_f = dk->texture_min_filter[handle];
-    bool needs_mipmaps = (min_f == GL_NEAREST_MIPMAP_NEAREST ||
-                          min_f == GL_LINEAR_MIPMAP_NEAREST ||
-                          min_f == GL_NEAREST_MIPMAP_LINEAR ||
-                          min_f == GL_LINEAR_MIPMAP_LINEAR);
+    bool needs_mipmaps = (min_f == GL_NEAREST_MIPMAP_NEAREST || min_f == GL_LINEAR_MIPMAP_NEAREST ||
+                          min_f == GL_NEAREST_MIPMAP_LINEAR || min_f == GL_LINEAR_MIPMAP_LINEAR);
 
     if (needs_mipmaps) {
         /* NPOT with mipmap filter is always incomplete per §3.7.10 */
-        if (is_npot) return false;
+        if (is_npot)
+            return false;
 
         /* All mip levels must be defined when mipmap filtering is active.
          * Per GLES2 §3.7.10: a texture using a mipmap filter is complete only
@@ -1496,8 +1571,8 @@ static bool dk_texture_is_complete(dk_backend_data_t *dk, sgl_handle_t handle) {
     return true;
 }
 
-#define SGL_BLACK_TEXTURE_HANDLE   0  /* Slot 0: reserved 1x1 black 2D (0,0,0,255) fallback */
-#define SGL_BLACK_CUBEMAP_HANDLE   1  /* Slot 1: reserved 1x1 black cubemap fallback */
+#define SGL_BLACK_TEXTURE_HANDLE 0 /* Slot 0: reserved 1x1 black 2D (0,0,0,255) fallback */
+#define SGL_BLACK_CUBEMAP_HANDLE 1 /* Slot 1: reserved 1x1 black cubemap fallback */
 
 void dk_bind_texture(sgl_backend_t *be, GLuint unit, sgl_handle_t handle, int stage) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
@@ -1515,7 +1590,8 @@ void dk_bind_texture(sgl_backend_t *be, GLuint unit, sgl_handle_t handle, int st
             handle = SGL_BLACK_CUBEMAP_HANDLE;
         else
             handle = SGL_BLACK_TEXTURE_HANDLE;
-        if (!dk->texture_initialized[handle]) return;
+        if (!dk->texture_initialized[handle])
+            return;
     }
 
     /* Insert barrier if this texture was used as a render target (FBO),
@@ -1523,7 +1599,8 @@ void dk_bind_texture(sgl_backend_t *be, GLuint unit, sgl_handle_t handle, int st
      * Invalidate Image (texture cache), L2, AND TIC/TSC descriptor caches. */
     if (dk->texture_used_as_rt[handle] || dk->cubemap_needs_barrier[handle]) {
         dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
-                        DkInvalidateFlags_Image | DkInvalidateFlags_Descriptors | DkInvalidateFlags_L2Cache);
+                        DkInvalidateFlags_Image | DkInvalidateFlags_Descriptors |
+                            DkInvalidateFlags_L2Cache);
         dk->texture_used_as_rt[handle] = false;
         dk->cubemap_needs_barrier[handle] = false;
     }
@@ -1611,15 +1688,16 @@ void dk_generate_mipmap(sgl_backend_t *be, sgl_handle_t handle) {
             }
 
             /* Define source and destination rectangles */
-            DkImageRect srcRect = { 0, 0, 0, src_width, src_height, 1 };
-            DkImageRect dstRect = { 0, 0, 0, dst_width, dst_height, 1 };
+            DkImageRect srcRect = {0, 0, 0, src_width, src_height, 1};
+            DkImageRect dstRect = {0, 0, 0, dst_width, dst_height, 1};
 
             /* Blit with linear filtering for smooth downscaling */
             dkCmdBufBlitImage(dk->cmdbuf, &srcView, &srcRect, &dstView, &dstRect,
                               DkBlitFlag_FilterLinear, 0);
 
             /* Add barrier between mip levels to ensure proper synchronization */
-            dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);
+            dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
+                            DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);
 
             src_width = dst_width;
             src_height = dst_height;
@@ -1627,7 +1705,8 @@ void dk_generate_mipmap(sgl_backend_t *be, sgl_handle_t handle) {
     }
 
     /* Final barrier to ensure all mipmap generation is complete before sampling */
-    dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);
+    dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
+                    DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);
 
     /* All mip levels are now defined */
     dk->texture_level_mask[handle] = (mip_levels >= 32) ? 0xFFFFFFFF : ((1u << mip_levels) - 1);
@@ -1635,4 +1714,3 @@ void dk_generate_mipmap(sgl_backend_t *be, sgl_handle_t handle) {
     SGL_TRACE_TEXTURE("generate_mipmap handle=%u levels=%u%s", handle, mip_levels,
                       is_cubemap ? " (cubemap)" : "");
 }
-

@@ -19,18 +19,18 @@ typedef enum {
 
 /* Log categories (bitmask) */
 typedef enum {
-    SGL_LOG_CAT_CORE    = (1 << 0),
-    SGL_LOG_CAT_STATE   = (1 << 1),
-    SGL_LOG_CAT_BUFFER  = (1 << 2),
+    SGL_LOG_CAT_CORE = (1 << 0),
+    SGL_LOG_CAT_STATE = (1 << 1),
+    SGL_LOG_CAT_BUFFER = (1 << 2),
     SGL_LOG_CAT_TEXTURE = (1 << 3),
-    SGL_LOG_CAT_SHADER  = (1 << 4),
-    SGL_LOG_CAT_DRAW    = (1 << 5),
-    SGL_LOG_CAT_FBO     = (1 << 6),
+    SGL_LOG_CAT_SHADER = (1 << 4),
+    SGL_LOG_CAT_DRAW = (1 << 5),
+    SGL_LOG_CAT_FBO = (1 << 6),
     SGL_LOG_CAT_UNIFORM = (1 << 7),
     SGL_LOG_CAT_BACKEND = (1 << 8),
-    SGL_LOG_CAT_EGL     = (1 << 9),
-    SGL_LOG_CAT_VERTEX  = (1 << 10),
-    SGL_LOG_CAT_ALL     = 0xFFFFFFFF
+    SGL_LOG_CAT_EGL = (1 << 9),
+    SGL_LOG_CAT_VERTEX = (1 << 10),
+    SGL_LOG_CAT_ALL = 0xFFFFFFFF
 } sgl_log_category_t;
 
 /* Initialize logging system */
@@ -43,8 +43,8 @@ void sgl_log_set_level(sgl_log_level_t level);
 void sgl_log_set_categories(uint32_t categories);
 
 /* Core logging function */
-void sgl_log(sgl_log_level_t level, sgl_log_category_t category,
-             const char *fmt, ...) __attribute__((format(printf, 3, 4)));
+void sgl_log(sgl_log_level_t level, sgl_log_category_t category, const char *fmt, ...)
+    __attribute__((format(printf, 3, 4)));
 
 /* Convenience macros */
 #ifdef SGL_DEBUG

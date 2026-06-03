@@ -21,62 +21,62 @@ typedef struct sgl_surface sgl_surface_t;
 /* GL Context */
 typedef struct sgl_context {
     /* State classes (GLOVE pattern) */
-    sgl_state_blend_t       blend_state;
-    sgl_state_depth_t       depth_state;
-    sgl_state_raster_t      raster_state;
-    sgl_state_viewport_t    viewport_state;
-    sgl_state_color_t       color_state;
+    sgl_state_blend_t blend_state;
+    sgl_state_depth_t depth_state;
+    sgl_state_raster_t raster_state;
+    sgl_state_viewport_t viewport_state;
+    sgl_state_color_t color_state;
 
     /* Resource manager */
-    sgl_resource_manager_t  res_mgr;
+    sgl_resource_manager_t res_mgr;
 
     /* Backend (opaque) */
-    sgl_backend_t          *backend;
+    sgl_backend_t *backend;
 
     /* Current bindings */
-    GLuint                  current_program;
-    GLuint                  bound_array_buffer;
-    GLuint                  bound_element_buffer;
-    GLuint                  bound_textures[SGL_MAX_TEXTURE_UNITS];      /* GL_TEXTURE_2D bindings */
-    GLuint                  bound_cubemap_textures[SGL_MAX_TEXTURE_UNITS]; /* GL_TEXTURE_CUBE_MAP bindings */
-    GLuint                  active_texture_unit;
-    GLuint                  bound_framebuffer;      /* GL_FRAMEBUFFER (legacy compat) */
-    GLuint                  bound_read_framebuffer; /* GL_READ_FRAMEBUFFER */
-    GLuint                  bound_draw_framebuffer; /* GL_DRAW_FRAMEBUFFER */
-    GLuint                  bound_renderbuffer;
+    GLuint current_program;
+    GLuint bound_array_buffer;
+    GLuint bound_element_buffer;
+    GLuint bound_textures[SGL_MAX_TEXTURE_UNITS];         /* GL_TEXTURE_2D bindings */
+    GLuint bound_cubemap_textures[SGL_MAX_TEXTURE_UNITS]; /* GL_TEXTURE_CUBE_MAP bindings */
+    GLuint active_texture_unit;
+    GLuint bound_framebuffer;      /* GL_FRAMEBUFFER (legacy compat) */
+    GLuint bound_read_framebuffer; /* GL_READ_FRAMEBUFFER */
+    GLuint bound_draw_framebuffer; /* GL_DRAW_FRAMEBUFFER */
+    GLuint bound_renderbuffer;
 
     /* Vertex attributes */
-    sgl_vertex_attrib_t     vertex_attribs[SGL_MAX_ATTRIBS];
+    sgl_vertex_attrib_t vertex_attribs[SGL_MAX_ATTRIBS];
 
     /* Bound surfaces (from EGL) */
-    sgl_surface_t          *draw_surface;
-    sgl_surface_t          *read_surface;
+    sgl_surface_t *draw_surface;
+    sgl_surface_t *read_surface;
 
     /* Pixel store state */
-    GLint                   pack_alignment;    /* GL_PACK_ALIGNMENT (default 4) */
-    GLint                   unpack_alignment;  /* GL_UNPACK_ALIGNMENT (default 4) */
+    GLint pack_alignment;   /* GL_PACK_ALIGNMENT (default 4) */
+    GLint unpack_alignment; /* GL_UNPACK_ALIGNMENT (default 4) */
 
     /* Sample coverage (MSAA not supported but values stored for query) */
-    float                   sample_coverage_value;    /* default 1.0 */
-    bool                    sample_coverage_invert;   /* default false */
+    float sample_coverage_value; /* default 1.0 */
+    bool sample_coverage_invert; /* default false */
 
     /* Caps tracked for query but not affecting rendering on this hardware */
-    bool                    dither_enabled;            /* default true (GLES2 spec) */
-    bool                    sample_alpha_to_coverage;  /* default false */
-    bool                    sample_coverage_enabled;   /* default false */
-    GLenum                  generate_mipmap_hint;      /* default GL_DONT_CARE */
+    bool dither_enabled;           /* default true (GLES2 spec) */
+    bool sample_alpha_to_coverage; /* default false */
+    bool sample_coverage_enabled;  /* default false */
+    GLenum generate_mipmap_hint;   /* default GL_DONT_CARE */
 
     /* Error */
-    GLenum                  error;
+    GLenum error;
 
     /* Flags */
-    bool                    initialized;
-    bool                    used;
+    bool initialized;
+    bool used;
     /* eglDestroyContext called while the context was current: the handle is
      * invalid but the context lives until it is no longer current (EGL §3.7.2). */
-    bool                    delete_pending;
-    int                     client_version;  /* 2 for GLES2 */
-    int                     config_id;        /* EGLConfig id this context was created with */
+    bool delete_pending;
+    int client_version; /* 2 for GLES2 */
+    int config_id;      /* EGLConfig id this context was created with */
 } sgl_context_t;
 
 /* Context lifecycle */

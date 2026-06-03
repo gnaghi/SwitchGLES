@@ -46,10 +46,10 @@ bool sgl_state_depth_set_clear(sgl_state_depth_t *state, float depth);
 
 /* Stencil update functions */
 bool sgl_state_stencil_set_test_enabled(sgl_state_depth_t *state, bool enabled);
-bool sgl_state_stencil_set_func(sgl_state_depth_t *state, GLenum face,
-                                 GLenum func, GLint ref, GLuint mask);
-bool sgl_state_stencil_set_op(sgl_state_depth_t *state, GLenum face,
-                               GLenum sfail, GLenum dpfail, GLenum dppass);
+bool sgl_state_stencil_set_func(sgl_state_depth_t *state, GLenum face, GLenum func, GLint ref,
+                                GLuint mask);
+bool sgl_state_stencil_set_op(sgl_state_depth_t *state, GLenum face, GLenum sfail, GLenum dpfail,
+                              GLenum dppass);
 bool sgl_state_stencil_set_write_mask(sgl_state_depth_t *state, GLenum face, GLuint mask);
 bool sgl_state_stencil_set_clear(sgl_state_depth_t *state, int stencil);
 

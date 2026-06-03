@@ -13,13 +13,7 @@ static uint32_t g_log_categories = SGL_LOG_CAT_ALL;
 static int g_log_initialized = 0;
 
 /* Level names */
-static const char *level_names[] = {
-    "TRACE",
-    "DEBUG",
-    "INFO",
-    "WARN",
-    "ERROR"
-};
+static const char *level_names[] = {"TRACE", "DEBUG", "INFO", "WARN", "ERROR"};
 
 void sgl_log_init(void) {
     g_log_level = SGL_LOG_INFO;
@@ -35,8 +29,7 @@ void sgl_log_set_categories(uint32_t categories) {
     g_log_categories = categories;
 }
 
-void sgl_log(sgl_log_level_t level, sgl_log_category_t category,
-             const char *fmt, ...) {
+void sgl_log(sgl_log_level_t level, sgl_log_category_t category, const char *fmt, ...) {
     /* Check if this message should be logged */
     if (level < g_log_level) {
         return;

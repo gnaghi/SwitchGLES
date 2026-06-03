@@ -15,7 +15,8 @@ GL_APICALL void GL_APIENTRY glGenBuffers(GLsizei n, GLuint *buffers) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
-    if (n == 0 || !buffers) return;
+    if (n == 0 || !buffers)
+        return;
 
     for (GLsizei i = 0; i < n; i++) {
         buffers[i] = sgl_res_mgr_alloc_buffer(&ctx->res_mgr);
@@ -33,30 +34,39 @@ GL_APICALL void GL_APIENTRY glDeleteBuffers(GLsizei n, const GLuint *buffers) {
     if (!ctx)
         return;
 
-    if (n < 0) { sgl_set_error(ctx, GL_INVALID_VALUE); return; }
-    if (!buffers) return;
+    if (n < 0) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+    if (!buffers)
+        return;
 
     for (GLsizei i = 0; i < n; i++) {
         GLuint id = buffers[i];
-        if (id == 0) continue;
+        if (id == 0)
+            continue;
 
         /* Return VBO allocation to free list before releasing handle */
         sgl_buffer_t *buf = GET_BUFFER(id);
-        if (buf && buf->data_offset != 0 && buf->size > 0 &&
-            ctx->backend && ctx->backend->ops->buffer_free) {
+        if (buf && buf->data_offset != 0 && buf->size > 0 && ctx->backend &&
+            ctx->backend->ops->buffer_free) {
             ctx->backend->ops->buffer_free(ctx->backend, buf->data_offset, (uint32_t)buf->size);
         }
 
-        if (ctx->bound_array_buffer == id) ctx->bound_array_buffer = 0;
-        if (ctx->bound_element_buffer == id) ctx->bound_element_buffer = 0;
+        if (ctx->bound_array_buffer == id)
+            ctx->bound_array_buffer = 0;
+        if (ctx->bound_element_buffer == id)
+            ctx->bound_element_buffer = 0;
 
         sgl_res_mgr_free_buffer(&ctx->res_mgr, id);
 
         /* Remove from overflow list if present */
         for (int j = 0; j < ctx->res_mgr.num_overflow_buffers; j++) {
             if (ctx->res_mgr.overflow_buffer_ids[j] == id) {
-                ctx->res_mgr.overflow_buffer_ids[j] = ctx->res_mgr.overflow_buffer_ids[--ctx->res_mgr.num_overflow_buffers];
-                ctx->res_mgr.overflow_buffer_targets[j] = ctx->res_mgr.overflow_buffer_targets[ctx->res_mgr.num_overflow_buffers];
+                ctx->res_mgr.overflow_buffer_ids[j] =
+                    ctx->res_mgr.overflow_buffer_ids[--ctx->res_mgr.num_overflow_buffers];
+                ctx->res_mgr.overflow_buffer_targets[j] =
+                    ctx->res_mgr.overflow_buffer_targets[ctx->res_mgr.num_overflow_buffers];
                 break;
             }
         }
@@ -69,10 +79,12 @@ GL_APICALL GLboolean GL_APIENTRY glIsBuffer(GLuint buffer) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return GL_FALSE;
-    if (buffer == 0) return GL_FALSE;
+    if (buffer == 0)
+        return GL_FALSE;
     sgl_buffer_t *buf = GET_BUFFER(buffer);
     /* GLES2: name becomes a buffer object only after first glBindBuffer */
-    if (buf && buf->target != 0) return GL_TRUE;
+    if (buf && buf->target != 0)
+        return GL_TRUE;
     /* Check overflow IDs (for IDs outside normal array range) */
     for (int i = 0; i < ctx->res_mgr.num_overflow_buffers; i++) {
         if (ctx->res_mgr.overflow_buffer_ids[i] == buffer &&
@@ -98,7 +110,10 @@ GL_APICALL void GL_APIENTRY glBindBuffer(GLenum target, GLuint buffer) {
              * no real storage (can't upload data to these). */
             bool found = false;
             for (int i = 0; i < ctx->res_mgr.num_overflow_buffers; i++) {
-                if (ctx->res_mgr.overflow_buffer_ids[i] == buffer) { found = true; break; }
+                if (ctx->res_mgr.overflow_buffer_ids[i] == buffer) {
+                    found = true;
+                    break;
+                }
             }
             if (!found && ctx->res_mgr.num_overflow_buffers < SGL_MAX_OVERFLOW_IDS) {
                 int idx = ctx->res_mgr.num_overflow_buffers++;
@@ -113,12 +128,15 @@ GL_APICALL void GL_APIENTRY glBindBuffer(GLenum target, GLuint buffer) {
             ctx->bound_array_buffer = buffer;
             if (buffer) {
                 sgl_buffer_t *buf = GET_BUFFER(buffer);
-                if (buf) buf->target = target;
+                if (buf)
+                    buf->target = target;
                 else {
                     /* Set target on overflow entry */
                     for (int i = 0; i < ctx->res_mgr.num_overflow_buffers; i++)
-                        if (ctx->res_mgr.overflow_buffer_ids[i] == buffer)
-                            { ctx->res_mgr.overflow_buffer_targets[i] = target; break; }
+                        if (ctx->res_mgr.overflow_buffer_ids[i] == buffer) {
+                            ctx->res_mgr.overflow_buffer_targets[i] = target;
+                            break;
+                        }
                 }
             }
             break;
@@ -126,11 +144,14 @@ GL_APICALL void GL_APIENTRY glBindBuffer(GLenum target, GLuint buffer) {
             ctx->bound_element_buffer = buffer;
             if (buffer) {
                 sgl_buffer_t *buf = GET_BUFFER(buffer);
-                if (buf) buf->target = target;
+                if (buf)
+                    buf->target = target;
                 else {
                     for (int i = 0; i < ctx->res_mgr.num_overflow_buffers; i++)
-                        if (ctx->res_mgr.overflow_buffer_ids[i] == buffer)
-                            { ctx->res_mgr.overflow_buffer_targets[i] = target; break; }
+                        if (ctx->res_mgr.overflow_buffer_ids[i] == buffer) {
+                            ctx->res_mgr.overflow_buffer_targets[i] = target;
+                            break;
+                        }
                 }
             }
             break;
@@ -142,7 +163,8 @@ GL_APICALL void GL_APIENTRY glBindBuffer(GLenum target, GLuint buffer) {
     SGL_TRACE_BUFFER("glBindBuffer(0x%X, %u)", target, buffer);
 }
 
-GL_APICALL void GL_APIENTRY glBufferData(GLenum target, GLsizeiptr size, const void *data, GLenum usage) {
+GL_APICALL void GL_APIENTRY glBufferData(GLenum target, GLsizeiptr size, const void *data,
+                                         GLenum usage) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
@@ -166,7 +188,8 @@ GL_APICALL void GL_APIENTRY glBufferData(GLenum target, GLsizeiptr size, const v
         return;
     }
 
-    GLuint buffer_id = (target == GL_ARRAY_BUFFER) ? ctx->bound_array_buffer : ctx->bound_element_buffer;
+    GLuint buffer_id =
+        (target == GL_ARRAY_BUFFER) ? ctx->bound_array_buffer : ctx->bound_element_buffer;
     sgl_buffer_t *buf = GET_BUFFER(buffer_id);
     if (!buf) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
@@ -188,7 +211,8 @@ GL_APICALL void GL_APIENTRY glBufferData(GLenum target, GLsizeiptr size, const v
             }
         }
         buf->size = size;
-        SGL_TRACE_BUFFER("glBufferData(0x%X, %zu, usage=0x%X, offset=%u)", target, (size_t)size, usage, buf->data_offset);
+        SGL_TRACE_BUFFER("glBufferData(0x%X, %zu, usage=0x%X, offset=%u)", target, (size_t)size,
+                         usage, buf->data_offset);
         return;
     }
 
@@ -196,16 +220,17 @@ GL_APICALL void GL_APIENTRY glBufferData(GLenum target, GLsizeiptr size, const v
     if (buf->data_offset != 0 && data && size <= buf->size && size > 0) {
         buf->usage = usage;
         if (ctx->backend->ops->buffer_sub_data) {
-            ctx->backend->ops->buffer_sub_data(ctx->backend, buffer_id, buf->data_offset, size, data);
+            ctx->backend->ops->buffer_sub_data(ctx->backend, buffer_id, buf->data_offset, size,
+                                               data);
         }
         buf->size = size;
-        SGL_TRACE_BUFFER("glBufferData(0x%X, %zu, usage=0x%X, offset=%u)", target, (size_t)size, usage, buf->data_offset);
+        SGL_TRACE_BUFFER("glBufferData(0x%X, %zu, usage=0x%X, offset=%u)", target, (size_t)size,
+                         usage, buf->data_offset);
         return;
     }
 
     /* Free old VBO allocation before allocating new one */
-    if (buf->data_offset != 0 && buf->size > 0 &&
-        ctx->backend->ops->buffer_free) {
+    if (buf->data_offset != 0 && buf->size > 0 && ctx->backend->ops->buffer_free) {
         ctx->backend->ops->buffer_free(ctx->backend, buf->data_offset, (uint32_t)buf->size);
     }
 
@@ -215,17 +240,20 @@ GL_APICALL void GL_APIENTRY glBufferData(GLenum target, GLsizeiptr size, const v
 
     /* Delegate to backend for actual GPU memory allocation and upload */
     if (ctx->backend->ops->buffer_data) {
-        buf->data_offset = ctx->backend->ops->buffer_data(ctx->backend, buffer_id, target, size, data, usage);
+        buf->data_offset =
+            ctx->backend->ops->buffer_data(ctx->backend, buffer_id, target, size, data, usage);
         if (buf->data_offset == 0 && size > 0) {
             sgl_set_error(ctx, GL_OUT_OF_MEMORY);
             return;
         }
     }
 
-    SGL_TRACE_BUFFER("glBufferData(0x%X, %zu, usage=0x%X, offset=%u)", target, (size_t)size, usage, buf->data_offset);
+    SGL_TRACE_BUFFER("glBufferData(0x%X, %zu, usage=0x%X, offset=%u)", target, (size_t)size, usage,
+                     buf->data_offset);
 }
 
-GL_APICALL void GL_APIENTRY glBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, const void *data) {
+GL_APICALL void GL_APIENTRY glBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size,
+                                            const void *data) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
@@ -238,7 +266,8 @@ GL_APICALL void GL_APIENTRY glBufferSubData(GLenum target, GLintptr offset, GLsi
         return;
     }
 
-    GLuint buffer_id = (target == GL_ARRAY_BUFFER) ? ctx->bound_array_buffer : ctx->bound_element_buffer;
+    GLuint buffer_id =
+        (target == GL_ARRAY_BUFFER) ? ctx->bound_array_buffer : ctx->bound_element_buffer;
     sgl_buffer_t *buf = GET_BUFFER(buffer_id);
     if (!buf) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
@@ -251,7 +280,8 @@ GL_APICALL void GL_APIENTRY glBufferSubData(GLenum target, GLintptr offset, GLsi
         return;
     }
 
-    if (!data) return;
+    if (!data)
+        return;
 
     /* Delegate to backend for actual data write */
     if (ctx->backend->ops->buffer_sub_data) {

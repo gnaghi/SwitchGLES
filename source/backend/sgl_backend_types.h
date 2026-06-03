@@ -45,7 +45,7 @@ typedef struct sgl_blend_state {
     GLenum src_rgb, dst_rgb;
     GLenum src_alpha, dst_alpha;
     GLenum equation_rgb, equation_alpha;
-    GLfloat color[4];  /* Blend constant color (RGBA) */
+    GLfloat color[4]; /* Blend constant color (RGBA) */
 } sgl_blend_state_t;
 
 /* Depth state */
@@ -101,7 +101,7 @@ typedef struct sgl_raster_state {
 
 /* Color state */
 typedef struct sgl_color_state {
-    bool mask[4];  /* RGBA */
+    bool mask[4]; /* RGBA */
     float clear_color[4];
 } sgl_color_state_t;
 

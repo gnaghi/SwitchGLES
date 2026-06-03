@@ -14,8 +14,8 @@
 #include <switch.h>
 
 EGLAPI EGLContext EGLAPIENTRY eglCreateContext(EGLDisplay dpy, EGLConfig config,
-                                                EGLContext share_context,
-                                                const EGLint *attrib_list) {
+                                               EGLContext share_context,
+                                               const EGLint *attrib_list) {
     SGL_EGL_VTRACE("eglCreateContext(%p, %p)", dpy, config);
     sgl_display *display = (sgl_display *)dpy;
     (void)share_context;
@@ -35,7 +35,7 @@ EGLAPI EGLContext EGLAPIENTRY eglCreateContext(EGLDisplay dpy, EGLConfig config,
     if (attrib_list) {
         for (int i = 0; attrib_list[i] != EGL_NONE; i += 2) {
             if (attrib_list[i] == EGL_CONTEXT_CLIENT_VERSION) {
-                client_version = attrib_list[i+1];
+                client_version = attrib_list[i + 1];
             }
         }
     }
@@ -116,7 +116,8 @@ EGLAPI EGLBoolean EGLAPIENTRY eglDestroyContext(EGLDisplay dpy, EGLContext conte
     sgl_egl_destroy_context_now(ctx);
     return EGL_TRUE;
 }
-EGLAPI EGLBoolean EGLAPIENTRY eglQueryContext(EGLDisplay dpy, EGLContext ctx, EGLint attribute, EGLint *value) {
+EGLAPI EGLBoolean EGLAPIENTRY eglQueryContext(EGLDisplay dpy, EGLContext ctx, EGLint attribute,
+                                              EGLint *value) {
     sgl_display *display = (sgl_display *)dpy;
     sgl_context_t *context = (sgl_context_t *)ctx;
 
@@ -131,10 +132,18 @@ EGLAPI EGLBoolean EGLAPIENTRY eglQueryContext(EGLDisplay dpy, EGLContext ctx, EG
     }
 
     switch (attribute) {
-        case EGL_CONFIG_ID: *value = context->config_id; break;
-        case EGL_CONTEXT_CLIENT_TYPE: *value = EGL_OPENGL_ES_API; break;
-        case EGL_CONTEXT_CLIENT_VERSION: *value = context->client_version; break;
-        case EGL_RENDER_BUFFER: *value = EGL_BACK_BUFFER; break;
+        case EGL_CONFIG_ID:
+            *value = context->config_id;
+            break;
+        case EGL_CONTEXT_CLIENT_TYPE:
+            *value = EGL_OPENGL_ES_API;
+            break;
+        case EGL_CONTEXT_CLIENT_VERSION:
+            *value = context->client_version;
+            break;
+        case EGL_RENDER_BUFFER:
+            *value = EGL_BACK_BUFFER;
+            break;
         default:
             sgl_egl_set_error(EGL_BAD_ATTRIBUTE);
             return EGL_FALSE;

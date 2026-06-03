@@ -17,12 +17,8 @@ void sgl_state_color_init(sgl_state_color_t *state) {
     state->clear_color[3] = 0.0f;
 }
 
-bool sgl_state_color_set_mask(sgl_state_color_t *state,
-                               bool r, bool g, bool b, bool a) {
-    if (state->mask[0] == r &&
-        state->mask[1] == g &&
-        state->mask[2] == b &&
-        state->mask[3] == a) {
+bool sgl_state_color_set_mask(sgl_state_color_t *state, bool r, bool g, bool b, bool a) {
+    if (state->mask[0] == r && state->mask[1] == g && state->mask[2] == b && state->mask[3] == a) {
         return false;
     }
     state->mask[0] = r;
@@ -32,11 +28,8 @@ bool sgl_state_color_set_mask(sgl_state_color_t *state,
     return true;
 }
 
-bool sgl_state_color_set_clear(sgl_state_color_t *state,
-                                float r, float g, float b, float a) {
-    if (state->clear_color[0] == r &&
-        state->clear_color[1] == g &&
-        state->clear_color[2] == b &&
+bool sgl_state_color_set_clear(sgl_state_color_t *state, float r, float g, float b, float a) {
+    if (state->clear_color[0] == r && state->clear_color[1] == g && state->clear_color[2] == b &&
         state->clear_color[3] == a) {
         return false;
     }

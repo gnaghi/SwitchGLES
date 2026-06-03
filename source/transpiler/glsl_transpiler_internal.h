@@ -24,6 +24,7 @@ int validate_const_initializers(glslt_ctx_t *ctx, const char *source, char *erro
 int validate_preprocessor_directives(const char *source, char *error, int error_size);
 int validate_preprocessor_undefined(const char *source, char *error, int error_size);
 int validate_qualification_order(const char *source, char *error, int error_size);
-int validate_texture_functions(const char *source, glslt_stage_t stage, char *error, int error_size);
+int validate_texture_functions(const char *source, glslt_stage_t stage, char *error,
+                               int error_size);
 
 #endif /* SGL_GLSL_TRANSPILER_INTERNAL_H */

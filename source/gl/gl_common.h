@@ -17,11 +17,15 @@
 #include "../util/sgl_log.h"
 
 /* Check backend is available */
-#define CHECK_BACKEND() \
-    if (!ctx->backend || !ctx->backend->ops) { return; }
+#define CHECK_BACKEND()                                                                            \
+    if (!ctx->backend || !ctx->backend->ops) {                                                     \
+        return;                                                                                    \
+    }
 
-#define CHECK_BACKEND_RET(ret) \
-    if (!ctx->backend || !ctx->backend->ops) { return (ret); }
+#define CHECK_BACKEND_RET(ret)                                                                     \
+    if (!ctx->backend || !ctx->backend->ops) {                                                     \
+        return (ret);                                                                              \
+    }
 
 /* Resource access macros */
 #define GET_BUFFER(id) sgl_res_mgr_get_buffer(&ctx->res_mgr, id)
@@ -38,12 +42,12 @@
 /* Get bound texture for a given target (resolves 2D vs cubemap binding) */
 static inline GLuint sgl_get_bound_texture(sgl_context_t *ctx, GLenum target) {
     if (target == GL_TEXTURE_CUBE_MAP ||
-        (target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X &&
-         target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z)) {
+        (target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X && target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z)) {
         GLuint cube = ctx->bound_cubemap_textures[ctx->active_texture_unit];
         /* Fallback: some tests bind GL_TEXTURE_2D but upload cubemap faces.
          * If no cubemap is bound, try the 2D binding. */
-        if (cube == 0) cube = ctx->bound_textures[ctx->active_texture_unit];
+        if (cube == 0)
+            cube = ctx->bound_textures[ctx->active_texture_unit];
         return cube;
     }
     return ctx->bound_textures[ctx->active_texture_unit];

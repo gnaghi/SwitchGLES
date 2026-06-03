@@ -16,8 +16,10 @@
  * - NPOT dimensions with mipmap min filter
  * - Cubemap face dimension mismatch (cubemap_incomplete flag) */
 static bool sgl_is_texture_complete(const sgl_texture_t *tex) {
-    if (!tex || !tex->used) return false;
-    if (tex->cubemap_incomplete) return false;
+    if (!tex || !tex->used)
+        return false;
+    if (tex->cubemap_incomplete)
+        return false;
 
     bool npot = !sgl_is_pot(tex->width) || !sgl_is_pot(tex->height);
     if (npot) {
@@ -39,18 +41,15 @@ static bool sgl_is_texture_complete(const sgl_texture_t *tex) {
 
 /* Prepare state before draw - delegates to backend */
 static void sgl_prepare_draw(sgl_context_t *ctx) {
-    if (!ctx->backend || !ctx->backend->ops) return;
+    if (!ctx->backend || !ctx->backend->ops)
+        return;
 
     /* Apply viewport - MUST be set before drawing */
     if (ctx->backend->ops->apply_viewport) {
         sgl_viewport_state_t vs = {
-            ctx->viewport_state.viewport_x,
-            ctx->viewport_state.viewport_y,
-            ctx->viewport_state.viewport_width,
-            ctx->viewport_state.viewport_height,
-            ctx->viewport_state.depth_near,
-            ctx->viewport_state.depth_far
-        };
+            ctx->viewport_state.viewport_x,     ctx->viewport_state.viewport_y,
+            ctx->viewport_state.viewport_width, ctx->viewport_state.viewport_height,
+            ctx->viewport_state.depth_near,     ctx->viewport_state.depth_far};
         ctx->backend->ops->apply_viewport(ctx->backend, &vs);
     }
 
@@ -62,12 +61,9 @@ static void sgl_prepare_draw(sgl_context_t *ctx) {
     } else {
         /* Fallback to separate calls if combined not available */
         if (ctx->backend->ops->apply_depth) {
-            sgl_depth_state_t ds = {
-                ctx->depth_state.depth_test_enabled,
-                ctx->depth_state.depth_write_enabled,
-                ctx->depth_state.depth_func,
-                ctx->depth_state.clear_depth
-            };
+            sgl_depth_state_t ds = {ctx->depth_state.depth_test_enabled,
+                                    ctx->depth_state.depth_write_enabled,
+                                    ctx->depth_state.depth_func, ctx->depth_state.clear_depth};
             ctx->backend->ops->apply_depth(ctx->backend, &ds);
         }
     }
@@ -119,21 +115,25 @@ static void sgl_prepare_draw(sgl_context_t *ctx) {
             /* Clamp per GLES2 spec */
             float near_val = ctx->viewport_state.depth_near;
             float far_val = ctx->viewport_state.depth_far;
-            if (near_val < 0.0f) near_val = 0.0f;
-            if (near_val > 1.0f) near_val = 1.0f;
-            if (far_val < 0.0f) far_val = 0.0f;
-            if (far_val > 1.0f) far_val = 1.0f;
+            if (near_val < 0.0f)
+                near_val = 0.0f;
+            if (near_val > 1.0f)
+                near_val = 1.0f;
+            if (far_val < 0.0f)
+                far_val = 0.0f;
+            if (far_val > 1.0f)
+                far_val = 1.0f;
             float diff_val = far_val - near_val;
-            float dr_vals[3] = { near_val, far_val, diff_val };
+            float dr_vals[3] = {near_val, far_val, diff_val};
             /* Write to primary locations (VS or transpiler) */
             for (int d = 0; d < 3; d++) {
                 GLint loc = prog->depth_range_loc[d];
-                if (!loc) continue;
+                if (!loc)
+                    continue;
                 int stage = (loc >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
                 int offset = loc & SGL_LOC_OFFSET_MASK;
-                sgl_packed_ubo_t *packed = (stage == 0)
-                    ? &prog->packed_vertex[0]
-                    : &prog->packed_fragment[0];
+                sgl_packed_ubo_t *packed =
+                    (stage == 0) ? &prog->packed_vertex[0] : &prog->packed_fragment[0];
                 if (packed->valid && offset + 4 <= packed->size) {
                     memcpy(packed->data + offset, &dr_vals[d], sizeof(float));
                     packed->dirty = true;
@@ -142,12 +142,12 @@ static void sgl_prepare_draw(sgl_context_t *ctx) {
             /* Write to FS mirror locations (when both VS+FS use gl_DepthRange) */
             for (int d = 0; d < 3; d++) {
                 GLint loc = prog->depth_range_loc_fs[d];
-                if (!loc) continue;
+                if (!loc)
+                    continue;
                 int stage = (loc >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
                 int offset = loc & SGL_LOC_OFFSET_MASK;
-                sgl_packed_ubo_t *packed = (stage == 0)
-                    ? &prog->packed_vertex[0]
-                    : &prog->packed_fragment[0];
+                sgl_packed_ubo_t *packed =
+                    (stage == 0) ? &prog->packed_vertex[0] : &prog->packed_fragment[0];
                 if (packed->valid && offset + 4 <= packed->size) {
                     memcpy(packed->data + offset, &dr_vals[d], sizeof(float));
                     packed->dirty = true;
@@ -174,9 +174,11 @@ static void sgl_prepare_draw(sgl_context_t *ctx) {
              * When sampler exists in both VS and FS (vs_shader_binding >= 0),
              * bind to each stage at its own binding slot independently. */
             for (int s = 0; s < prog->num_samplers; s++) {
-                if (!prog->samplers[s].used) continue;
+                if (!prog->samplers[s].used)
+                    continue;
                 int tu = prog->samplers[s].tex_unit;
-                if (tu < 0 || tu >= (int)SGL_MAX_TEXTURE_UNITS) continue;
+                if (tu < 0 || tu >= (int)SGL_MAX_TEXTURE_UNITS)
+                    continue;
                 /* Use sampler type to select correct binding (2D vs cubemap) */
                 GLuint tex_id;
                 bool is_cubemap_sampler = (prog->samplers[s].gl_type == GL_SAMPLER_CUBE);
@@ -189,51 +191,70 @@ static void sgl_prepare_draw(sgl_context_t *ctx) {
                     sgl_handle_t fallback = is_cubemap_sampler ? 1 : 0;
                     int fs_binding = prog->samplers[s].shader_binding;
                     int vs_binding = prog->samplers[s].vs_shader_binding;
-                    if (fs_binding < 0 || fs_binding >= 16) fs_binding = 0;
-                    if (vs_binding >= 16) vs_binding = -1;
+                    if (fs_binding < 0 || fs_binding >= 16)
+                        fs_binding = 0;
+                    if (vs_binding >= 16)
+                        vs_binding = -1;
                     if (vs_binding >= 0) {
-                        ctx->backend->ops->bind_texture(ctx->backend, (GLuint)fs_binding, fallback, 1);
-                        ctx->backend->ops->bind_texture(ctx->backend, (GLuint)vs_binding, fallback, 0);
+                        ctx->backend->ops->bind_texture(ctx->backend, (GLuint)fs_binding, fallback,
+                                                        1);
+                        ctx->backend->ops->bind_texture(ctx->backend, (GLuint)vs_binding, fallback,
+                                                        0);
                     } else {
-                        ctx->backend->ops->bind_texture(ctx->backend, (GLuint)fs_binding, fallback, -1);
+                        ctx->backend->ops->bind_texture(ctx->backend, (GLuint)fs_binding, fallback,
+                                                        -1);
                     }
                     continue;
                 }
                 sgl_texture_t *tex = GET_TEXTURE(tex_id);
-                if (!tex || !tex->used) continue;
+                if (!tex || !tex->used)
+                    continue;
                 /* GLES2 §3.7.10: incomplete textures sample as black fallback */
                 if (!sgl_is_texture_complete(tex)) {
                     sgl_handle_t fallback = is_cubemap_sampler ? 1 : 0;
                     int fs_binding = prog->samplers[s].shader_binding;
                     int vs_binding = prog->samplers[s].vs_shader_binding;
-                    if (fs_binding < 0 || fs_binding >= 16) fs_binding = 0;
-                    if (vs_binding >= 16) vs_binding = -1;
+                    if (fs_binding < 0 || fs_binding >= 16)
+                        fs_binding = 0;
+                    if (vs_binding >= 16)
+                        vs_binding = -1;
                     if (vs_binding >= 0) {
-                        ctx->backend->ops->bind_texture(ctx->backend, (GLuint)fs_binding, fallback, 1);
-                        ctx->backend->ops->bind_texture(ctx->backend, (GLuint)vs_binding, fallback, 0);
+                        ctx->backend->ops->bind_texture(ctx->backend, (GLuint)fs_binding, fallback,
+                                                        1);
+                        ctx->backend->ops->bind_texture(ctx->backend, (GLuint)vs_binding, fallback,
+                                                        0);
                     } else {
-                        ctx->backend->ops->bind_texture(ctx->backend, (GLuint)fs_binding, fallback, -1);
+                        ctx->backend->ops->bind_texture(ctx->backend, (GLuint)fs_binding, fallback,
+                                                        -1);
                     }
                     continue;
                 }
                 /* Pass texture params to backend for sampler creation */
                 GLenum target = tex->target ? tex->target : GL_TEXTURE_2D;
                 if (ctx->backend->ops->texture_parameter) {
-                    ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target, GL_TEXTURE_MIN_FILTER, tex->min_filter);
-                    ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target, GL_TEXTURE_MAG_FILTER, tex->mag_filter);
-                    ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target, GL_TEXTURE_WRAP_S, tex->wrap_s);
-                    ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target, GL_TEXTURE_WRAP_T, tex->wrap_t);
+                    ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target,
+                                                         GL_TEXTURE_MIN_FILTER, tex->min_filter);
+                    ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target,
+                                                         GL_TEXTURE_MAG_FILTER, tex->mag_filter);
+                    ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target,
+                                                         GL_TEXTURE_WRAP_S, tex->wrap_s);
+                    ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target,
+                                                         GL_TEXTURE_WRAP_T, tex->wrap_t);
                 }
                 int fs_binding = prog->samplers[s].shader_binding;
                 int vs_binding = prog->samplers[s].vs_shader_binding;
                 /* Guard: validate binding indices to prevent GPU crash from
                  * invalid descriptor access (max 16 per stage on Tegra X1) */
-                if (fs_binding < 0 || fs_binding >= 16) fs_binding = 0;
-                if (vs_binding >= 16) vs_binding = -1;
+                if (fs_binding < 0 || fs_binding >= 16)
+                    fs_binding = 0;
+                if (vs_binding >= 16)
+                    vs_binding = -1;
                 if (vs_binding >= 0) {
                     /* Sampler in both stages: bind to each stage at its own binding */
-                    ctx->backend->ops->bind_texture(ctx->backend, (GLuint)fs_binding, tex_id, 1); /* FS */
-                    ctx->backend->ops->bind_texture(ctx->backend, (GLuint)vs_binding, tex_id, 0); /* VS */
+                    ctx->backend->ops->bind_texture(ctx->backend, (GLuint)fs_binding, tex_id,
+                                                    1); /* FS */
+                    ctx->backend->ops->bind_texture(ctx->backend, (GLuint)vs_binding, tex_id,
+                                                    0); /* VS */
                 } else {
                     /* Sampler in one stage only: bind to both stages at shader_binding */
                     ctx->backend->ops->bind_texture(ctx->backend, (GLuint)fs_binding, tex_id, -1);
@@ -244,7 +265,8 @@ static void sgl_prepare_draw(sgl_context_t *ctx) {
              * Check both 2D and cubemap bindings per unit. */
             for (GLuint unit = 0; unit < SGL_MAX_TEXTURE_UNITS; unit++) {
                 GLuint tex_id = ctx->bound_textures[unit];
-                if (tex_id == 0) tex_id = ctx->bound_cubemap_textures[unit];
+                if (tex_id == 0)
+                    tex_id = ctx->bound_cubemap_textures[unit];
                 if (tex_id > 0) {
                     sgl_texture_t *tex = GET_TEXTURE(tex_id);
                     if (tex && tex->used) {
@@ -257,10 +279,16 @@ static void sgl_prepare_draw(sgl_context_t *ctx) {
                         }
                         GLenum target = tex->target ? tex->target : GL_TEXTURE_2D;
                         if (ctx->backend->ops->texture_parameter) {
-                            ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target, GL_TEXTURE_MIN_FILTER, tex->min_filter);
-                            ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target, GL_TEXTURE_MAG_FILTER, tex->mag_filter);
-                            ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target, GL_TEXTURE_WRAP_S, tex->wrap_s);
-                            ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target, GL_TEXTURE_WRAP_T, tex->wrap_t);
+                            ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target,
+                                                                 GL_TEXTURE_MIN_FILTER,
+                                                                 tex->min_filter);
+                            ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target,
+                                                                 GL_TEXTURE_MAG_FILTER,
+                                                                 tex->mag_filter);
+                            ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target,
+                                                                 GL_TEXTURE_WRAP_S, tex->wrap_s);
+                            ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target,
+                                                                 GL_TEXTURE_WRAP_T, tex->wrap_t);
                         }
                         ctx->backend->ops->bind_texture(ctx->backend, unit, tex_id, -1);
                     }
@@ -268,7 +296,6 @@ static void sgl_prepare_draw(sgl_context_t *ctx) {
             }
         }
     }
-
 }
 
 GL_APICALL void GL_APIENTRY glDrawArrays(GLenum mode, GLint first, GLsizei count) {
@@ -308,7 +335,8 @@ GL_APICALL void GL_APIENTRY glDrawArrays(GLenum mode, GLint first, GLsizei count
         }
     }
 
-    if (count == 0) return;
+    if (count == 0)
+        return;
 
     /* No program bound or program not linked */
     if (ctx->current_program == 0) {
@@ -344,8 +372,8 @@ GL_APICALL void GL_APIENTRY glDrawArrays(GLenum mode, GLint first, GLsizei count
 
     /* Bind vertex attributes via backend */
     if (ctx->backend->ops->bind_vertex_attribs) {
-        ctx->backend->ops->bind_vertex_attribs(ctx->backend, prepared_attribs,
-                                               SGL_MAX_ATTRIBS, first, count);
+        ctx->backend->ops->bind_vertex_attribs(ctx->backend, prepared_attribs, SGL_MAX_ATTRIBS,
+                                               first, count);
     }
 
     /* Draw via backend */
@@ -356,7 +384,8 @@ GL_APICALL void GL_APIENTRY glDrawArrays(GLenum mode, GLint first, GLsizei count
     SGL_TRACE_DRAW("glDrawArrays(mode=0x%X, first=%d, count=%d)", mode, first, count);
 }
 
-GL_APICALL void GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum type, const void *indices) {
+GL_APICALL void GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum type,
+                                           const void *indices) {
     sgl_ensure_frame_ready();
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
@@ -403,7 +432,8 @@ GL_APICALL void GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum ty
         }
     }
 
-    if (count == 0) return;
+    if (count == 0)
+        return;
 
     /* No program bound or program not linked */
     if (ctx->current_program == 0) {
@@ -443,24 +473,27 @@ GL_APICALL void GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum ty
      * to avoid reading past the end of the vertex arrays.
      * This applies for BOTH client-side indices AND EBO-bound indices,
      * because vertex attributes may still be client pointers. */
-    GLsizei vertex_count = count;  /* Default: use index count (safe for VBOs) */
+    GLsizei vertex_count = count; /* Default: use index count (safe for VBOs) */
     if (ctx->bound_element_buffer == 0 && indices != NULL) {
         /* Client-side indices: scan for max vertex index */
         GLuint max_idx = 0;
         if (type == GL_UNSIGNED_BYTE) {
             const GLubyte *idx8 = (const GLubyte *)indices;
             for (GLsizei i = 0; i < count; i++) {
-                if (idx8[i] > max_idx) max_idx = idx8[i];
+                if (idx8[i] > max_idx)
+                    max_idx = idx8[i];
             }
         } else if (type == GL_UNSIGNED_SHORT) {
             const GLushort *idx16 = (const GLushort *)indices;
             for (GLsizei i = 0; i < count; i++) {
-                if (idx16[i] > max_idx) max_idx = idx16[i];
+                if (idx16[i] > max_idx)
+                    max_idx = idx16[i];
             }
         } else if (type == GL_UNSIGNED_INT) {
             const GLuint *idx32 = (const GLuint *)indices;
             for (GLsizei i = 0; i < count; i++) {
-                if (idx32[i] > max_idx) max_idx = idx32[i];
+                if (idx32[i] > max_idx)
+                    max_idx = idx32[i];
             }
         }
         /* Guard against max_idx+1 wrapping to 0 (would under-allocate) */
@@ -474,25 +507,28 @@ GL_APICALL void GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum ty
         sgl_buffer_t *ebo_buf = GET_BUFFER(ctx->bound_element_buffer);
         if (ebo_buf) {
             uint32_t ebo_byte_offset = ebo_buf->data_offset + (uint32_t)(uintptr_t)indices;
-            const uint8_t *ebo_data = (const uint8_t *)ctx->backend->ops->get_data_cpu_ptr(
-                ctx->backend, ebo_byte_offset);
+            const uint8_t *ebo_data =
+                (const uint8_t *)ctx->backend->ops->get_data_cpu_ptr(ctx->backend, ebo_byte_offset);
             /* get_data_cpu_ptr returns NULL for an out-of-range offset — do
              * not dereference it (would crash the scan loop below). */
             if (ebo_data) {
                 GLuint max_idx = 0;
                 if (type == GL_UNSIGNED_BYTE) {
                     for (GLsizei i = 0; i < count; i++) {
-                        if (ebo_data[i] > max_idx) max_idx = ebo_data[i];
+                        if (ebo_data[i] > max_idx)
+                            max_idx = ebo_data[i];
                     }
                 } else if (type == GL_UNSIGNED_SHORT) {
                     const GLushort *idx16 = (const GLushort *)ebo_data;
                     for (GLsizei i = 0; i < count; i++) {
-                        if (idx16[i] > max_idx) max_idx = idx16[i];
+                        if (idx16[i] > max_idx)
+                            max_idx = idx16[i];
                     }
                 } else if (type == GL_UNSIGNED_INT) {
                     const GLuint *idx32 = (const GLuint *)ebo_data;
                     for (GLsizei i = 0; i < count; i++) {
-                        if (idx32[i] > max_idx) max_idx = idx32[i];
+                        if (idx32[i] > max_idx)
+                            max_idx = idx32[i];
                     }
                 }
                 /* Guard against max_idx+1 wrapping to 0 (would under-allocate) */
@@ -500,15 +536,16 @@ GL_APICALL void GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum ty
                     vertex_count = (GLsizei)(max_idx + 1);
                 }
                 SGL_TRACE_DRAW("EBO_SCAN ebo=%u off=%u count=%d max_idx=%u vtx_count=%d",
-                       ctx->bound_element_buffer, (uint32_t)(uintptr_t)indices, count, max_idx, vertex_count);
+                               ctx->bound_element_buffer, (uint32_t)(uintptr_t)indices, count,
+                               max_idx, vertex_count);
             }
         }
     }
 
     /* Bind vertex attributes via backend */
     if (ctx->backend->ops->bind_vertex_attribs) {
-        ctx->backend->ops->bind_vertex_attribs(ctx->backend, prepared_attribs,
-                                               SGL_MAX_ATTRIBS, 0, vertex_count);
+        ctx->backend->ops->bind_vertex_attribs(ctx->backend, prepared_attribs, SGL_MAX_ATTRIBS, 0,
+                                               vertex_count);
     }
 
     /* Compute index buffer offset if EBO is bound */
@@ -521,10 +558,10 @@ GL_APICALL void GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum ty
         }
     }
 
-    /* Draw elements via backend - pass ebo_data_offset, backend will copy client indices if ebo=0 */
+    /* Draw elements via backend - pass ebo_data_offset, backend will copy client indices if ebo=0
+     */
     if (ctx->backend->ops->draw_elements) {
-        ctx->backend->ops->draw_elements(ctx->backend, mode, count, type,
-                                         indices, ebo_data_offset);
+        ctx->backend->ops->draw_elements(ctx->backend, mode, count, type, indices, ebo_data_offset);
     }
 
     SGL_TRACE_DRAW("glDrawElements(mode=0x%X, count=%d, type=0x%X)", mode, count, type);

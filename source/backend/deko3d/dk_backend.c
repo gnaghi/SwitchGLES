@@ -46,8 +46,8 @@ const sgl_backend_ops_t dk_backend_ops = {
     .apply_viewport = dk_apply_viewport,
     .apply_scissor = dk_apply_scissor,
     .apply_blend = dk_apply_blend,
-    .apply_depth = NULL,      /* Removed: use apply_depth_stencil instead */
-    .apply_stencil = NULL,    /* Removed: use apply_depth_stencil instead */
+    .apply_depth = NULL,   /* Removed: use apply_depth_stencil instead */
+    .apply_stencil = NULL, /* Removed: use apply_depth_stencil instead */
     .apply_depth_stencil = dk_apply_depth_stencil,
     .apply_raster = dk_apply_raster,
     .apply_color_mask = dk_apply_color_mask,
@@ -65,7 +65,7 @@ const sgl_backend_ops_t dk_backend_ops = {
     .get_data_cpu_ptr = dk_get_data_cpu_ptr,
 
     /* Texture Operations (dk_texture.c) */
-    .create_texture = NULL,  /* Handled at GL layer */
+    .create_texture = NULL, /* Handled at GL layer */
     .delete_texture = dk_delete_texture,
     .texture_image_2d = dk_texture_image_2d,
     .texture_sub_image_2d = dk_texture_sub_image_2d,
@@ -78,17 +78,17 @@ const sgl_backend_ops_t dk_backend_ops = {
     .compressed_texture_sub_image_2d = dk_compressed_texture_sub_image_2d,
 
     /* Shader Operations (dk_shader.c) */
-    .create_shader = NULL,   /* Handled at GL layer */
+    .create_shader = NULL, /* Handled at GL layer */
     .delete_shader = dk_delete_shader,
     .load_shader_binary = dk_load_shader_binary,
     .load_shader_file = dk_load_shader_file,
 
     /* Program Operations (dk_shader.c) */
-    .create_program = NULL,  /* Handled at GL layer */
+    .create_program = NULL, /* Handled at GL layer */
     .delete_program = dk_delete_program,
-    .attach_shader = NULL,   /* Handled at GL layer */
+    .attach_shader = NULL, /* Handled at GL layer */
     .link_program = dk_link_program,
-    .use_program = NULL,     /* Handled at GL layer */
+    .use_program = NULL, /* Handled at GL layer */
     .bind_program = dk_bind_program,
 
     /* Uniform Operations (dk_uniform.c) */
@@ -105,11 +105,11 @@ const sgl_backend_ops_t dk_backend_ops = {
     .draw_elements = dk_draw_elements,
 
     /* Framebuffer Operations (dk_framebuffer.c) */
-    .create_framebuffer = NULL,        /* Handled at GL layer */
-    .delete_framebuffer = NULL,        /* Handled at GL layer */
+    .create_framebuffer = NULL, /* Handled at GL layer */
+    .delete_framebuffer = NULL, /* Handled at GL layer */
     .bind_framebuffer = dk_bind_framebuffer,
-    .framebuffer_texture = NULL,       /* Handled at GL layer */
-    .check_framebuffer_status = NULL,  /* Handled at GL layer */
+    .framebuffer_texture = NULL,      /* Handled at GL layer */
+    .check_framebuffer_status = NULL, /* Handled at GL layer */
 
     /* Renderbuffer Operations (dk_framebuffer.c) */
     .renderbuffer_storage = dk_renderbuffer_storage,
@@ -141,7 +141,8 @@ const sgl_backend_ops_t dk_backend_ops = {
  */
 sgl_backend_t *dk_backend_create(DkDevice device) {
     sgl_backend_t *be = (sgl_backend_t *)malloc(sizeof(sgl_backend_t));
-    if (!be) return NULL;
+    if (!be)
+        return NULL;
 
     dk_backend_data_t *dk = (dk_backend_data_t *)malloc(sizeof(dk_backend_data_t));
     if (!dk) {
@@ -165,7 +166,8 @@ sgl_backend_t *dk_backend_create(DkDevice device) {
  * @param be    Backend pointer
  */
 void dk_backend_destroy(sgl_backend_t *be) {
-    if (!be) return;
+    if (!be)
+        return;
 
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
     if (dk) {
@@ -210,7 +212,7 @@ void sgl_backend_destroy(sgl_backend_t *be) {
  * @return 0 on success, -1 on failure
  */
 int dk_init(sgl_backend_t *be, void *device) {
-    (void)device;  /* Device already stored in create */
+    (void)device; /* Device already stored in create */
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
     SGL_TRACE_BACKEND("Initializing deko3d backend");
@@ -258,7 +260,8 @@ int dk_init(sgl_backend_t *be, void *device) {
     /* Create shader code memory */
     DkMemBlockMaker codeMaker;
     dkMemBlockMakerDefaults(&codeMaker, dk->device, SGL_CODE_MEM_SIZE);
-    codeMaker.flags = DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached | DkMemBlockFlags_Code;
+    codeMaker.flags =
+        DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached | DkMemBlockFlags_Code;
     dk->code_memblock = dkMemBlockCreate(&codeMaker);
     if (!dk->code_memblock) {
         SGL_ERROR_BACKEND("Failed to create shader code memory");
@@ -280,16 +283,19 @@ int dk_init(sgl_backend_t *be, void *device) {
         SGL_ERROR_BACKEND("Failed to create data memory");
         return -1;
     }
-    dk->data_offset = 256;  /* Reserve offset 0 as error indicator */
+    dk->data_offset = 256; /* Reserve offset 0 as error indicator */
     dk->data_offset_watermark = 256;
-    dk->vbo_free_count = 0;  /* Free list starts empty */
+    dk->vbo_free_count = 0; /* Free list starts empty */
 
     /* Reserve regions within data memory */
     dk->uniform_base = SGL_DATA_MEM_SIZE - SGL_UNIFORM_BUF_SIZE;
     dk->uniform_offset = 0;
-    dk->client_array_base = 192 * 1024 * 1024;  /* 192MB for static VBOs (spearmint map+model geo), rest = client arrays */
+    dk->client_array_base =
+        192 * 1024 *
+        1024; /* 192MB for static VBOs (spearmint map+model geo), rest = client arrays */
     dk->client_array_offset = 0;
-    dk->client_array_slot_end = dk->uniform_base - dk->client_array_base;  /* Full region initially */
+    dk->client_array_slot_end =
+        dk->uniform_base - dk->client_array_base; /* Full region initially */
 
     /* Create texture memory */
     DkMemBlockMaker texMaker;
@@ -354,15 +360,14 @@ int dk_init(sgl_backend_t *be, void *device) {
     dk->state_initialized = true;
 
     SGL_TRACE_BACKEND("Backend initialized: queue=%p code=%luKB data=%luMB tex=%luMB",
-                      (void*)dk->queue,
-                      (unsigned long)(SGL_CODE_MEM_SIZE / 1024),
+                      (void *)dk->queue, (unsigned long)(SGL_CODE_MEM_SIZE / 1024),
                       (unsigned long)(SGL_DATA_MEM_SIZE / (1024 * 1024)),
                       (unsigned long)(SGL_TEXTURE_MEM_SIZE / (1024 * 1024)));
     SGL_TRACE_BACKEND("  uniform: offset=%u size=%u", dk->uniform_base, SGL_UNIFORM_BUF_SIZE);
-    SGL_TRACE_BACKEND("  VBO: 256 to %u (%uKB)", dk->client_array_base, (dk->client_array_base - 256) / 1024);
-    SGL_TRACE_BACKEND("  client_array: %u to %u (%uMB, %uMB/slot)",
-                      dk->client_array_base, dk->uniform_base,
-                      (dk->uniform_base - dk->client_array_base) / (1024*1024),
+    SGL_TRACE_BACKEND("  VBO: 256 to %u (%uKB)", dk->client_array_base,
+                      (dk->client_array_base - 256) / 1024);
+    SGL_TRACE_BACKEND("  client_array: %u to %u (%uMB, %uMB/slot)", dk->client_array_base,
+                      dk->uniform_base, (dk->uniform_base - dk->client_array_base) / (1024 * 1024),
                       (dk->uniform_base - dk->client_array_base) / (SGL_FB_NUM * 1024 * 1024));
     return 0;
 }
@@ -376,11 +381,11 @@ int dk_init(sgl_backend_t *be, void *device) {
  */
 void dk_shutdown(sgl_backend_t *be) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
-    if (!dk || !dk->state_initialized) return;
+    if (!dk || !dk->state_initialized)
+        return;
 
     SGL_TRACE_BACKEND("Shutting down: VBO peak %uKB/%uKB (%.1f%%), free_list=%d blocks",
-                      dk->data_offset_watermark / 1024,
-                      dk->client_array_base / 1024,
+                      dk->data_offset_watermark / 1024, dk->client_array_base / 1024,
                       100.0f * (float)dk->data_offset_watermark / (float)dk->client_array_base,
                       dk->vbo_free_count);
 

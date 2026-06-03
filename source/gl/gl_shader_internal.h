@@ -21,8 +21,8 @@ GLenum uam_base_type_to_gl(uint8_t base_type, uint8_t vec_elems, uint8_t mat_col
 
 /* Compile a GLSL 4.60 source into a shader's DKSH (used by compile and by the
  * VS-with-attrib-bindings recompile in glLinkProgram). */
-bool sgl_compile_glsl460(sgl_context_t *ctx, GLuint shader_id,
-                         sgl_shader_t *sh, const char *glsl_source);
+bool sgl_compile_glsl460(sgl_context_t *ctx, GLuint shader_id, sgl_shader_t *sh,
+                         const char *glsl_source);
 #endif
 
 #endif /* SGL_GL_SHADER_INTERNAL_H */

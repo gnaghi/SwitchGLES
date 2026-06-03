@@ -29,9 +29,8 @@
  * - handle>0: Bind FBO with specified color attachment texture
  * ============================================================================ */
 
-void dk_bind_framebuffer(sgl_backend_t *be, sgl_handle_t handle,
-                         sgl_handle_t color_tex, sgl_handle_t depth_rb,
-                         bool color_is_rb, bool depth_is_rb,
+void dk_bind_framebuffer(sgl_backend_t *be, sgl_handle_t handle, sgl_handle_t color_tex,
+                         sgl_handle_t depth_rb, bool color_is_rb, bool depth_is_rb,
                          sgl_handle_t stencil_rb, bool stencil_is_rb) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
@@ -59,7 +58,7 @@ void dk_bind_framebuffer(sgl_backend_t *be, sgl_handle_t handle,
      * glu::resetState repeatedly rebinds FBO 0 between dEQP tests). */
     dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
                     DkInvalidateFlags_Image | DkInvalidateFlags_Descriptors |
-                    DkInvalidateFlags_L2Cache | DkInvalidateFlags_Zcull);
+                        DkInvalidateFlags_L2Cache | DkInvalidateFlags_Zcull);
 
     if (handle == 0) {
         /* Bind default framebuffer (swapchain image) - use per-slot depth buffer */
@@ -93,7 +92,8 @@ void dk_bind_framebuffer(sgl_backend_t *be, sgl_handle_t handle,
             }
         }
         if (!color_found) {
-            SGL_TRACE_FBO("bind_framebuffer: color_tex=%u (is_rb=%d) not found", color_tex, color_is_rb);
+            SGL_TRACE_FBO("bind_framebuffer: color_tex=%u (is_rb=%d) not found", color_tex,
+                          color_is_rb);
             return;
         }
 
@@ -104,14 +104,12 @@ void dk_bind_framebuffer(sgl_backend_t *be, sgl_handle_t handle,
         DkImageView depthView;
         if (depth_rb > 0) {
             if (depth_is_rb) {
-                if (depth_rb < SGL_MAX_RENDERBUFFERS &&
-                    dk->renderbuffer_initialized[depth_rb]) {
+                if (depth_rb < SGL_MAX_RENDERBUFFERS && dk->renderbuffer_initialized[depth_rb]) {
                     dkImageViewDefaults(&depthView, &dk->renderbuffer_images[depth_rb]);
                     pDepthView = &depthView;
                 }
             } else {
-                if (depth_rb < SGL_MAX_TEXTURES &&
-                    dk->texture_initialized[depth_rb]) {
+                if (depth_rb < SGL_MAX_TEXTURES && dk->texture_initialized[depth_rb]) {
                     dkImageViewDefaults(&depthView, &dk->textures[depth_rb]);
                     pDepthView = &depthView;
                 }
@@ -150,12 +148,10 @@ void dk_bind_framebuffer(sgl_backend_t *be, sgl_handle_t handle,
  * - GL_NEAREST and GL_LINEAR filtering
  * ============================================================================ */
 
-void dk_blit_framebuffer(sgl_backend_t *be,
-                          sgl_handle_t read_fbo, sgl_handle_t read_color_tex,
-                          sgl_handle_t write_fbo, sgl_handle_t write_color_tex,
-                          GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1,
-                          GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1,
-                          GLbitfield mask, GLenum filter) {
+void dk_blit_framebuffer(sgl_backend_t *be, sgl_handle_t read_fbo, sgl_handle_t read_color_tex,
+                         sgl_handle_t write_fbo, sgl_handle_t write_color_tex, GLint srcX0,
+                         GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0,
+                         GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
     /* Only color blit is supported (depth/stencil blit not implemented) */
@@ -205,20 +201,40 @@ void dk_blit_framebuffer(sgl_backend_t *be,
 
     /* Compute source rect (handle negative-width/height for flipping) */
     uint32_t sx0, sy0, sw, sh;
-    if (srcX1 >= srcX0) { sx0 = srcX0; sw = srcX1 - srcX0; }
-    else { sx0 = srcX1; sw = srcX0 - srcX1; }
-    if (srcY1 >= srcY0) { sy0 = srcY0; sh = srcY1 - srcY0; }
-    else { sy0 = srcY1; sh = srcY0 - srcY1; }
+    if (srcX1 >= srcX0) {
+        sx0 = srcX0;
+        sw = srcX1 - srcX0;
+    } else {
+        sx0 = srcX1;
+        sw = srcX0 - srcX1;
+    }
+    if (srcY1 >= srcY0) {
+        sy0 = srcY0;
+        sh = srcY1 - srcY0;
+    } else {
+        sy0 = srcY1;
+        sh = srcY0 - srcY1;
+    }
 
     /* Compute dest rect */
     uint32_t dx0, dy0, dw, dh;
-    if (dstX1 >= dstX0) { dx0 = dstX0; dw = dstX1 - dstX0; }
-    else { dx0 = dstX1; dw = dstX0 - dstX1; }
-    if (dstY1 >= dstY0) { dy0 = dstY0; dh = dstY1 - dstY0; }
-    else { dy0 = dstY1; dh = dstY0 - dstY1; }
+    if (dstX1 >= dstX0) {
+        dx0 = dstX0;
+        dw = dstX1 - dstX0;
+    } else {
+        dx0 = dstX1;
+        dw = dstX0 - dstX1;
+    }
+    if (dstY1 >= dstY0) {
+        dy0 = dstY0;
+        dh = dstY1 - dstY0;
+    } else {
+        dy0 = dstY1;
+        dh = dstY0 - dstY1;
+    }
 
-    DkImageRect srcRect = { sx0, sy0, 0, sw, sh, 1 };
-    DkImageRect dstRect = { dx0, dy0, 0, dw, dh, 1 };
+    DkImageRect srcRect = {sx0, sy0, 0, sw, sh, 1};
+    DkImageRect dstRect = {dx0, dy0, 0, dw, dh, 1};
 
     /* Select blit filter */
     uint32_t blitFlags = (filter == GL_LINEAR) ? DkBlitFlag_FilterLinear : 0;
@@ -228,8 +244,7 @@ void dk_blit_framebuffer(sgl_backend_t *be,
         dk->texture_used_as_rt[write_color_tex] = true;
     }
 
-    dkCmdBufBlitImage(dk->cmdbuf, &srcView, &srcRect, &dstView, &dstRect,
-                      blitFlags, 0);
+    dkCmdBufBlitImage(dk->cmdbuf, &srcView, &srcRect, &dstView, &dstRect, blitFlags, 0);
 
     /* Barrier after blit to ensure data is visible */
     dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
@@ -251,8 +266,7 @@ void dk_blit_framebuffer(sgl_backend_t *be,
  * 5. Frees the readback memory
  * ============================================================================ */
 
-void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y,
-                    GLsizei width, GLsizei height,
+void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y, GLsizei width, GLsizei height,
                     GLenum format, GLenum type, void *pixels) {
     (void)type;
     /* format used below for BGRA R/B swap */
@@ -294,7 +308,7 @@ void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y,
     /* Allocate separate memory block for readback
      * Using a dedicated block ensures proper CPU visibility */
     size_t bufferSize = (size_t)width * (size_t)height * 4;
-    bufferSize = SGL_ALIGN_UP(bufferSize, SGL_PAGE_ALIGNMENT);  /* Align to 4KB */
+    bufferSize = SGL_ALIGN_UP(bufferSize, SGL_PAGE_ALIGNMENT); /* Align to 4KB */
 
     DkMemBlock readbackMem;
     DkMemBlockMaker memMaker;
@@ -310,21 +324,23 @@ void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y,
      * This ensures the render target contents are finalized BEFORE we copy.
      * deko3d requires render pass to be complete before CopyImageToBuffer. */
     {
-        dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);
+        dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
+                        DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);
         dk_flush_sync(dk);
 
         if (dkQueueIsInErrorState(dk->queue)) {
-            SGL_ERROR_BACKEND("read_pixels: GPU error! slot=%d fbo=%u depth=%p draws=%u cmdbuf=%p submitted=%d",
-                             dk->current_slot, dk->current_fbo,
-                             (void*)dk->depth_images[dk->current_slot],
-                             dk->diag_draw_count, (void*)dk->cmdbuf,
-                             dk->cmdbuf_submitted);
+            SGL_ERROR_BACKEND(
+                "read_pixels: GPU error! slot=%d fbo=%u depth=%p draws=%u cmdbuf=%p submitted=%d",
+                dk->current_slot, dk->current_fbo, (void *)dk->depth_images[dk->current_slot],
+                dk->diag_draw_count, (void *)dk->cmdbuf, dk->cmdbuf_submitted);
             memset(pixels, 0, (size_t)width * (size_t)height * 4);
             dkMemBlockDestroy(readbackMem);
             dkCmdBufClear(dk->cmdbuf);
-            dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+            dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0,
+                              SGL_CMD_MEM_SIZE);
             dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
-            dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr, SGL_MAX_TEXTURES);
+            dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr,
+                                             SGL_MAX_TEXTURES);
             dk->descriptors_bound = true;
             dk_rebind_default_render_target(dk);
             return;
@@ -376,8 +392,8 @@ void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y,
     }
     uint32_t dk_y = (uint32_t)y;
 
-    DkImageRect srcRect = { (uint32_t)x, dk_y, 0, (uint32_t)width, (uint32_t)height, 1 };
-    DkCopyBuf dstBuf = { dkMemBlockGetGpuAddr(readbackMem), (uint32_t)(width * 4), (uint32_t)height };
+    DkImageRect srcRect = {(uint32_t)x, dk_y, 0, (uint32_t)width, (uint32_t)height, 1};
+    DkCopyBuf dstBuf = {dkMemBlockGetGpuAddr(readbackMem), (uint32_t)(width * 4), (uint32_t)height};
 
     dkCmdBufCopyImageToBuffer(dk->cmdbuf, &srcView, &srcRect, &dstBuf, 0);
 
@@ -400,16 +416,15 @@ void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y,
      * each row is padded to a multiple of pack_alignment bytes. */
     sgl_context_t *ctx = sgl_get_current_context();
     int pack_alignment = (ctx && ctx->pack_alignment > 0) ? ctx->pack_alignment : 4;
-    size_t row_bytes = (size_t)width * 4;  /* actual pixel data per row */
-    size_t row_stride = ((row_bytes + pack_alignment - 1) / pack_alignment) * pack_alignment;  /* padded */
+    size_t row_bytes = (size_t)width * 4; /* actual pixel data per row */
+    size_t row_stride =
+        ((row_bytes + pack_alignment - 1) / pack_alignment) * pack_alignment; /* padded */
 
     void *cpuAddr = dkMemBlockGetCpuAddr(readbackMem);
     uint8_t *src_ptr = (uint8_t *)cpuAddr;
     uint8_t *dst_ptr = (uint8_t *)pixels;
     for (int row = 0; row < height; row++) {
-        memcpy(dst_ptr + row * row_stride,
-               src_ptr + row * row_bytes,
-               row_bytes);
+        memcpy(dst_ptr + row * row_stride, src_ptr + row * row_bytes, row_bytes);
     }
 
     /* Per GLES spec §4.3.1: "If the color buffer does not store an alpha
@@ -420,11 +435,14 @@ void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y,
         if (fbo) {
             GLenum fmt = 0;
             if (fbo->color_is_renderbuffer) {
-                sgl_renderbuffer_t *rb = sgl_res_mgr_get_renderbuffer(&ctx->res_mgr, fbo->color_attachment);
-                if (rb) fmt = rb->internal_format;
+                sgl_renderbuffer_t *rb =
+                    sgl_res_mgr_get_renderbuffer(&ctx->res_mgr, fbo->color_attachment);
+                if (rb)
+                    fmt = rb->internal_format;
             } else {
                 sgl_texture_t *tex = sgl_res_mgr_get_texture(&ctx->res_mgr, fbo->color_attachment);
-                if (tex) fmt = tex->internal_format;
+                if (tex)
+                    fmt = tex->internal_format;
             }
             if (fmt == GL_RGB || fmt == GL_RGB8 || fmt == GL_RGB565) {
                 for (int row = 0; row < height; row++) {
@@ -452,8 +470,8 @@ void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y,
                 source_is_bgra = true;
             }
         }
-        bool need_swap = (source_is_bgra && format != GL_BGRA_EXT) ||
-                         (!source_is_bgra && format == GL_BGRA_EXT);
+        bool need_swap =
+            (source_is_bgra && format != GL_BGRA_EXT) || (!source_is_bgra && format == GL_BGRA_EXT);
         if (need_swap) {
             for (int row = 0; row < height; row++) {
                 uint8_t *p = dst_ptr + row * row_stride;
@@ -490,8 +508,8 @@ void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y,
  * These are used as FBO attachments for depth testing without a depth texture.
  * ============================================================================ */
 
-void dk_renderbuffer_storage(sgl_backend_t *be, sgl_handle_t handle,
-                              GLenum internalformat, GLsizei width, GLsizei height) {
+void dk_renderbuffer_storage(sgl_backend_t *be, sgl_handle_t handle, GLenum internalformat,
+                             GLsizei width, GLsizei height) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
     if (handle == 0 || handle >= SGL_MAX_RENDERBUFFERS) {
@@ -562,7 +580,8 @@ void dk_renderbuffer_storage(sgl_backend_t *be, sgl_handle_t handle,
     /* Create the depth/stencil image */
     DkImageLayoutMaker imgMaker;
     dkImageLayoutMakerDefaults(&imgMaker, dk->device);
-    imgMaker.flags = DkImageFlags_UsageRender | DkImageFlags_Usage2DEngine | DkImageFlags_HwCompression;
+    imgMaker.flags =
+        DkImageFlags_UsageRender | DkImageFlags_Usage2DEngine | DkImageFlags_HwCompression;
     imgMaker.format = dkFormat;
     imgMaker.dimensions[0] = width;
     imgMaker.dimensions[1] = height;
@@ -596,8 +615,8 @@ void dk_renderbuffer_storage(sgl_backend_t *be, sgl_handle_t handle,
     }
 
     /* Initialize the image in the dedicated memblock */
-    dkImageInitialize(&dk->renderbuffer_images[handle], &layout,
-                      dk->renderbuffer_memblocks[handle], 0);
+    dkImageInitialize(&dk->renderbuffer_images[handle], &layout, dk->renderbuffer_memblocks[handle],
+                      0);
 
     dk->renderbuffer_width[handle] = width;
     dk->renderbuffer_height[handle] = height;
@@ -614,7 +633,8 @@ void dk_renderbuffer_storage(sgl_backend_t *be, sgl_handle_t handle,
         }
     }
 
-    SGL_TRACE_FBO("renderbuffer_storage handle=%u format=0x%X %dx%d", handle, internalformat, width, height);
+    SGL_TRACE_FBO("renderbuffer_storage handle=%u format=0x%X %dx%d", handle, internalformat, width,
+                  height);
 }
 
 /* ============================================================================

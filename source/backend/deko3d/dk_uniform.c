@@ -36,20 +36,20 @@ uint32_t dk_alloc_uniform(sgl_backend_t *be, uint32_t size) {
      * the first draw's data at offset 0. */
     if (dk->uniform_offset + alignedSize > SGL_UNIFORM_BUF_SIZE) {
         dk->diag_uniform_overflows++;
-        SGL_ERROR_BACKEND("alloc_uniform: out of uniform memory (need %u, have %u)",
-                          alignedSize, SGL_UNIFORM_BUF_SIZE - dk->uniform_offset);
+        SGL_ERROR_BACKEND("alloc_uniform: out of uniform memory (need %u, have %u)", alignedSize,
+                          SGL_UNIFORM_BUF_SIZE - dk->uniform_offset);
         /* Return last valid offset (at least 256 bytes from end) so writes
          * go to a safe location rather than offset 0 */
-        uint32_t fallback = SGL_UNIFORM_BUF_SIZE > alignedSize
-                          ? SGL_UNIFORM_BUF_SIZE - alignedSize : 0;
+        uint32_t fallback =
+            SGL_UNIFORM_BUF_SIZE > alignedSize ? SGL_UNIFORM_BUF_SIZE - alignedSize : 0;
         return fallback;
     }
 
     uint32_t offset = dk->uniform_offset;
     dk->uniform_offset += alignedSize;
 
-    DK_VERBOSE_PRINT("[DK] alloc_uniform: size=%u aligned=%u offset=%u\n",
-                     size, alignedSize, offset);
+    DK_VERBOSE_PRINT("[DK] alloc_uniform: size=%u aligned=%u offset=%u\n", size, alignedSize,
+                     offset);
     SGL_TRACE_UNIFORM("alloc_uniform size=%u -> offset=%u", size, offset);
 
     return offset;
@@ -70,7 +70,7 @@ void dk_write_uniform(sgl_backend_t *be, uint32_t offset, const void *data, uint
     }
 
     /* Calculate CPU address in uniform buffer region */
-    uint8_t *cpu_base = (uint8_t*)dkMemBlockGetCpuAddr(dk->data_memblock);
+    uint8_t *cpu_base = (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock);
     void *dst = cpu_base + dk->uniform_base + offset;
 
     /* Copy uniform data */

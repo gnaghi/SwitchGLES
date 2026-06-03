@@ -10,17 +10,15 @@
 #include <stdbool.h>
 
 typedef struct sgl_state_color {
-    bool mask[4];  /* RGBA write mask */
-    float clear_color[4];  /* RGBA clear color */
+    bool mask[4];         /* RGBA write mask */
+    float clear_color[4]; /* RGBA clear color */
 } sgl_state_color_t;
 
 /* Initialize to GL defaults */
 void sgl_state_color_init(sgl_state_color_t *state);
 
 /* Update functions - return true if value changed */
-bool sgl_state_color_set_mask(sgl_state_color_t *state,
-                               bool r, bool g, bool b, bool a);
-bool sgl_state_color_set_clear(sgl_state_color_t *state,
-                                float r, float g, float b, float a);
+bool sgl_state_color_set_mask(sgl_state_color_t *state, bool r, bool g, bool b, bool a);
+bool sgl_state_color_set_clear(sgl_state_color_t *state, float r, float g, float b, float a);
 
 #endif /* SGL_STATE_COLOR_H */

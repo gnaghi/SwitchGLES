@@ -24,7 +24,8 @@ static GLsizei sgl_compressed_image_size(GLenum format, GLsizei width, GLsizei h
         case GL_COMPRESSED_SIGNED_R11_EAC:
         case GL_COMPRESSED_RGB_S3TC_DXT1_EXT:
         case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
-            bpb = 8; break;
+            bpb = 8;
+            break;
 
         /* 16 bytes/block, 4x4 */
         case GL_COMPRESSED_RGBA8_ETC2_EAC:
@@ -33,23 +34,80 @@ static GLsizei sgl_compressed_image_size(GLenum format, GLsizei width, GLsizei h
         case GL_COMPRESSED_SIGNED_RG11_EAC:
         case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
         case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
-            bpb = 16; break;
+            bpb = 16;
+            break;
 
         /* ASTC — all 16 bytes/block, varying block sizes */
-        case GL_COMPRESSED_RGBA_ASTC_4x4_KHR:   bw=4;  bh=4;  bpb=16; break;
-        case GL_COMPRESSED_RGBA_ASTC_5x4_KHR:   bw=5;  bh=4;  bpb=16; break;
-        case GL_COMPRESSED_RGBA_ASTC_5x5_KHR:   bw=5;  bh=5;  bpb=16; break;
-        case GL_COMPRESSED_RGBA_ASTC_6x5_KHR:   bw=6;  bh=5;  bpb=16; break;
-        case GL_COMPRESSED_RGBA_ASTC_6x6_KHR:   bw=6;  bh=6;  bpb=16; break;
-        case GL_COMPRESSED_RGBA_ASTC_8x5_KHR:   bw=8;  bh=5;  bpb=16; break;
-        case GL_COMPRESSED_RGBA_ASTC_8x6_KHR:   bw=8;  bh=6;  bpb=16; break;
-        case GL_COMPRESSED_RGBA_ASTC_8x8_KHR:   bw=8;  bh=8;  bpb=16; break;
-        case GL_COMPRESSED_RGBA_ASTC_10x5_KHR:  bw=10; bh=5;  bpb=16; break;
-        case GL_COMPRESSED_RGBA_ASTC_10x6_KHR:  bw=10; bh=6;  bpb=16; break;
-        case GL_COMPRESSED_RGBA_ASTC_10x8_KHR:  bw=10; bh=8;  bpb=16; break;
-        case GL_COMPRESSED_RGBA_ASTC_10x10_KHR: bw=10; bh=10; bpb=16; break;
-        case GL_COMPRESSED_RGBA_ASTC_12x10_KHR: bw=12; bh=10; bpb=16; break;
-        case GL_COMPRESSED_RGBA_ASTC_12x12_KHR: bw=12; bh=12; bpb=16; break;
+        case GL_COMPRESSED_RGBA_ASTC_4x4_KHR:
+            bw = 4;
+            bh = 4;
+            bpb = 16;
+            break;
+        case GL_COMPRESSED_RGBA_ASTC_5x4_KHR:
+            bw = 5;
+            bh = 4;
+            bpb = 16;
+            break;
+        case GL_COMPRESSED_RGBA_ASTC_5x5_KHR:
+            bw = 5;
+            bh = 5;
+            bpb = 16;
+            break;
+        case GL_COMPRESSED_RGBA_ASTC_6x5_KHR:
+            bw = 6;
+            bh = 5;
+            bpb = 16;
+            break;
+        case GL_COMPRESSED_RGBA_ASTC_6x6_KHR:
+            bw = 6;
+            bh = 6;
+            bpb = 16;
+            break;
+        case GL_COMPRESSED_RGBA_ASTC_8x5_KHR:
+            bw = 8;
+            bh = 5;
+            bpb = 16;
+            break;
+        case GL_COMPRESSED_RGBA_ASTC_8x6_KHR:
+            bw = 8;
+            bh = 6;
+            bpb = 16;
+            break;
+        case GL_COMPRESSED_RGBA_ASTC_8x8_KHR:
+            bw = 8;
+            bh = 8;
+            bpb = 16;
+            break;
+        case GL_COMPRESSED_RGBA_ASTC_10x5_KHR:
+            bw = 10;
+            bh = 5;
+            bpb = 16;
+            break;
+        case GL_COMPRESSED_RGBA_ASTC_10x6_KHR:
+            bw = 10;
+            bh = 6;
+            bpb = 16;
+            break;
+        case GL_COMPRESSED_RGBA_ASTC_10x8_KHR:
+            bw = 10;
+            bh = 8;
+            bpb = 16;
+            break;
+        case GL_COMPRESSED_RGBA_ASTC_10x10_KHR:
+            bw = 10;
+            bh = 10;
+            bpb = 16;
+            break;
+        case GL_COMPRESSED_RGBA_ASTC_12x10_KHR:
+            bw = 12;
+            bh = 10;
+            bpb = 16;
+            break;
+        case GL_COMPRESSED_RGBA_ASTC_12x12_KHR:
+            bw = 12;
+            bh = 12;
+            bpb = 16;
+            break;
 
         default:
             return 0; /* Unknown format — skip validation */
@@ -62,9 +120,8 @@ static GLsizei sgl_compressed_image_size(GLenum format, GLsizei width, GLsizei h
 
 /* Check if a format enum is a valid GLES2 texture format */
 static bool sgl_is_valid_tex_format(GLenum format) {
-    return format == GL_RGBA || format == GL_RGB ||
-           format == GL_LUMINANCE_ALPHA || format == GL_LUMINANCE ||
-           format == GL_ALPHA || format == GL_DEPTH_COMPONENT ||
+    return format == GL_RGBA || format == GL_RGB || format == GL_LUMINANCE_ALPHA ||
+           format == GL_LUMINANCE || format == GL_ALPHA || format == GL_DEPTH_COMPONENT ||
            format == GL_BGRA_EXT;
 }
 
@@ -125,7 +182,8 @@ GL_APICALL void GL_APIENTRY glGenTextures(GLsizei n, GLuint *textures) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
-    if (n == 0 || !textures) return;
+    if (n == 0 || !textures)
+        return;
 
     for (GLsizei i = 0; i < n; i++) {
         textures[i] = sgl_res_mgr_alloc_texture(&ctx->res_mgr);
@@ -143,12 +201,17 @@ GL_APICALL void GL_APIENTRY glDeleteTextures(GLsizei n, const GLuint *textures) 
     if (!ctx)
         return;
 
-    if (n < 0) { sgl_set_error(ctx, GL_INVALID_VALUE); return; }
-    if (!textures) return;
+    if (n < 0) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+    if (!textures)
+        return;
 
     for (GLsizei i = 0; i < n; i++) {
         GLuint id = textures[i];
-        if (id == 0) continue;
+        if (id == 0)
+            continue;
 
         for (int unit = 0; unit < SGL_MAX_TEXTURE_UNITS; unit++) {
             if (ctx->bound_textures[unit] == id)
@@ -171,18 +234,24 @@ GL_APICALL void GL_APIENTRY glDeleteTextures(GLsizei n, const GLuint *textures) 
             sgl_framebuffer_t *fbo = GET_FRAMEBUFFER(ctx->bound_framebuffer);
             if (fbo && fbo->used) {
                 if (!fbo->color_is_renderbuffer && fbo->color_attachment == id) {
-                    fbo->color_attachment = 0; fbo->color_textarget = 0;
-                    if (tex) tex->fbo_ref_count--;
+                    fbo->color_attachment = 0;
+                    fbo->color_textarget = 0;
+                    if (tex)
+                        tex->fbo_ref_count--;
                     detached = true;
                 }
                 if (!fbo->depth_is_renderbuffer && fbo->depth_attachment == id) {
-                    fbo->depth_attachment = 0; fbo->depth_textarget = 0;
-                    if (tex) tex->fbo_ref_count--;
+                    fbo->depth_attachment = 0;
+                    fbo->depth_textarget = 0;
+                    if (tex)
+                        tex->fbo_ref_count--;
                     detached = true;
                 }
                 if (!fbo->stencil_is_renderbuffer && fbo->stencil_attachment == id) {
-                    fbo->stencil_attachment = 0; fbo->stencil_textarget = 0;
-                    if (tex) tex->fbo_ref_count--;
+                    fbo->stencil_attachment = 0;
+                    fbo->stencil_textarget = 0;
+                    if (tex)
+                        tex->fbo_ref_count--;
                     detached = true;
                 }
             }
@@ -192,12 +261,10 @@ GL_APICALL void GL_APIENTRY glDeleteTextures(GLsizei n, const GLuint *textures) 
         if (detached && ctx->backend && ctx->backend->ops->bind_framebuffer) {
             sgl_framebuffer_t *fbo = GET_FRAMEBUFFER(ctx->bound_framebuffer);
             if (fbo) {
-                ctx->backend->ops->bind_framebuffer(ctx->backend, ctx->bound_framebuffer,
-                                                     fbo->color_attachment, fbo->depth_attachment,
-                                                     fbo->color_is_renderbuffer,
-                                                     fbo->depth_is_renderbuffer,
-                                                     fbo->stencil_attachment,
-                                                     fbo->stencil_is_renderbuffer);
+                ctx->backend->ops->bind_framebuffer(
+                    ctx->backend, ctx->bound_framebuffer, fbo->color_attachment,
+                    fbo->depth_attachment, fbo->color_is_renderbuffer, fbo->depth_is_renderbuffer,
+                    fbo->stencil_attachment, fbo->stencil_is_renderbuffer);
             }
         }
 
@@ -218,8 +285,10 @@ GL_APICALL void GL_APIENTRY glDeleteTextures(GLsizei n, const GLuint *textures) 
         /* Remove from overflow list if present */
         for (int j = 0; j < ctx->res_mgr.num_overflow_textures; j++) {
             if (ctx->res_mgr.overflow_texture_ids[j] == id) {
-                ctx->res_mgr.overflow_texture_ids[j] = ctx->res_mgr.overflow_texture_ids[--ctx->res_mgr.num_overflow_textures];
-                ctx->res_mgr.overflow_texture_targets[j] = ctx->res_mgr.overflow_texture_targets[ctx->res_mgr.num_overflow_textures];
+                ctx->res_mgr.overflow_texture_ids[j] =
+                    ctx->res_mgr.overflow_texture_ids[--ctx->res_mgr.num_overflow_textures];
+                ctx->res_mgr.overflow_texture_targets[j] =
+                    ctx->res_mgr.overflow_texture_targets[ctx->res_mgr.num_overflow_textures];
                 break;
             }
         }
@@ -232,10 +301,12 @@ GL_APICALL GLboolean GL_APIENTRY glIsTexture(GLuint texture) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return GL_FALSE;
-    if (texture == 0) return GL_FALSE;
+    if (texture == 0)
+        return GL_FALSE;
     sgl_texture_t *tex = GET_TEXTURE(texture);
     /* GLES2: name becomes a texture object only after first glBindTexture */
-    if (tex && tex->target != 0) return GL_TRUE;
+    if (tex && tex->target != 0)
+        return GL_TRUE;
     /* Check overflow IDs */
     for (int i = 0; i < ctx->res_mgr.num_overflow_textures; i++) {
         if (ctx->res_mgr.overflow_texture_ids[i] == texture)
@@ -285,7 +356,10 @@ GL_APICALL void GL_APIENTRY glBindTexture(GLenum target, GLuint texture) {
                 /* Overflow: ID outside array range. Track for glIsTexture. */
                 bool found = false;
                 for (int i = 0; i < ctx->res_mgr.num_overflow_textures; i++) {
-                    if (ctx->res_mgr.overflow_texture_ids[i] == texture) { found = true; break; }
+                    if (ctx->res_mgr.overflow_texture_ids[i] == texture) {
+                        found = true;
+                        break;
+                    }
                 }
                 if (!found && ctx->res_mgr.num_overflow_textures < SGL_MAX_OVERFLOW_IDS) {
                     int idx = ctx->res_mgr.num_overflow_textures++;
@@ -321,13 +395,12 @@ do_bind:
 
 /* Helper to check if target is a valid cubemap face */
 static int sgl_is_cubemap_face(GLenum target) {
-    return target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X &&
-           target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z;
+    return target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X && target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z;
 }
 
 GL_APICALL void GL_APIENTRY glTexImage2D(GLenum target, GLint level, GLint internalformat,
-                                          GLsizei width, GLsizei height, GLint border,
-                                          GLenum format, GLenum type, const void *pixels) {
+                                         GLsizei width, GLsizei height, GLint border, GLenum format,
+                                         GLenum type, const void *pixels) {
     /* Ensure frame is ready before GPU work */
     sgl_ensure_frame_ready();
 
@@ -362,8 +435,10 @@ GL_APICALL void GL_APIENTRY glTexImage2D(GLenum target, GLint level, GLint inter
 
     /* Normalize GL_BGRA8_EXT (0x93A1) to GL_BGRA_EXT (0x80E1).
      * Both map to the same format; BGRA8_EXT is the sized variant. */
-    if ((GLenum)internalformat == GL_BGRA8_EXT) internalformat = GL_BGRA_EXT;
-    if (format == GL_BGRA8_EXT) format = GL_BGRA_EXT;
+    if ((GLenum)internalformat == GL_BGRA8_EXT)
+        internalformat = GL_BGRA_EXT;
+    if (format == GL_BGRA8_EXT)
+        format = GL_BGRA_EXT;
 
     /* Check max texture size (8192 for Tegra X1) */
     if (width > 8192 || height > 8192) {
@@ -446,9 +521,12 @@ GL_APICALL void GL_APIENTRY glTexImage2D(GLenum target, GLint level, GLint inter
          * glCheckFramebufferStatus can detect them as non-color-renderable
          * (GL_OES_texture_half_float does NOT imply color-renderable). */
         if (type == GL_HALF_FLOAT_OES) {
-            if (internalformat == GL_RGBA) tex->internal_format = GL_RGBA16F;
-            else if (internalformat == GL_RGB) tex->internal_format = GL_RGB16F;
-            else tex->internal_format = internalformat;
+            if (internalformat == GL_RGBA)
+                tex->internal_format = GL_RGBA16F;
+            else if (internalformat == GL_RGB)
+                tex->internal_format = GL_RGB16F;
+            else
+                tex->internal_format = internalformat;
         } else {
             tex->internal_format = internalformat;
         }
@@ -458,8 +536,10 @@ GL_APICALL void GL_APIENTRY glTexImage2D(GLenum target, GLint level, GLint inter
          * is incomplete when using mipmap filtering → black fallback. */
         int expected_w = tex->width >> level;
         int expected_h = tex->height >> level;
-        if (expected_w < 1) expected_w = 1;
-        if (expected_h < 1) expected_h = 1;
+        if (expected_w < 1)
+            expected_w = 1;
+        if (expected_h < 1)
+            expected_h = 1;
         if (width != expected_w || height != expected_h) {
             tex->cubemap_incomplete = true;
         }
@@ -473,18 +553,17 @@ GL_APICALL void GL_APIENTRY glTexImage2D(GLenum target, GLint level, GLint inter
 
     /* Delegate to backend for actual GPU texture creation and upload */
     if (ctx->backend->ops->texture_image_2d) {
-        ctx->backend->ops->texture_image_2d(ctx->backend, tex_id,
-                                            target, level, internalformat,
-                                            width, height, border,
-                                            format, type, pixels);
+        ctx->backend->ops->texture_image_2d(ctx->backend, tex_id, target, level, internalformat,
+                                            width, height, border, format, type, pixels);
     }
 
-    SGL_TRACE_TEXTURE("glTexImage2D(target=0x%X, %dx%d, format=0x%X)", target, width, height, format);
+    SGL_TRACE_TEXTURE("glTexImage2D(target=0x%X, %dx%d, format=0x%X)", target, width, height,
+                      format);
 }
 
-GL_APICALL void GL_APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset,
-                                             GLsizei width, GLsizei height, GLenum format,
-                                             GLenum type, const void *pixels) {
+GL_APICALL void GL_APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint xoffset,
+                                            GLint yoffset, GLsizei width, GLsizei height,
+                                            GLenum format, GLenum type, const void *pixels) {
     /* Ensure frame is ready before GPU work */
     sgl_ensure_frame_ready();
 
@@ -522,10 +601,12 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint xo
         return;
     }
 
-    if (width == 0 || height == 0) return;
+    if (width == 0 || height == 0)
+        return;
 
     GLuint tex_id = sgl_get_bound_texture(ctx, target);
-    if (tex_id == 0) return;  /* Default texture — no-op */
+    if (tex_id == 0)
+        return; /* Default texture — no-op */
     sgl_texture_t *tex = GET_TEXTURE(tex_id);
     if (!tex) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
@@ -540,19 +621,16 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint xo
         level_h = level_h > 1 ? level_h >> 1 : 1;
     }
     /* Range check without computing offset+size (avoids signed overflow). */
-    if (xoffset > level_w || width > level_w - xoffset ||
-        yoffset > level_h || height > level_h - yoffset) {
+    if (xoffset > level_w || width > level_w - xoffset || yoffset > level_h ||
+        height > level_h - yoffset) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
 
     /* Delegate to backend for actual GPU texture update */
     if (ctx->backend->ops->texture_sub_image_2d) {
-        ctx->backend->ops->texture_sub_image_2d(ctx->backend, tex_id,
-                                                 target, level,
-                                                 xoffset, yoffset,
-                                                 width, height,
-                                                 format, type, pixels);
+        ctx->backend->ops->texture_sub_image_2d(ctx->backend, tex_id, target, level, xoffset,
+                                                yoffset, width, height, format, type, pixels);
     }
 
     SGL_TRACE_TEXTURE("glTexSubImage2D(offset=%d,%d size=%dx%d)", xoffset, yoffset, width, height);
@@ -587,9 +665,9 @@ GL_APICALL void GL_APIENTRY glTexParameteri(GLenum target, GLenum pname, GLint p
      * GLES2 spec: errors must be generated even for default texture object. */
     switch (pname) {
         case GL_TEXTURE_MIN_FILTER:
-            if (param != GL_NEAREST && param != GL_LINEAR &&
-                param != GL_NEAREST_MIPMAP_NEAREST && param != GL_LINEAR_MIPMAP_NEAREST &&
-                param != GL_NEAREST_MIPMAP_LINEAR && param != GL_LINEAR_MIPMAP_LINEAR) {
+            if (param != GL_NEAREST && param != GL_LINEAR && param != GL_NEAREST_MIPMAP_NEAREST &&
+                param != GL_LINEAR_MIPMAP_NEAREST && param != GL_NEAREST_MIPMAP_LINEAR &&
+                param != GL_LINEAR_MIPMAP_LINEAR) {
                 sgl_set_error(ctx, GL_INVALID_ENUM);
                 return;
             }
@@ -613,15 +691,25 @@ GL_APICALL void GL_APIENTRY glTexParameteri(GLenum target, GLenum pname, GLint p
     }
 
     GLuint tex_id = sgl_get_bound_texture(ctx, target);
-    if (tex_id == 0) return;  /* Default texture — validated but silently ignored */
+    if (tex_id == 0)
+        return; /* Default texture — validated but silently ignored */
     sgl_texture_t *tex = GET_TEXTURE(tex_id);
-    if (!tex) return;
+    if (!tex)
+        return;
 
     switch (pname) {
-        case GL_TEXTURE_MIN_FILTER: tex->min_filter = (GLenum)param; break;
-        case GL_TEXTURE_MAG_FILTER: tex->mag_filter = (GLenum)param; break;
-        case GL_TEXTURE_WRAP_S:     tex->wrap_s = (GLenum)param; break;
-        case GL_TEXTURE_WRAP_T:     tex->wrap_t = (GLenum)param; break;
+        case GL_TEXTURE_MIN_FILTER:
+            tex->min_filter = (GLenum)param;
+            break;
+        case GL_TEXTURE_MAG_FILTER:
+            tex->mag_filter = (GLenum)param;
+            break;
+        case GL_TEXTURE_WRAP_S:
+            tex->wrap_s = (GLenum)param;
+            break;
+        case GL_TEXTURE_WRAP_T:
+            tex->wrap_t = (GLenum)param;
+            break;
     }
 
     SGL_TRACE_TEXTURE("glTexParameteri(0x%X, 0x%X, %d)", target, pname, param);
@@ -642,7 +730,8 @@ GL_APICALL void GL_APIENTRY glGetTexParameterfv(GLenum target, GLenum pname, GLf
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
-    if (!params) return;
+    if (!params)
+        return;
 
     if (target != GL_TEXTURE_2D && target != GL_TEXTURE_CUBE_MAP) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
@@ -665,10 +754,18 @@ GL_APICALL void GL_APIENTRY glGetTexParameterfv(GLenum target, GLenum pname, GLf
     }
 
     switch (pname) {
-        case GL_TEXTURE_MIN_FILTER: *params = (GLfloat)tex->min_filter; break;
-        case GL_TEXTURE_MAG_FILTER: *params = (GLfloat)tex->mag_filter; break;
-        case GL_TEXTURE_WRAP_S:     *params = (GLfloat)tex->wrap_s;     break;
-        case GL_TEXTURE_WRAP_T:     *params = (GLfloat)tex->wrap_t;     break;
+        case GL_TEXTURE_MIN_FILTER:
+            *params = (GLfloat)tex->min_filter;
+            break;
+        case GL_TEXTURE_MAG_FILTER:
+            *params = (GLfloat)tex->mag_filter;
+            break;
+        case GL_TEXTURE_WRAP_S:
+            *params = (GLfloat)tex->wrap_s;
+            break;
+        case GL_TEXTURE_WRAP_T:
+            *params = (GLfloat)tex->wrap_t;
+            break;
     }
 }
 
@@ -676,7 +773,8 @@ GL_APICALL void GL_APIENTRY glGetTexParameteriv(GLenum target, GLenum pname, GLi
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
-    if (!params) return;
+    if (!params)
+        return;
 
     if (target != GL_TEXTURE_2D && target != GL_TEXTURE_CUBE_MAP) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
@@ -698,10 +796,18 @@ GL_APICALL void GL_APIENTRY glGetTexParameteriv(GLenum target, GLenum pname, GLi
     }
 
     switch (pname) {
-        case GL_TEXTURE_MIN_FILTER: *params = (GLint)tex->min_filter; break;
-        case GL_TEXTURE_MAG_FILTER: *params = (GLint)tex->mag_filter; break;
-        case GL_TEXTURE_WRAP_S:     *params = (GLint)tex->wrap_s;     break;
-        case GL_TEXTURE_WRAP_T:     *params = (GLint)tex->wrap_t;     break;
+        case GL_TEXTURE_MIN_FILTER:
+            *params = (GLint)tex->min_filter;
+            break;
+        case GL_TEXTURE_MAG_FILTER:
+            *params = (GLint)tex->mag_filter;
+            break;
+        case GL_TEXTURE_WRAP_S:
+            *params = (GLint)tex->wrap_s;
+            break;
+        case GL_TEXTURE_WRAP_T:
+            *params = (GLint)tex->wrap_t;
+            break;
     }
 }
 
@@ -757,7 +863,8 @@ GL_APICALL void GL_APIENTRY glGenerateMipmap(GLenum target) {
 }
 
 GL_APICALL void GL_APIENTRY glCopyTexImage2D(GLenum target, GLint level, GLenum internalformat,
-                                              GLint x, GLint y, GLsizei width, GLsizei height, GLint border) {
+                                             GLint x, GLint y, GLsizei width, GLsizei height,
+                                             GLint border) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
@@ -820,7 +927,8 @@ GL_APICALL void GL_APIENTRY glCopyTexImage2D(GLenum target, GLint level, GLenum 
     }
 
     GLuint tex_id = sgl_get_bound_texture(ctx, target);
-    if (tex_id == 0) return;  /* Default texture — no-op */
+    if (tex_id == 0)
+        return; /* Default texture — no-op */
     sgl_texture_t *tex = GET_TEXTURE(tex_id);
     if (!tex) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
@@ -828,7 +936,7 @@ GL_APICALL void GL_APIENTRY glCopyTexImage2D(GLenum target, GLint level, GLenum 
     }
 
     /* Update GL-level texture state — only update base dimensions at level 0 */
-    tex->used = true;  /* Mark texture as used (critical for draw-time binding) */
+    tex->used = true; /* Mark texture as used (critical for draw-time binding) */
     if (level == 0) {
         tex->width = width;
         tex->height = height;
@@ -838,16 +946,17 @@ GL_APICALL void GL_APIENTRY glCopyTexImage2D(GLenum target, GLint level, GLenum 
 
     /* Delegate to backend */
     if (ctx->backend->ops->copy_tex_image_2d) {
-        ctx->backend->ops->copy_tex_image_2d(ctx->backend, tex_id,
-                                              target, level, internalformat,
-                                              x, y, width, height);
+        ctx->backend->ops->copy_tex_image_2d(ctx->backend, tex_id, target, level, internalformat, x,
+                                             y, width, height);
     }
 
-    SGL_TRACE_TEXTURE("glCopyTexImage2D(target=0x%X, %dx%d from (%d,%d))", target, width, height, x, y);
+    SGL_TRACE_TEXTURE("glCopyTexImage2D(target=0x%X, %dx%d from (%d,%d))", target, width, height, x,
+                      y);
 }
 
-GL_APICALL void GL_APIENTRY glCopyTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset,
-                                                 GLint x, GLint y, GLsizei width, GLsizei height) {
+GL_APICALL void GL_APIENTRY glCopyTexSubImage2D(GLenum target, GLint level, GLint xoffset,
+                                                GLint yoffset, GLint x, GLint y, GLsizei width,
+                                                GLsizei height) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
@@ -888,7 +997,8 @@ GL_APICALL void GL_APIENTRY glCopyTexSubImage2D(GLenum target, GLint level, GLin
     }
 
     GLuint tex_id = sgl_get_bound_texture(ctx, target);
-    if (tex_id == 0) return;  /* Default texture — no-op */
+    if (tex_id == 0)
+        return; /* Default texture — no-op */
     sgl_texture_t *tex = GET_TEXTURE(tex_id);
     if (!tex) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
@@ -896,27 +1006,25 @@ GL_APICALL void GL_APIENTRY glCopyTexSubImage2D(GLenum target, GLint level, GLin
     }
 
     /* Validate offsets + size against texture dimensions */
-    if (xoffset + width > (GLsizei)tex->width ||
-        yoffset + height > (GLsizei)tex->height) {
+    if (xoffset + width > (GLsizei)tex->width || yoffset + height > (GLsizei)tex->height) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
 
     /* Delegate to backend */
     if (ctx->backend->ops->copy_tex_sub_image_2d) {
-        ctx->backend->ops->copy_tex_sub_image_2d(ctx->backend, tex_id,
-                                                  target, level,
-                                                  xoffset, yoffset,
-                                                  x, y, width, height);
+        ctx->backend->ops->copy_tex_sub_image_2d(ctx->backend, tex_id, target, level, xoffset,
+                                                 yoffset, x, y, width, height);
     }
 
-    SGL_TRACE_TEXTURE("glCopyTexSubImage2D(offset=%d,%d from (%d,%d) %dx%d)",
-                      xoffset, yoffset, x, y, width, height);
+    SGL_TRACE_TEXTURE("glCopyTexSubImage2D(offset=%d,%d from (%d,%d) %dx%d)", xoffset, yoffset, x,
+                      y, width, height);
 }
 
-GL_APICALL void GL_APIENTRY glCompressedTexImage2D(GLenum target, GLint level, GLenum internalformat,
-                                                    GLsizei width, GLsizei height, GLint border,
-                                                    GLsizei imageSize, const void *data) {
+GL_APICALL void GL_APIENTRY glCompressedTexImage2D(GLenum target, GLint level,
+                                                   GLenum internalformat, GLsizei width,
+                                                   GLsizei height, GLint border, GLsizei imageSize,
+                                                   const void *data) {
     /* Ensure frame is ready before GPU work */
     sgl_ensure_frame_ready();
 
@@ -979,7 +1087,8 @@ GL_APICALL void GL_APIENTRY glCompressedTexImage2D(GLenum target, GLint level, G
 
     /* Get bound texture */
     GLuint tex_id = sgl_get_bound_texture(ctx, target);
-    if (tex_id == 0) return;  /* Default texture — no-op */
+    if (tex_id == 0)
+        return; /* Default texture — no-op */
     sgl_texture_t *tex = GET_TEXTURE(tex_id);
     if (!tex) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
@@ -997,19 +1106,18 @@ GL_APICALL void GL_APIENTRY glCompressedTexImage2D(GLenum target, GLint level, G
 
     /* Delegate to backend for actual GPU texture creation and upload */
     if (ctx->backend->ops->compressed_texture_image_2d) {
-        ctx->backend->ops->compressed_texture_image_2d(ctx->backend, tex_id,
-                                                        target, level, internalformat,
-                                                        width, height,
-                                                        imageSize, data);
+        ctx->backend->ops->compressed_texture_image_2d(
+            ctx->backend, tex_id, target, level, internalformat, width, height, imageSize, data);
     }
 
-    SGL_TRACE_TEXTURE("glCompressedTexImage2D(target=0x%X, %dx%d, format=0x%X, size=%d)",
-                      target, width, height, internalformat, imageSize);
+    SGL_TRACE_TEXTURE("glCompressedTexImage2D(target=0x%X, %dx%d, format=0x%X, size=%d)", target,
+                      width, height, internalformat, imageSize);
 }
 
-GL_APICALL void GL_APIENTRY glCompressedTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset,
-                                                       GLsizei width, GLsizei height, GLenum format,
-                                                       GLsizei imageSize, const void *data) {
+GL_APICALL void GL_APIENTRY glCompressedTexSubImage2D(GLenum target, GLint level, GLint xoffset,
+                                                      GLint yoffset, GLsizei width, GLsizei height,
+                                                      GLenum format, GLsizei imageSize,
+                                                      const void *data) {
     /* Ensure frame is ready before GPU work */
     sgl_ensure_frame_ready();
 
@@ -1044,10 +1152,12 @@ GL_APICALL void GL_APIENTRY glCompressedTexSubImage2D(GLenum target, GLint level
         }
     }
 
-    if (width == 0 || height == 0) return;
+    if (width == 0 || height == 0)
+        return;
 
     GLuint tex_id = sgl_get_bound_texture(ctx, target);
-    if (tex_id == 0) return;  /* Default texture — no-op */
+    if (tex_id == 0)
+        return; /* Default texture — no-op */
     sgl_texture_t *tex = GET_TEXTURE(tex_id);
     if (!tex) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
@@ -1056,12 +1166,11 @@ GL_APICALL void GL_APIENTRY glCompressedTexSubImage2D(GLenum target, GLint level
 
     /* Delegate to backend for actual GPU texture update */
     if (ctx->backend->ops->compressed_texture_sub_image_2d) {
-        ctx->backend->ops->compressed_texture_sub_image_2d(ctx->backend, tex_id,
-                                                            target, level,
-                                                            xoffset, yoffset,
-                                                            width, height,
-                                                            format, imageSize, data);
+        ctx->backend->ops->compressed_texture_sub_image_2d(ctx->backend, tex_id, target, level,
+                                                           xoffset, yoffset, width, height, format,
+                                                           imageSize, data);
     }
 
-    SGL_TRACE_TEXTURE("glCompressedTexSubImage2D(offset=%d,%d size=%dx%d)", xoffset, yoffset, width, height);
+    SGL_TRACE_TEXTURE("glCompressedTexSubImage2D(offset=%d,%d size=%dx%d)", xoffset, yoffset, width,
+                      height);
 }

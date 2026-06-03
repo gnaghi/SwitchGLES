@@ -25,14 +25,11 @@ typedef struct sgl_state_viewport {
 void sgl_state_viewport_init(sgl_state_viewport_t *state, int width, int height);
 
 /* Viewport update functions - return true if value changed */
-bool sgl_state_viewport_set(sgl_state_viewport_t *state,
-                             int x, int y, int width, int height);
-bool sgl_state_viewport_set_depth_range(sgl_state_viewport_t *state,
-                                         float near_val, float far_val);
+bool sgl_state_viewport_set(sgl_state_viewport_t *state, int x, int y, int width, int height);
+bool sgl_state_viewport_set_depth_range(sgl_state_viewport_t *state, float near_val, float far_val);
 
 /* Scissor update functions */
-bool sgl_state_scissor_set(sgl_state_viewport_t *state,
-                            int x, int y, int width, int height);
+bool sgl_state_scissor_set(sgl_state_viewport_t *state, int x, int y, int width, int height);
 bool sgl_state_scissor_set_enabled(sgl_state_viewport_t *state, bool enabled);
 
 #endif /* SGL_STATE_VIEWPORT_H */

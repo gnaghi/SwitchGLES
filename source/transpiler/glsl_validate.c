@@ -11,15 +11,10 @@
 
 /* Check if name (of length len) is a GLSL built-in type name */
 static int is_glsl_type_name(const char *name, int len) {
-    static const char *types[] = {
-        "bool", "int", "float", "void",
-        "vec2", "vec3", "vec4",
-        "ivec2", "ivec3", "ivec4",
-        "bvec2", "bvec3", "bvec4",
-        "mat2", "mat3", "mat4",
-        "sampler2D", "samplerCube",
-        NULL
-    };
+    static const char *types[] = {"bool",  "int",       "float",       "void",  "vec2",
+                                  "vec3",  "vec4",      "ivec2",       "ivec3", "ivec4",
+                                  "bvec2", "bvec3",     "bvec4",       "mat2",  "mat3",
+                                  "mat4",  "sampler2D", "samplerCube", NULL};
     for (int i = 0; types[i]; i++)
         if ((int)strlen(types[i]) == len && strncmp(name, types[i], len) == 0)
             return 1;
@@ -29,18 +24,29 @@ static int is_glsl_type_name(const char *name, int len) {
 /* Check if name (of length len) is a GLSL ES 1.00 built-in function.
  * Constant expressions may include built-in function calls per §5.10. */
 static int is_glsl_builtin_func(const char *name, int len) {
-    static const char *funcs[] = {
-        "radians", "degrees", "sin", "cos", "tan", "asin", "acos", "atan",
-        "pow", "exp", "log", "exp2", "log2", "sqrt", "inversesqrt",
-        "abs", "sign", "floor", "ceil", "fract", "mod", "min", "max",
-        "clamp", "mix", "step", "smoothstep",
-        "length", "distance", "dot", "cross", "normalize",
-        "faceforward", "reflect", "refract",
-        "matrixCompMult",
-        "lessThan", "lessThanEqual", "greaterThan", "greaterThanEqual",
-        "equal", "notEqual", "any", "all", "not",
-        NULL
-    };
+    static const char *funcs[] = {"radians",     "degrees",
+                                  "sin",         "cos",
+                                  "tan",         "asin",
+                                  "acos",        "atan",
+                                  "pow",         "exp",
+                                  "log",         "exp2",
+                                  "log2",        "sqrt",
+                                  "inversesqrt", "abs",
+                                  "sign",        "floor",
+                                  "ceil",        "fract",
+                                  "mod",         "min",
+                                  "max",         "clamp",
+                                  "mix",         "step",
+                                  "smoothstep",  "length",
+                                  "distance",    "dot",
+                                  "cross",       "normalize",
+                                  "faceforward", "reflect",
+                                  "refract",     "matrixCompMult",
+                                  "lessThan",    "lessThanEqual",
+                                  "greaterThan", "greaterThanEqual",
+                                  "equal",       "notEqual",
+                                  "any",         "all",
+                                  "not",         NULL};
     for (int i = 0; funcs[i]; i++)
         if ((int)strlen(funcs[i]) == len && strncmp(name, funcs[i], len) == 0)
             return 1;
@@ -50,7 +56,7 @@ static int is_glsl_builtin_func(const char *name, int len) {
 /* Scan an expression for non-constant identifier references.
  * Returns pointer to first non-const identifier, or NULL if all OK. */
 static const char *find_nonconst_in_expr(glslt_ctx_t *ctx, const char *expr, int expr_len,
-                                          char const_names[][64], int num_consts) {
+                                         char const_names[][64], int num_consts) {
     const char *p = expr;
     const char *end = expr + expr_len;
 
@@ -60,7 +66,8 @@ static const char *find_nonconst_in_expr(glslt_ctx_t *ctx, const char *expr, int
             if (*p == '.') {
                 p++;
                 /* Skip member/swizzle name (e.g. .xyz, .field) */
-                while (p < end && is_ident_char(*p)) p++;
+                while (p < end && is_ident_char(*p))
+                    p++;
             } else {
                 p++;
             }
@@ -69,13 +76,15 @@ static const char *find_nonconst_in_expr(glslt_ctx_t *ctx, const char *expr, int
 
         /* Numeric literal starting with digit — skip */
         if (*p >= '0' && *p <= '9') {
-            while (p < end && (is_ident_char(*p) || *p == '.')) p++;
+            while (p < end && (is_ident_char(*p) || *p == '.'))
+                p++;
             continue;
         }
 
         /* Identifier */
         const char *id = p;
-        while (p < end && is_ident_char(*p)) p++;
+        while (p < end && is_ident_char(*p))
+            p++;
         int id_len = (int)(p - id);
 
         /* true/false */
@@ -98,17 +107,18 @@ static const char *find_nonconst_in_expr(glslt_ctx_t *ctx, const char *expr, int
         /* Known const variable */
         int found = 0;
         for (int i = 0; i < num_consts; i++) {
-            if ((int)strlen(const_names[i]) == id_len &&
-                strncmp(const_names[i], id, id_len) == 0) {
+            if ((int)strlen(const_names[i]) == id_len && strncmp(const_names[i], id, id_len) == 0) {
                 found = 1;
                 break;
             }
         }
-        if (found) continue;
+        if (found)
+            continue;
 
         /* Check if followed by '(' — function call */
         const char *q = p;
-        while (q < end && (*q == ' ' || *q == '\t')) q++;
+        while (q < end && (*q == ' ' || *q == '\t'))
+            q++;
         if (q < end && *q == '(') {
             if (is_glsl_builtin_func(id, id_len) || is_glsl_type_name(id, id_len))
                 continue;
@@ -118,8 +128,10 @@ static const char *find_nonconst_in_expr(glslt_ctx_t *ctx, const char *expr, int
             {
                 char tmp[64];
                 int tl = id_len < 63 ? id_len : 63;
-                memcpy(tmp, id, tl); tmp[tl] = '\0';
-                if (find_struct_def(ctx, tmp)) continue;
+                memcpy(tmp, id, tl);
+                tmp[tl] = '\0';
+                if (find_struct_def(ctx, tmp))
+                    continue;
             }
             return id; /* User function call — not constant */
         }
@@ -134,8 +146,7 @@ static const char *find_nonconst_in_expr(glslt_ctx_t *ctx, const char *expr, int
 /* Validate that local const variables are initialized from constant expressions
  * per GLES 1.00 §5.10. Source must be normalized (one statement per line).
  * Returns 1 if valid, 0 if invalid. */
-int validate_const_initializers(glslt_ctx_t *ctx, const char *source,
-                                        char *error, int error_size) {
+int validate_const_initializers(glslt_ctx_t *ctx, const char *source, char *error, int error_size) {
     char const_names[128][64];
     int num_consts = 0;
     int brace_depth = 0;
@@ -145,23 +156,34 @@ int validate_const_initializers(glslt_ctx_t *ctx, const char *source,
     const char *line = source;
     while (*line) {
         const char *eol = line;
-        while (*eol && *eol != '\n') eol++;
+        while (*eol && *eol != '\n')
+            eol++;
         int line_len = (int)(eol - line);
 
         /* Handle ongoing block comment */
         if (in_block_comment) {
             const char *close = NULL;
             for (const char *s = line; s < line + line_len - 1; s++) {
-                if (s[0] == '*' && s[1] == '/') { close = s; break; }
+                if (s[0] == '*' && s[1] == '/') {
+                    close = s;
+                    break;
+                }
             }
             if (close) {
                 in_block_comment = 0;
                 /* Track braces in rest of line after comment close */
                 for (const char *b = close + 2; b < line + line_len; b++) {
-                    if (*b == '{') brace_depth++;
-                    else if (*b == '}') { if (brace_depth > 0) brace_depth--; }
-                    else if (*b == '(') paren_depth++;
-                    else if (*b == ')') { if (paren_depth > 0) paren_depth--; }
+                    if (*b == '{')
+                        brace_depth++;
+                    else if (*b == '}') {
+                        if (brace_depth > 0)
+                            brace_depth--;
+                    } else if (*b == '(')
+                        paren_depth++;
+                    else if (*b == ')') {
+                        if (paren_depth > 0)
+                            paren_depth--;
+                    }
                 }
             }
             line = (*eol) ? eol + 1 : eol;
@@ -170,16 +192,26 @@ int validate_const_initializers(glslt_ctx_t *ctx, const char *source,
 
         /* Find effective start (skip leading whitespace) */
         const char *p = line;
-        while (p < line + line_len && (*p == ' ' || *p == '\t')) p++;
-        if (p >= line + line_len) { line = (*eol) ? eol + 1 : eol; continue; }
+        while (p < line + line_len && (*p == ' ' || *p == '\t'))
+            p++;
+        if (p >= line + line_len) {
+            line = (*eol) ? eol + 1 : eol;
+            continue;
+        }
 
         /* Skip preprocessor directives */
-        if (*p == '#') { line = (*eol) ? eol + 1 : eol; continue; }
+        if (*p == '#') {
+            line = (*eol) ? eol + 1 : eol;
+            continue;
+        }
 
         /* Check for line comment */
         const char *lc = NULL;
         for (const char *s = p; s < line + line_len - 1; s++) {
-            if (s[0] == '/' && s[1] == '/') { lc = s; break; }
+            if (s[0] == '/' && s[1] == '/') {
+                lc = s;
+                break;
+            }
         }
         int effective_len = lc ? (int)(lc - line) : line_len;
 
@@ -188,7 +220,10 @@ int validate_const_initializers(glslt_ctx_t *ctx, const char *source,
             if (s[0] == '/' && s[1] == '*') {
                 const char *close = NULL;
                 for (const char *t = s + 2; t < line + effective_len - 1; t++) {
-                    if (t[0] == '*' && t[1] == '/') { close = t; break; }
+                    if (t[0] == '*' && t[1] == '/') {
+                        close = t;
+                        break;
+                    }
                 }
                 if (!close) {
                     in_block_comment = 1;
@@ -203,42 +238,57 @@ int validate_const_initializers(glslt_ctx_t *ctx, const char *source,
 
         /* Track braces and parens (for function parameters vs declarations) */
         for (const char *b = line; b < line + effective_len; b++) {
-            if (*b == '{') brace_depth++;
-            else if (*b == '}') { if (brace_depth > 0) brace_depth--; }
-            else if (*b == '(') paren_depth++;
-            else if (*b == ')') { if (paren_depth > 0) paren_depth--; }
+            if (*b == '{')
+                brace_depth++;
+            else if (*b == '}') {
+                if (brace_depth > 0)
+                    brace_depth--;
+            } else if (*b == '(')
+                paren_depth++;
+            else if (*b == ')') {
+                if (paren_depth > 0)
+                    paren_depth--;
+            }
         }
 
         /* Only process const declarations when not inside parentheses
          * (avoids matching `const` in function parameters) */
         if (paren_depth == 0 && starts_with_word(p, "const")) {
             const char *c = p + 5;
-            while (*c == ' ' || *c == '\t') c++;
+            while (*c == ' ' || *c == '\t')
+                c++;
 
             /* Skip type */
             const char *type_start = c;
-            while (c < line + effective_len && is_ident_char(*c)) c++;
-            if (c == type_start) goto next_line;
-            while (*c == ' ' || *c == '\t') c++;
+            while (c < line + effective_len && is_ident_char(*c))
+                c++;
+            if (c == type_start)
+                goto next_line;
+            while (*c == ' ' || *c == '\t')
+                c++;
 
             /* Get variable name */
             const char *name_start = c;
-            while (c < line + effective_len && is_ident_char(*c)) c++;
+            while (c < line + effective_len && is_ident_char(*c))
+                c++;
             int name_len = (int)(c - name_start);
-            if (name_len == 0 || name_len >= 64) goto next_line;
+            if (name_len == 0 || name_len >= 64)
+                goto next_line;
 
-            while (*c == ' ' || *c == '\t') c++;
+            while (*c == ' ' || *c == '\t')
+                c++;
 
             if (*c == '=' && brace_depth > 0) {
                 c++; /* skip = */
                 /* Find semicolon */
                 const char *semi = c;
-                while (semi < line + effective_len && *semi != ';') semi++;
+                while (semi < line + effective_len && *semi != ';')
+                    semi++;
 
                 if (semi < line + effective_len) {
                     int expr_len = (int)(semi - c);
-                    const char *bad = find_nonconst_in_expr(ctx,
-                        c, expr_len, const_names, num_consts);
+                    const char *bad =
+                        find_nonconst_in_expr(ctx, c, expr_len, const_names, num_consts);
                     if (bad) {
                         snprintf(error, error_size,
                                  "'const' variable initializer must be a "
@@ -266,8 +316,7 @@ int validate_const_initializers(glslt_ctx_t *ctx, const char *source,
 /* Validate GLES 1.00 rules that are stricter than GLSL 4.60.
  * Must run on normalized source before transpilation.
  * Returns 1 if valid, 0 if invalid (error message written). */
-int validate_gles_semantics(const char *source, glslt_stage_t stage,
-                                    char *error, int error_size) {
+int validate_gles_semantics(const char *source, glslt_stage_t stage, char *error, int error_size) {
     int brace_depth = 0;
     int in_block_comment = 0;
     int in_line_comment = 0;
@@ -277,30 +326,73 @@ int validate_gles_semantics(const char *source, glslt_stage_t stage,
 
     while (*p) {
         /* Reset line comment on newline */
-        if (*p == '\n') { in_line_comment = 0; p++; continue; }
+        if (*p == '\n') {
+            in_line_comment = 0;
+            p++;
+            continue;
+        }
 
         /* Skip line comments */
-        if (in_line_comment) { p++; continue; }
+        if (in_line_comment) {
+            p++;
+            continue;
+        }
 
         /* Handle block comments */
         if (in_block_comment) {
-            if (p[0] == '*' && p[1] == '/') { in_block_comment = 0; p += 2; continue; }
-            p++; continue;
+            if (p[0] == '*' && p[1] == '/') {
+                in_block_comment = 0;
+                p += 2;
+                continue;
+            }
+            p++;
+            continue;
         }
 
         /* Detect comment starts */
-        if (p[0] == '/' && p[1] == '/') { in_line_comment = 1; p += 2; continue; }
-        if (p[0] == '/' && p[1] == '*') { in_block_comment = 1; p += 2; continue; }
+        if (p[0] == '/' && p[1] == '/') {
+            in_line_comment = 1;
+            p += 2;
+            continue;
+        }
+        if (p[0] == '/' && p[1] == '*') {
+            in_block_comment = 1;
+            p += 2;
+            continue;
+        }
 
         /* Skip string literals */
-        if (*p == '"') { p++; while (*p && *p != '"') { if (*p == '\\') p++; p++; } if (*p) p++; continue; }
+        if (*p == '"') {
+            p++;
+            while (*p && *p != '"') {
+                if (*p == '\\')
+                    p++;
+                p++;
+            }
+            if (*p)
+                p++;
+            continue;
+        }
 
         /* Skip preprocessor directives (they're valid anywhere) */
-        if (*p == '#') { while (*p && *p != '\n') p++; continue; }
+        if (*p == '#') {
+            while (*p && *p != '\n')
+                p++;
+            continue;
+        }
 
         /* Track braces */
-        if (*p == '{') { brace_depth++; p++; continue; }
-        if (*p == '}') { if (brace_depth > 0) brace_depth--; p++; continue; }
+        if (*p == '{') {
+            brace_depth++;
+            p++;
+            continue;
+        }
+        if (*p == '}') {
+            if (brace_depth > 0)
+                brace_depth--;
+            p++;
+            continue;
+        }
 
         /* GLES 1.00 §5.9: Reserved operators must cause compile error.
          * These are valid in desktop GLSL but not in ES 1.00. */
@@ -314,20 +406,38 @@ int validate_gles_semantics(const char *source, glslt_stage_t stage,
             return 0;
         }
         if (*p == '^') {
-            if (p[1] == '^') { p += 2; continue; } /* ^^ logical XOR, allowed — skip both */
-            if (p[1] == '=') { snprintf(error, error_size, "reserved operator '^=' in GLSL ES 1.00"); return 0; }
+            if (p[1] == '^') {
+                p += 2;
+                continue;
+            } /* ^^ logical XOR, allowed — skip both */
+            if (p[1] == '=') {
+                snprintf(error, error_size, "reserved operator '^=' in GLSL ES 1.00");
+                return 0;
+            }
             snprintf(error, error_size, "reserved operator '^' in GLSL ES 1.00");
             return 0;
         }
         if (*p == '&') {
-            if (p[1] == '&') { p += 2; continue; } /* && logical AND, allowed — skip both */
-            if (p[1] == '=') { snprintf(error, error_size, "reserved operator '&=' in GLSL ES 1.00"); return 0; }
+            if (p[1] == '&') {
+                p += 2;
+                continue;
+            } /* && logical AND, allowed — skip both */
+            if (p[1] == '=') {
+                snprintf(error, error_size, "reserved operator '&=' in GLSL ES 1.00");
+                return 0;
+            }
             snprintf(error, error_size, "reserved operator '&' in GLSL ES 1.00");
             return 0;
         }
         if (*p == '|') {
-            if (p[1] == '|') { p += 2; continue; } /* || logical OR, allowed — skip both */
-            if (p[1] == '=') { snprintf(error, error_size, "reserved operator '|=' in GLSL ES 1.00"); return 0; }
+            if (p[1] == '|') {
+                p += 2;
+                continue;
+            } /* || logical OR, allowed — skip both */
+            if (p[1] == '=') {
+                snprintf(error, error_size, "reserved operator '|=' in GLSL ES 1.00");
+                return 0;
+            }
             snprintf(error, error_size, "reserved operator '|' in GLSL ES 1.00");
             return 0;
         }
@@ -354,40 +464,37 @@ int validate_gles_semantics(const char *source, glslt_stage_t stage,
 
         /* Only check at start of identifiers (word boundary) */
         if (!is_ident_char(*p) || (p > source && is_ident_char(*(p - 1)))) {
-            p++; continue;
+            p++;
+            continue;
         }
 
         /* At word boundary — check for storage qualifier keywords */
         if (starts_with_word(p, "attribute")) {
             if (stage == GLSLT_FRAGMENT) {
-                snprintf(error, error_size,
-                         "'attribute' qualifier not allowed in fragment shader");
+                snprintf(error, error_size, "'attribute' qualifier not allowed in fragment shader");
                 return 0;
             }
             if (brace_depth > 0) {
-                snprintf(error, error_size,
-                         "'attribute' cannot be declared inside a function");
+                snprintf(error, error_size, "'attribute' cannot be declared inside a function");
                 return 0;
             }
         }
         if (starts_with_word(p, "varying")) {
             if (brace_depth > 0) {
-                snprintf(error, error_size,
-                         "'varying' cannot be declared inside a function");
+                snprintf(error, error_size, "'varying' cannot be declared inside a function");
                 return 0;
             }
             /* GLES 1.00: varyings cannot have struct type (§4.3.5) */
             const char *after_v = p + 7; /* skip "varying" */
-            while (*after_v == ' ' || *after_v == '\t') after_v++;
+            while (*after_v == ' ' || *after_v == '\t')
+                after_v++;
             if (starts_with_word(after_v, "struct")) {
-                snprintf(error, error_size,
-                         "struct type not allowed for varying");
+                snprintf(error, error_size, "struct type not allowed for varying");
                 return 0;
             }
         }
         if (starts_with_word(p, "uniform") && brace_depth > 0) {
-            snprintf(error, error_size,
-                     "'uniform' cannot be declared inside a function");
+            snprintf(error, error_size, "'uniform' cannot be declared inside a function");
             return 0;
         }
 
@@ -401,14 +508,14 @@ int validate_gles_semantics(const char *source, glslt_stage_t stage,
         }
 
         /* Skip over identifier */
-        while (*p && is_ident_char(*p)) p++;
+        while (*p && is_ident_char(*p))
+            p++;
     }
 
     /* GLES2 §3.9.2: shader must not statically write to both gl_FragColor
      * and gl_FragData (even in dead code or unused functions) */
     if (has_frag_color_write && has_frag_data_write) {
-        snprintf(error, error_size,
-                 "cannot write to both gl_FragColor and gl_FragData");
+        snprintf(error, error_size, "cannot write to both gl_FragColor and gl_FragData");
         return 0;
     }
 
@@ -419,17 +526,17 @@ int validate_gles_semantics(const char *source, glslt_stage_t stage,
  * - #version must be first non-whitespace/non-comment line
  * - #version must be exactly 100
  * - #error must cause compile failure */
-int validate_preprocessor_directives(const char *source,
-                                             char *error, int error_size) {
+int validate_preprocessor_directives(const char *source, char *error, int error_size) {
     int in_block_comment = 0;
-    int found_noncomment_line = 0;  /* Have we seen a non-whitespace/non-comment line? */
-    (void)0;  /* found_version tracking done inline */
+    int found_noncomment_line = 0; /* Have we seen a non-whitespace/non-comment line? */
+    (void)0;                       /* found_version tracking done inline */
     const char *lp = source;
 
     while (*lp) {
         /* Extract line */
         const char *eol = lp;
-        while (*eol && *eol != '\n') eol++;
+        while (*eol && *eol != '\n')
+            eol++;
         int line_len = (int)(eol - lp);
 
         /* Check block comment state */
@@ -457,7 +564,7 @@ int validate_preprocessor_directives(const char *source,
                 continue;
             }
             if (p + 1 < line_end && p[0] == '/' && p[1] == '/') {
-                break;  /* Rest of line is comment */
+                break; /* Rest of line is comment */
             }
             if (*p != ' ' && *p != '\t' && *p != '\r') {
                 has_content = 1;
@@ -471,7 +578,8 @@ int validate_preprocessor_directives(const char *source,
 
         if (has_content && is_preprocessor && pp_start) {
             const char *dp = pp_start + 1;
-            while (*dp == ' ' || *dp == '\t') dp++;
+            while (*dp == ' ' || *dp == '\t')
+                dp++;
 
             /* Check #error directive — must cause compile failure */
             if (strncmp(dp, "error", 5) == 0 && !is_ident_char(dp[5])) {
@@ -482,16 +590,15 @@ int validate_preprocessor_directives(const char *source,
             /* Check #version directive */
             if (strncmp(dp, "version", 7) == 0 && !is_ident_char(dp[7])) {
                 if (found_noncomment_line) {
-                    snprintf(error, error_size,
-                             "#version must be the first statement in a shader");
+                    snprintf(error, error_size, "#version must be the first statement in a shader");
                     return 0;
                 }
                 const char *vp = dp + 7;
-                while (*vp == ' ' || *vp == '\t') vp++;
+                while (*vp == ' ' || *vp == '\t')
+                    vp++;
                 /* Must have a numeric version number */
                 if (*vp < '0' || *vp > '9') {
-                    snprintf(error, error_size,
-                             "invalid #version directive");
+                    snprintf(error, error_size, "invalid #version directive");
                     return 0;
                 }
                 int version_num = 0;
@@ -501,22 +608,21 @@ int validate_preprocessor_directives(const char *source,
                 }
                 /* Check for invalid tokens after version number (e.g. "100.0", "100 foobar") */
                 if (*vp == '.') {
-                    snprintf(error, error_size,
-                             "invalid #version directive (float literal)");
+                    snprintf(error, error_size, "invalid #version directive (float literal)");
                     return 0;
                 }
                 /* Skip whitespace, check for extra tokens */
-                while (*vp == ' ' || *vp == '\t') vp++;
+                while (*vp == ' ' || *vp == '\t')
+                    vp++;
                 if (*vp && *vp != '\n' && *vp != '\r' &&
                     !(vp[0] == '/' && (vp[1] == '/' || vp[1] == '*'))) {
-                    snprintf(error, error_size,
-                             "extra tokens after #version %d", version_num);
+                    snprintf(error, error_size, "extra tokens after #version %d", version_num);
                     return 0;
                 }
                 /* Version must be exactly 100 */
                 if (version_num != 100) {
-                    snprintf(error, error_size,
-                             "unsupported GLSL version %d (expected 100)", version_num);
+                    snprintf(error, error_size, "unsupported GLSL version %d (expected 100)",
+                             version_num);
                     return 0;
                 }
             }
@@ -536,28 +642,42 @@ int validate_preprocessor_directives(const char *source,
  * Tracks #define/#undef and checks that all identifiers in preprocessor
  * conditional expressions are defined (except as arguments to 'defined').
  * Handles short-circuit: "NONZERO || rest" and "ZERO && rest" skip rest. */
-int validate_preprocessor_undefined(const char *source,
-                                            char *error, int error_size) {
-    typedef struct { char name[64]; int value; } ppdef_t;
+int validate_preprocessor_undefined(const char *source, char *error, int error_size) {
+    typedef struct {
+        char name[64];
+        int value;
+    } ppdef_t;
     ppdef_t defs[256];
     int ndefs = 0;
     int in_block_comment = 0;
 
     /* Pre-define built-in macros (use snprintf for safety) */
-    snprintf(defs[ndefs].name, sizeof(defs[0].name), "GL_ES"); defs[ndefs].value = 1; ndefs++;
-    snprintf(defs[ndefs].name, sizeof(defs[0].name), "__VERSION__"); defs[ndefs].value = 100; ndefs++;
-    snprintf(defs[ndefs].name, sizeof(defs[0].name), "__LINE__"); defs[ndefs].value = 1; ndefs++;
-    snprintf(defs[ndefs].name, sizeof(defs[0].name), "__FILE__"); defs[ndefs].value = 0; ndefs++;
+    snprintf(defs[ndefs].name, sizeof(defs[0].name), "GL_ES");
+    defs[ndefs].value = 1;
+    ndefs++;
+    snprintf(defs[ndefs].name, sizeof(defs[0].name), "__VERSION__");
+    defs[ndefs].value = 100;
+    ndefs++;
+    snprintf(defs[ndefs].name, sizeof(defs[0].name), "__LINE__");
+    defs[ndefs].value = 1;
+    ndefs++;
+    snprintf(defs[ndefs].name, sizeof(defs[0].name), "__FILE__");
+    defs[ndefs].value = 0;
+    ndefs++;
 
     const char *line = source;
     while (*line) {
         const char *eol = line;
-        while (*eol && *eol != '\n') eol++;
+        while (*eol && *eol != '\n')
+            eol++;
 
         /* Handle block comments spanning lines */
         if (in_block_comment) {
             for (const char *c = line; c < eol - 1; c++) {
-                if (c[0] == '*' && c[1] == '/') { in_block_comment = 0; break; }
+                if (c[0] == '*' && c[1] == '/') {
+                    in_block_comment = 0;
+                    break;
+                }
             }
             line = (*eol) ? eol + 1 : eol;
             continue;
@@ -565,97 +685,128 @@ int validate_preprocessor_undefined(const char *source,
 
         /* Check for block comment start on this line */
         for (const char *c = line; c < eol - 1; c++) {
-            if (c[0] == '/' && c[1] == '/') break;  /* line comment — stop */
+            if (c[0] == '/' && c[1] == '/')
+                break; /* line comment — stop */
             if (c[0] == '/' && c[1] == '*') {
                 /* Check if closed on same line */
                 int closed = 0;
                 for (const char *d = c + 2; d < eol - 1; d++) {
-                    if (d[0] == '*' && d[1] == '/') { closed = 1; break; }
+                    if (d[0] == '*' && d[1] == '/') {
+                        closed = 1;
+                        break;
+                    }
                 }
-                if (!closed) in_block_comment = 1;
+                if (!closed)
+                    in_block_comment = 1;
                 break;
             }
         }
-        if (in_block_comment) { line = (*eol) ? eol + 1 : eol; continue; }
+        if (in_block_comment) {
+            line = (*eol) ? eol + 1 : eol;
+            continue;
+        }
 
         const char *p = line;
-        while (p < eol && (*p == ' ' || *p == '\t')) p++;
-        if (p >= eol || *p != '#') { line = (*eol) ? eol + 1 : eol; continue; }
+        while (p < eol && (*p == ' ' || *p == '\t'))
+            p++;
+        if (p >= eol || *p != '#') {
+            line = (*eol) ? eol + 1 : eol;
+            continue;
+        }
         p++;
-        while (p < eol && (*p == ' ' || *p == '\t')) p++;
+        while (p < eol && (*p == ' ' || *p == '\t'))
+            p++;
 
         if (strncmp(p, "define", 6) == 0 && (p + 6 >= eol || !is_ident_char(p[6]))) {
             p += 6;
-            while (p < eol && (*p == ' ' || *p == '\t')) p++;
+            while (p < eol && (*p == ' ' || *p == '\t'))
+                p++;
             const char *ns = p;
-            while (p < eol && is_ident_char(*p)) p++;
+            while (p < eol && is_ident_char(*p))
+                p++;
             int nl = (int)(p - ns);
             if (nl > 0 && nl < 64 && ndefs < 256) {
-                while (p < eol && (*p == ' ' || *p == '\t')) p++;
+                while (p < eol && (*p == ' ' || *p == '\t'))
+                    p++;
                 /* Skip function-like macro parens: #define FOO(x) ... */
                 if (p < eol && *p == '(') {
-                    while (p < eol && *p != ')') p++;
-                    if (p < eol) p++;
-                    while (p < eol && (*p == ' ' || *p == '\t')) p++;
+                    while (p < eol && *p != ')')
+                        p++;
+                    if (p < eol)
+                        p++;
+                    while (p < eol && (*p == ' ' || *p == '\t'))
+                        p++;
                 }
                 int val = 1;
                 if (p < eol && ((*p >= '0' && *p <= '9') || *p == '-')) {
-                    val = 0; int neg = 0;
-                    if (*p == '-') { neg = 1; p++; }
+                    val = 0;
+                    int neg = 0;
+                    if (*p == '-') {
+                        neg = 1;
+                        p++;
+                    }
                     while (p < eol && *p >= '0' && *p <= '9')
                         val = val * 10 + (*p++ - '0');
-                    if (neg) val = -val;
+                    if (neg)
+                        val = -val;
                 }
                 int found = -1;
                 for (int i = 0; i < ndefs; i++) {
-                    if ((int)strlen(defs[i].name) == nl &&
-                        strncmp(defs[i].name, ns, nl) == 0) { found = i; break; }
+                    if ((int)strlen(defs[i].name) == nl && strncmp(defs[i].name, ns, nl) == 0) {
+                        found = i;
+                        break;
+                    }
                 }
-                if (found >= 0) { defs[found].value = val; }
-                else {
+                if (found >= 0) {
+                    defs[found].value = val;
+                } else {
                     strncpy(defs[ndefs].name, ns, nl);
                     defs[ndefs].name[nl] = '\0';
                     defs[ndefs].value = val;
                     ndefs++;
                 }
             }
-        }
-        else if (strncmp(p, "undef", 5) == 0 && (p + 5 >= eol || !is_ident_char(p[5]))) {
+        } else if (strncmp(p, "undef", 5) == 0 && (p + 5 >= eol || !is_ident_char(p[5]))) {
             p += 5;
-            while (p < eol && (*p == ' ' || *p == '\t')) p++;
+            while (p < eol && (*p == ' ' || *p == '\t'))
+                p++;
             const char *ns = p;
-            while (p < eol && is_ident_char(*p)) p++;
+            while (p < eol && is_ident_char(*p))
+                p++;
             int nl = (int)(p - ns);
             for (int i = 0; i < ndefs; i++) {
-                if ((int)strlen(defs[i].name) == nl &&
-                    strncmp(defs[i].name, ns, nl) == 0) {
+                if ((int)strlen(defs[i].name) == nl && strncmp(defs[i].name, ns, nl) == 0) {
                     defs[i] = defs[--ndefs];
                     break;
                 }
             }
-        }
-        else if ((strncmp(p, "if", 2) == 0 && (p + 2 >= eol || !is_ident_char(p[2]))) ||
-                 (strncmp(p, "elif", 4) == 0 && (p + 4 >= eol || !is_ident_char(p[4])))) {
+        } else if ((strncmp(p, "if", 2) == 0 && (p + 2 >= eol || !is_ident_char(p[2]))) ||
+                   (strncmp(p, "elif", 4) == 0 && (p + 4 >= eol || !is_ident_char(p[4])))) {
             p += (p[0] == 'e') ? 4 : 2;
-            while (p < eol && (*p == ' ' || *p == '\t')) p++;
+            while (p < eol && (*p == ' ' || *p == '\t'))
+                p++;
 
             const char *expr_end = eol;
             for (const char *c = p; c < eol; c++) {
-                if (c + 1 < eol && c[0] == '/' && (c[1] == '/' || c[1] == '*'))
-                    { expr_end = c; break; }
+                if (c + 1 < eol && c[0] == '/' && (c[1] == '/' || c[1] == '*')) {
+                    expr_end = c;
+                    break;
+                }
             }
 
             /* Simple short-circuit: "LITERAL || rest" (nonzero) or "LITERAL && rest" (zero) */
             const char *scan_end = expr_end;
             const char *sp = p;
-            while (sp < expr_end && (*sp == ' ' || *sp == '\t')) sp++;
+            while (sp < expr_end && (*sp == ' ' || *sp == '\t'))
+                sp++;
             if (sp < expr_end && sp[0] >= '0' && sp[0] <= '9') {
                 int lit = 0;
                 const char *lp = sp;
                 while (lp < expr_end && *lp >= '0' && *lp <= '9')
                     lit = lit * 10 + (*lp++ - '0');
                 const char *ap = lp;
-                while (ap < expr_end && (*ap == ' ' || *ap == '\t')) ap++;
+                while (ap < expr_end && (*ap == ' ' || *ap == '\t'))
+                    ap++;
                 if (ap + 1 < expr_end && ap[0] == '|' && ap[1] == '|' && lit != 0)
                     scan_end = ap;
                 else if (ap + 1 < expr_end && ap[0] == '&' && ap[1] == '&' && lit == 0)
@@ -665,35 +816,48 @@ int validate_preprocessor_undefined(const char *source,
             /* Scan for undefined identifiers */
             const char *s = p;
             while (s < scan_end) {
-                if (!(isalpha((unsigned char)*s) || *s == '_')) { s++; continue; }
+                if (!(isalpha((unsigned char)*s) || *s == '_')) {
+                    s++;
+                    continue;
+                }
                 const char *is = s;
-                while (s < scan_end && is_ident_char(*s)) s++;
+                while (s < scan_end && is_ident_char(*s))
+                    s++;
                 int il = (int)(s - is);
 
                 /* Skip 'defined' keyword and its argument */
                 if (il == 7 && strncmp(is, "defined", 7) == 0) {
-                    while (s < scan_end && (*s == ' ' || *s == '\t')) s++;
+                    while (s < scan_end && (*s == ' ' || *s == '\t'))
+                        s++;
                     if (s < scan_end && *s == '(') {
                         s++;
-                        while (s < scan_end && (*s == ' ' || *s == '\t')) s++;
-                        while (s < scan_end && is_ident_char(*s)) s++;
-                        while (s < scan_end && (*s == ' ' || *s == '\t')) s++;
-                        if (s < scan_end && *s == ')') s++;
+                        while (s < scan_end && (*s == ' ' || *s == '\t'))
+                            s++;
+                        while (s < scan_end && is_ident_char(*s))
+                            s++;
+                        while (s < scan_end && (*s == ' ' || *s == '\t'))
+                            s++;
+                        if (s < scan_end && *s == ')')
+                            s++;
                     } else {
-                        while (s < scan_end && is_ident_char(*s)) s++;
+                        while (s < scan_end && is_ident_char(*s))
+                            s++;
                     }
                     continue;
                 }
 
                 int found = 0;
                 for (int i = 0; i < ndefs; i++) {
-                    if ((int)strlen(defs[i].name) == il &&
-                        strncmp(defs[i].name, is, il) == 0) { found = 1; break; }
+                    if ((int)strlen(defs[i].name) == il && strncmp(defs[i].name, is, il) == 0) {
+                        found = 1;
+                        break;
+                    }
                 }
                 if (!found) {
                     char buf[64];
                     int cl = il < 63 ? il : 63;
-                    strncpy(buf, is, cl); buf[cl] = '\0';
+                    strncpy(buf, is, cl);
+                    buf[cl] = '\0';
                     snprintf(error, error_size,
                              "undefined identifier '%s' in preprocessor expression", buf);
                     return 0;
@@ -710,88 +874,160 @@ int validate_preprocessor_undefined(const char *source,
  * Variables: invariant → storage(attribute/varying/uniform) → precision → type
  * Parameters: storage(const) → parameter(in/out/inout) → precision → type
  * Any reordering of qualifier groups is a compile error. */
-int validate_qualification_order(const char *source,
-                                         char *error, int error_size) {
+int validate_qualification_order(const char *source, char *error, int error_size) {
     int brace_depth = 0;
     int paren_depth = 0;
-    int in_comment = 0;  /* 0=none, 1=line, 2=block */
-    int last_qc = -1;    /* last qualifier class seen */
-    int in_params = 0;   /* inside function parameter list at global scope */
+    int in_comment = 0; /* 0=none, 1=line, 2=block */
+    int last_qc = -1;   /* last qualifier class seen */
+    int in_params = 0;  /* inside function parameter list at global scope */
 
     const char *p = source;
     while (*p) {
         if (*p == '\n') {
-            if (in_comment == 1) in_comment = 0;
-            p++; continue;
-        }
-        if (in_comment == 1) { p++; continue; }
-        if (in_comment == 2) {
-            if (p[0] == '*' && p[1] == '/') { in_comment = 0; p += 2; }
-            else p++;
+            if (in_comment == 1)
+                in_comment = 0;
+            p++;
             continue;
         }
-        if (p[0] == '/' && p[1] == '/') { in_comment = 1; p += 2; continue; }
-        if (p[0] == '/' && p[1] == '*') { in_comment = 2; p += 2; continue; }
-        if (*p == '#') { while (*p && *p != '\n') p++; continue; }
+        if (in_comment == 1) {
+            p++;
+            continue;
+        }
+        if (in_comment == 2) {
+            if (p[0] == '*' && p[1] == '/') {
+                in_comment = 0;
+                p += 2;
+            } else
+                p++;
+            continue;
+        }
+        if (p[0] == '/' && p[1] == '/') {
+            in_comment = 1;
+            p += 2;
+            continue;
+        }
+        if (p[0] == '/' && p[1] == '*') {
+            in_comment = 2;
+            p += 2;
+            continue;
+        }
+        if (*p == '#') {
+            while (*p && *p != '\n')
+                p++;
+            continue;
+        }
 
         if (*p == '(') {
-            if (brace_depth == 0) { in_params = 1; last_qc = -1; }
-            paren_depth++; p++; continue;
+            if (brace_depth == 0) {
+                in_params = 1;
+                last_qc = -1;
+            }
+            paren_depth++;
+            p++;
+            continue;
         }
         if (*p == ')') {
-            if (paren_depth > 0) paren_depth--;
-            if (paren_depth == 0) { in_params = 0; last_qc = -1; }
-            p++; continue;
+            if (paren_depth > 0)
+                paren_depth--;
+            if (paren_depth == 0) {
+                in_params = 0;
+                last_qc = -1;
+            }
+            p++;
+            continue;
         }
-        if (*p == '{') { brace_depth++; last_qc = -1; p++; continue; }
-        if (*p == '}') { if (brace_depth > 0) brace_depth--; last_qc = -1; p++; continue; }
-        if (*p == ';') { last_qc = -1; p++; continue; }
-        if (*p == ',' && in_params) { last_qc = -1; p++; continue; }
+        if (*p == '{') {
+            brace_depth++;
+            last_qc = -1;
+            p++;
+            continue;
+        }
+        if (*p == '}') {
+            if (brace_depth > 0)
+                brace_depth--;
+            last_qc = -1;
+            p++;
+            continue;
+        }
+        if (*p == ';') {
+            last_qc = -1;
+            p++;
+            continue;
+        }
+        if (*p == ',' && in_params) {
+            last_qc = -1;
+            p++;
+            continue;
+        }
 
-        if (!(isalpha((unsigned char)*p) || *p == '_')) { p++; continue; }
-        if (p > source && is_ident_char(*(p - 1))) { p++; continue; }
+        if (!(isalpha((unsigned char)*p) || *p == '_')) {
+            p++;
+            continue;
+        }
+        if (p > source && is_ident_char(*(p - 1))) {
+            p++;
+            continue;
+        }
 
         const char *w = p;
-        while (*p && is_ident_char(*p)) p++;
+        while (*p && is_ident_char(*p))
+            p++;
         int wl = (int)(p - w);
 
         /* Only check at global scope (not inside function bodies) */
-        if (brace_depth > 0) continue;
+        if (brace_depth > 0)
+            continue;
 
         int qc = -1;
         if (!in_params) {
             /* Global variable: invariant=0, storage=1, precision=2 */
-            if (wl == 9 && strncmp(w, "invariant", 9) == 0) qc = 0;
-            else if (wl == 9 && strncmp(w, "attribute", 9) == 0) qc = 1;
-            else if (wl == 7 && strncmp(w, "varying", 7) == 0) qc = 1;
-            else if (wl == 7 && strncmp(w, "uniform", 7) == 0) qc = 1;
-            else if (wl == 4 && strncmp(w, "lowp", 4) == 0) qc = 2;
-            else if (wl == 7 && strncmp(w, "mediump", 7) == 0) qc = 2;
-            else if (wl == 5 && strncmp(w, "highp", 5) == 0) qc = 2;
+            if (wl == 9 && strncmp(w, "invariant", 9) == 0)
+                qc = 0;
+            else if (wl == 9 && strncmp(w, "attribute", 9) == 0)
+                qc = 1;
+            else if (wl == 7 && strncmp(w, "varying", 7) == 0)
+                qc = 1;
+            else if (wl == 7 && strncmp(w, "uniform", 7) == 0)
+                qc = 1;
+            else if (wl == 4 && strncmp(w, "lowp", 4) == 0)
+                qc = 2;
+            else if (wl == 7 && strncmp(w, "mediump", 7) == 0)
+                qc = 2;
+            else if (wl == 5 && strncmp(w, "highp", 5) == 0)
+                qc = 2;
         } else {
             /* Function parameter: storage(const)=0, param(in/out/inout)=1, precision=2 */
-            if (wl == 5 && strncmp(w, "const", 5) == 0) qc = 0;
-            else if (wl == 5 && strncmp(w, "inout", 5) == 0) qc = 1;
-            else if (wl == 3 && strncmp(w, "out", 3) == 0) qc = 1;
-            else if (wl == 2 && strncmp(w, "in", 2) == 0) qc = 1;
-            else if (wl == 4 && strncmp(w, "lowp", 4) == 0) qc = 2;
-            else if (wl == 7 && strncmp(w, "mediump", 7) == 0) qc = 2;
-            else if (wl == 5 && strncmp(w, "highp", 5) == 0) qc = 2;
+            if (wl == 5 && strncmp(w, "const", 5) == 0)
+                qc = 0;
+            else if (wl == 5 && strncmp(w, "inout", 5) == 0)
+                qc = 1;
+            else if (wl == 3 && strncmp(w, "out", 3) == 0)
+                qc = 1;
+            else if (wl == 2 && strncmp(w, "in", 2) == 0)
+                qc = 1;
+            else if (wl == 4 && strncmp(w, "lowp", 4) == 0)
+                qc = 2;
+            else if (wl == 7 && strncmp(w, "mediump", 7) == 0)
+                qc = 2;
+            else if (wl == 5 && strncmp(w, "highp", 5) == 0)
+                qc = 2;
         }
 
         if (qc >= 0) {
             if (qc < last_qc) {
                 char qb[32];
                 int cl = wl < 31 ? wl : 31;
-                strncpy(qb, w, cl); qb[cl] = '\0';
+                strncpy(qb, w, cl);
+                qb[cl] = '\0';
                 snprintf(error, error_size,
                          "incorrect qualification order: '%s' cannot appear after "
-                         "a higher-precedence qualifier", qb);
+                         "a higher-precedence qualifier",
+                         qb);
                 return 0;
             }
             last_qc = qc;
         } else {
-            last_qc = -1;  /* non-qualifier word → reset */
+            last_qc = -1; /* non-qualifier word → reset */
         }
     }
     return 1;
@@ -802,34 +1038,62 @@ int validate_qualification_order(const char *source,
  * - texture2DLod/textureCubeLod → vertex only
  * - texture2DProj with bias → fragment only
  * - texture2DProjLod → vertex only */
-int validate_texture_functions(const char *source, glslt_stage_t stage,
-                                       char *error, int error_size) {
+int validate_texture_functions(const char *source, glslt_stage_t stage, char *error,
+                               int error_size) {
     int in_comment = 0;
     const char *p = source;
 
     while (*p) {
-        if (*p == '\n') { if (in_comment == 1) in_comment = 0; p++; continue; }
-        if (in_comment == 1) { p++; continue; }
-        if (in_comment == 2) {
-            if (p[0] == '*' && p[1] == '/') { in_comment = 0; p += 2; }
-            else p++;
+        if (*p == '\n') {
+            if (in_comment == 1)
+                in_comment = 0;
+            p++;
             continue;
         }
-        if (p[0] == '/' && p[1] == '/') { in_comment = 1; p += 2; continue; }
-        if (p[0] == '/' && p[1] == '*') { in_comment = 2; p += 2; continue; }
-        if (*p == '#') { while (*p && *p != '\n') p++; continue; }
+        if (in_comment == 1) {
+            p++;
+            continue;
+        }
+        if (in_comment == 2) {
+            if (p[0] == '*' && p[1] == '/') {
+                in_comment = 0;
+                p += 2;
+            } else
+                p++;
+            continue;
+        }
+        if (p[0] == '/' && p[1] == '/') {
+            in_comment = 1;
+            p += 2;
+            continue;
+        }
+        if (p[0] == '/' && p[1] == '*') {
+            in_comment = 2;
+            p += 2;
+            continue;
+        }
+        if (*p == '#') {
+            while (*p && *p != '\n')
+                p++;
+            continue;
+        }
 
-        if (!(isalpha((unsigned char)*p) || *p == '_') ||
-            (p > source && is_ident_char(*(p - 1)))) { p++; continue; }
+        if (!(isalpha((unsigned char)*p) || *p == '_') || (p > source && is_ident_char(*(p - 1)))) {
+            p++;
+            continue;
+        }
 
         const char *w = p;
-        while (*p && is_ident_char(*p)) p++;
+        while (*p && is_ident_char(*p))
+            p++;
         int wl = (int)(p - w);
 
         /* Skip to check if followed by '(' */
         const char *a = p;
-        while (*a == ' ' || *a == '\t') a++;
-        if (*a != '(') continue;
+        while (*a == ' ' || *a == '\t')
+            a++;
+        if (*a != '(')
+            continue;
 
         if (stage == GLSLT_FRAGMENT) {
             /* Fragment: reject Lod variants (vertex-only) */
@@ -838,13 +1102,12 @@ int validate_texture_functions(const char *source, glslt_stage_t stage,
                 (wl == 16 && strncmp(w, "texture2DProjLod", 16) == 0)) {
                 char nb[32];
                 int cl = wl < 31 ? wl : 31;
-                strncpy(nb, w, cl); nb[cl] = '\0';
-                snprintf(error, error_size,
-                         "'%s' is not available in fragment shader", nb);
+                strncpy(nb, w, cl);
+                nb[cl] = '\0';
+                snprintf(error, error_size, "'%s' is not available in fragment shader", nb);
                 return 0;
             }
-        }
-        else if (stage == GLSLT_VERTEX) {
+        } else if (stage == GLSLT_VERTEX) {
             /* Vertex: reject bias variants (3-arg texture2D/textureCube/texture2DProj) */
             if ((wl == 9 && strncmp(w, "texture2D", 9) == 0) ||
                 (wl == 11 && strncmp(w, "textureCube", 11) == 0) ||
@@ -853,15 +1116,19 @@ int validate_texture_functions(const char *source, glslt_stage_t stage,
                 const char *cp = a + 1;
                 int depth = 1, commas = 0;
                 while (*cp && depth > 0) {
-                    if (*cp == '(') depth++;
-                    else if (*cp == ')') depth--;
-                    else if (*cp == ',' && depth == 1) commas++;
+                    if (*cp == '(')
+                        depth++;
+                    else if (*cp == ')')
+                        depth--;
+                    else if (*cp == ',' && depth == 1)
+                        commas++;
                     cp++;
                 }
                 if (commas >= 2) {
                     char nb[32];
                     int cl = wl < 31 ? wl : 31;
-                    strncpy(nb, w, cl); nb[cl] = '\0';
+                    strncpy(nb, w, cl);
+                    nb[cl] = '\0';
                     snprintf(error, error_size,
                              "'%s' with bias parameter is not available in vertex shader", nb);
                     return 0;
@@ -871,4 +1138,3 @@ int validate_texture_functions(const char *source, glslt_stage_t stage,
     }
     return 1;
 }
-

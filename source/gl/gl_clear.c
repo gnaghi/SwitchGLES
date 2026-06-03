@@ -47,10 +47,8 @@ GL_APICALL void GL_APIENTRY glClear(GLbitfield mask) {
 
     /* Delegate to backend for actual clear operations */
     if (ctx->backend->ops->clear) {
-        ctx->backend->ops->clear(ctx->backend, mask,
-                                  ctx->color_state.clear_color,
-                                  ctx->depth_state.clear_depth,
-                                  ctx->depth_state.clear_stencil);
+        ctx->backend->ops->clear(ctx->backend, mask, ctx->color_state.clear_color,
+                                 ctx->depth_state.clear_depth, ctx->depth_state.clear_stencil);
     }
 
     /* Re-apply combined depth-stencil state after clear if stencil was cleared.
@@ -78,10 +76,7 @@ GL_APICALL void GL_APIENTRY glViewport(GLint x, GLint y, GLsizei width, GLsizei 
         /* Apply via backend */
         if (ctx->backend->ops->apply_viewport) {
             sgl_viewport_state_t vs = {
-                x, y, width, height,
-                ctx->viewport_state.depth_near,
-                ctx->viewport_state.depth_far
-            };
+                x, y, width, height, ctx->viewport_state.depth_near, ctx->viewport_state.depth_far};
             ctx->backend->ops->apply_viewport(ctx->backend, &vs);
         }
     }
@@ -103,7 +98,7 @@ GL_APICALL void GL_APIENTRY glScissor(GLint x, GLint y, GLsizei width, GLsizei h
     if (sgl_state_scissor_set(&ctx->viewport_state, x, y, width, height)) {
         /* Apply via backend */
         if (ctx->backend->ops->apply_scissor) {
-            sgl_scissor_state_t ss = { x, y, width, height, true };
+            sgl_scissor_state_t ss = {x, y, width, height, true};
             ctx->backend->ops->apply_scissor(ctx->backend, &ss);
         }
     }
@@ -120,13 +115,12 @@ GL_APICALL void GL_APIENTRY glDepthRangef(GLfloat nearVal, GLfloat farVal) {
     if (sgl_state_viewport_set_depth_range(&ctx->viewport_state, nearVal, farVal)) {
         /* Apply via backend */
         if (ctx->backend->ops->apply_viewport) {
-            sgl_viewport_state_t vs = {
-                ctx->viewport_state.viewport_x,
-                ctx->viewport_state.viewport_y,
-                ctx->viewport_state.viewport_width,
-                ctx->viewport_state.viewport_height,
-                nearVal, farVal
-            };
+            sgl_viewport_state_t vs = {ctx->viewport_state.viewport_x,
+                                       ctx->viewport_state.viewport_y,
+                                       ctx->viewport_state.viewport_width,
+                                       ctx->viewport_state.viewport_height,
+                                       nearVal,
+                                       farVal};
             ctx->backend->ops->apply_viewport(ctx->backend, &vs);
         }
     }
