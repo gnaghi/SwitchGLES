@@ -44,9 +44,10 @@ void dk_delete_buffer(sgl_backend_t *be, sgl_handle_t handle) {
  * On alloc: first-fit search, then fall back to bump allocator.
  * ============================================================================ */
 
-void dk_buffer_free(sgl_backend_t *be, uint32_t offset, uint32_t size) {
-    dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
-
+/* Insert a freed block into the sorted VBO free-list, coalescing with the
+ * previous and/or next block. Shared by dk_buffer_free() and the deferred-free
+ * processing in dk_submit_and_reset() (both return blocks to the same list). */
+void dk_vbo_free_insert(dk_backend_data_t *dk, uint32_t offset, uint32_t size) {
     if (offset == 0 || size == 0) return;
 
     /* Only free blocks from the VBO region (not client_array or uniform) */
@@ -108,6 +109,10 @@ void dk_buffer_free(sgl_backend_t *be, uint32_t offset, uint32_t size) {
 
     SGL_TRACE_BUFFER("buffer_free: added block offset=%u size=%u (free_count=%d)",
                      offset, size, dk->vbo_free_count);
+}
+
+void dk_buffer_free(sgl_backend_t *be, uint32_t offset, uint32_t size) {
+    dk_vbo_free_insert((dk_backend_data_t *)be->impl_data, offset, size);
 }
 
 const void *dk_get_data_cpu_ptr(sgl_backend_t *be, uint32_t offset) {

@@ -182,49 +182,8 @@ void dk_submit_and_reset(dk_backend_data_t *dk) {
      * in-flight draws that reference them have completed. */
     if (dk->deferred_free_count > 0) {
         for (int i = 0; i < dk->deferred_free_count; i++) {
-            uint32_t offset = dk->deferred_free[i].offset;
-            uint32_t size = dk->deferred_free[i].size;
-            if (offset == 0 || size == 0) continue;
-            if (offset >= dk->client_array_base) continue;
-
-            /* Insert into free list (sorted by offset, with coalescing) */
-            int insertAt = 0;
-            while (insertAt < dk->vbo_free_count &&
-                   dk->vbo_free_list[insertAt].offset < offset)
-                insertAt++;
-
-            /* Try coalescing with previous */
-            if (insertAt > 0) {
-                sgl_vbo_free_block_t *prev = &dk->vbo_free_list[insertAt - 1];
-                if (prev->offset + prev->size == offset) {
-                    prev->size += size;
-                    if (insertAt < dk->vbo_free_count &&
-                        prev->offset + prev->size == dk->vbo_free_list[insertAt].offset) {
-                        prev->size += dk->vbo_free_list[insertAt].size;
-                        memmove(&dk->vbo_free_list[insertAt],
-                                &dk->vbo_free_list[insertAt + 1],
-                                (dk->vbo_free_count - insertAt - 1) * sizeof(sgl_vbo_free_block_t));
-                        dk->vbo_free_count--;
-                    }
-                    continue;
-                }
-            }
-            /* Try coalescing with next */
-            if (insertAt < dk->vbo_free_count &&
-                offset + size == dk->vbo_free_list[insertAt].offset) {
-                dk->vbo_free_list[insertAt].offset = offset;
-                dk->vbo_free_list[insertAt].size += size;
-                continue;
-            }
-            /* Insert new block */
-            if (dk->vbo_free_count < SGL_VBO_FREE_LIST_MAX) {
-                memmove(&dk->vbo_free_list[insertAt + 1],
-                        &dk->vbo_free_list[insertAt],
-                        (dk->vbo_free_count - insertAt) * sizeof(sgl_vbo_free_block_t));
-                dk->vbo_free_list[insertAt].offset = offset;
-                dk->vbo_free_list[insertAt].size = size;
-                dk->vbo_free_count++;
-            }
+            dk_vbo_free_insert(dk, dk->deferred_free[i].offset,
+                               dk->deferred_free[i].size);
         }
         dk->deferred_free_count = 0;
     }

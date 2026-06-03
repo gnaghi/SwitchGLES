@@ -164,6 +164,17 @@ void dk_submit_and_reset(dk_backend_data_t *dk);
 void dk_flush_sync(dk_backend_data_t *dk);
 
 /**
+ * Insert a freed block into the sorted VBO free-list, coalescing with adjacent
+ * blocks. Shared by dk_buffer_free() and dk_submit_and_reset()'s deferred-free
+ * processing.
+ *
+ * @param dk      Backend data pointer (not sgl_backend_t)
+ * @param offset  Byte offset of the freed block in the data memblock
+ * @param size    Size of the freed block in bytes
+ */
+void dk_vbo_free_insert(dk_backend_data_t *dk, uint32_t offset, uint32_t size);
+
+/**
  * Command buffer overflow callback.
  * Safety net called by deko3d when cmdbuf runs out of memory during recording.
  * Submits pending work, waits for GPU, recycles memory, and re-binds essentials.
