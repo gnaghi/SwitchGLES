@@ -697,21 +697,9 @@ EGLAPI EGLSurface EGLAPIENTRY eglCreateWindowSurface(EGLDisplay dpy, EGLConfig c
     return (EGLSurface)surf;
 }
 
-EGLAPI EGLBoolean EGLAPIENTRY eglDestroySurface(EGLDisplay dpy, EGLSurface surface) {
-    SGL_EGL_VTRACE("eglDestroySurface(%p, %p)", dpy, surface);
-    sgl_display *display = (sgl_display *)dpy;
-    sgl_surface *surf = (sgl_surface *)surface;
-
-    if (display != &g_sgl.display || !display->initialized) {
-        sgl_egl_set_error(EGL_BAD_DISPLAY);
-        return EGL_FALSE;
-    }
-
-    if (!surf || !surf->used) {
-        sgl_egl_set_error(EGL_BAD_SURFACE);
-        return EGL_FALSE;
-    }
-
+/* Actually tear down a surface's GPU resources and free the slot. Shared by the
+ * immediate-destroy path and deferred reaping from eglMakeCurrent. */
+static void sgl_egl_destroy_surface_now(sgl_surface *surf) {
     /* Wait for GPU to finish */
     if (sgl_get_current_context() && sgl_get_current_context()->backend) {
         dk_backend_data_t *dk = (dk_backend_data_t *)sgl_get_current_context()->backend->impl_data;
@@ -736,6 +724,66 @@ EGLAPI EGLBoolean EGLAPIENTRY eglDestroySurface(EGLDisplay dpy, EGLSurface surfa
     }
 
     memset(surf, 0, sizeof(sgl_surface));
+}
+
+/* Actually tear down a context's backend and free the slot. */
+static void sgl_egl_destroy_context_now(sgl_context_t *ctx) {
+    for (int i = 0; i < SGL_MAX_CONTEXTS; i++) {
+        if (&g_sgl.contexts[i] == ctx && g_sgl.backends[i]) {
+            dk_backend_destroy(g_sgl.backends[i]);
+            g_sgl.backends[i] = NULL;
+            break;
+        }
+    }
+    sgl_context_destroy(ctx);
+}
+
+/* Reap objects whose destruction was deferred because they were current. Called
+ * from eglMakeCurrent once the current binding has changed: any prior
+ * context/surface flagged delete_pending that is no longer current is torn down
+ * now (EGL §3.5.4 / §3.7.2). prev_draw/prev_read may alias or be NULL. */
+static void sgl_egl_reap_deferred(sgl_context_t *prev_ctx,
+                                  sgl_surface *prev_draw, sgl_surface *prev_read) {
+    sgl_context_t *cur = sgl_get_current_context();
+
+    if (prev_draw && prev_draw->used && prev_draw->delete_pending &&
+        !(cur && (cur->draw_surface == prev_draw || cur->read_surface == prev_draw))) {
+        sgl_egl_destroy_surface_now(prev_draw);
+    }
+    if (prev_read && prev_read != prev_draw && prev_read->used && prev_read->delete_pending &&
+        !(cur && (cur->draw_surface == prev_read || cur->read_surface == prev_read))) {
+        sgl_egl_destroy_surface_now(prev_read);
+    }
+    if (prev_ctx && prev_ctx != cur && prev_ctx->delete_pending) {
+        sgl_egl_destroy_context_now(prev_ctx);
+    }
+}
+
+EGLAPI EGLBoolean EGLAPIENTRY eglDestroySurface(EGLDisplay dpy, EGLSurface surface) {
+    SGL_EGL_VTRACE("eglDestroySurface(%p, %p)", dpy, surface);
+    sgl_display *display = (sgl_display *)dpy;
+    sgl_surface *surf = (sgl_surface *)surface;
+
+    if (display != &g_sgl.display || !display->initialized) {
+        sgl_egl_set_error(EGL_BAD_DISPLAY);
+        return EGL_FALSE;
+    }
+
+    if (!surf || !surf->used) {
+        sgl_egl_set_error(EGL_BAD_SURFACE);
+        return EGL_FALSE;
+    }
+
+    /* If the surface is current (bound as the draw or read surface of the
+     * current context), defer destruction: invalidate the handle now but keep
+     * the resources until it is no longer current (EGL §3.5.4). */
+    sgl_context_t *cur = sgl_get_current_context();
+    if (cur && (cur->draw_surface == surf || cur->read_surface == surf)) {
+        surf->delete_pending = true;
+        return EGL_TRUE;
+    }
+
+    sgl_egl_destroy_surface_now(surf);
     return EGL_TRUE;
 }
 
@@ -865,21 +913,16 @@ EGLAPI EGLBoolean EGLAPIENTRY eglDestroyContext(EGLDisplay dpy, EGLContext conte
         return EGL_FALSE;
     }
 
+    /* If the context is current to the (single) thread, defer destruction: the
+     * handle is invalid from here on, but the context keeps working until a
+     * later eglMakeCurrent makes it non-current (EGL §3.7.2). The actual
+     * teardown then happens in sgl_egl_reap_deferred(). */
     if (sgl_get_current_context() == ctx) {
-        sgl_set_current_context(NULL);
-        g_sgl.current_context = NULL;
+        ctx->delete_pending = true;
+        return EGL_TRUE;
     }
 
-    /* Find and destroy backend */
-    for (int i = 0; i < SGL_MAX_CONTEXTS; i++) {
-        if (&g_sgl.contexts[i] == ctx && g_sgl.backends[i]) {
-            dk_backend_destroy(g_sgl.backends[i]);
-            g_sgl.backends[i] = NULL;
-            break;
-        }
-    }
-
-    sgl_context_destroy(ctx);
+    sgl_egl_destroy_context_now(ctx);
     return EGL_TRUE;
 }
 
@@ -896,6 +939,13 @@ EGLAPI EGLBoolean EGLAPIENTRY eglMakeCurrent(EGLDisplay dpy, EGLSurface draw,
         return EGL_FALSE;
     }
 
+    /* Capture the outgoing context and its surfaces so that, once the binding
+     * changes below, we can reap any of them whose destruction was deferred
+     * while they were current (EGL §3.5.4 / §3.7.2). */
+    sgl_context_t *prev_ctx = sgl_get_current_context();
+    sgl_surface *prev_draw = prev_ctx ? prev_ctx->draw_surface : NULL;
+    sgl_surface *prev_read = prev_ctx ? prev_ctx->read_surface : NULL;
+
     /* Release case: a NULL context requires both surfaces to be EGL_NO_SURFACE
      * (EGL 1.4 §3.7.3), otherwise it is a mismatch. */
     if (context == EGL_NO_CONTEXT) {
@@ -906,6 +956,7 @@ EGLAPI EGLBoolean EGLAPIENTRY eglMakeCurrent(EGLDisplay dpy, EGLSurface draw,
         sgl_set_current_context(NULL);
         g_sgl.current_context = NULL;
         g_sgl.current_display = NULL;
+        sgl_egl_reap_deferred(prev_ctx, prev_draw, prev_read);
         return EGL_TRUE;
     }
 
@@ -962,6 +1013,10 @@ EGLAPI EGLBoolean EGLAPIENTRY eglMakeCurrent(EGLDisplay dpy, EGLSurface draw,
      * leaving need_acquire=true for the next gluStateReset → glBindFramebuffer
      * → sgl_ensure_frame_ready cycle. */
     sgl_ensure_frame_ready();
+
+    /* The previously-current context/surfaces are no longer current; reap any
+     * that were flagged for deferred destruction. */
+    sgl_egl_reap_deferred(prev_ctx, prev_draw, prev_read);
 
     return EGL_TRUE;
 }

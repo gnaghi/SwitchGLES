@@ -72,6 +72,9 @@ typedef struct sgl_context {
     /* Flags */
     bool                    initialized;
     bool                    used;
+    /* eglDestroyContext called while the context was current: the handle is
+     * invalid but the context lives until it is no longer current (EGL §3.7.2). */
+    bool                    delete_pending;
     int                     client_version;  /* 2 for GLES2 */
     int                     config_id;        /* EGLConfig id this context was created with */
 } sgl_context_t;

@@ -69,6 +69,10 @@ typedef struct sgl_surface {
 
     /* Flag to defer acquire to next frame start */
     bool need_acquire;
+
+    /* eglDestroySurface called while the surface was current: the handle is
+     * invalid but the resources live until it is no longer current (EGL §3.5.4). */
+    bool delete_pending;
 } sgl_surface;
 
 /* Global state */
