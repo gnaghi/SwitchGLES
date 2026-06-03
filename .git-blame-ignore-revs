@@ -1,0 +1,3 @@
+# Bulk clang-format + LF normalization — skip in git blame.
+# Enable locally: git config blame.ignoreRevsFile .git-blame-ignore-revs
+e929f8dad7ac29ae71683252226d0587023409f4
