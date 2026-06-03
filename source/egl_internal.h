@@ -107,8 +107,23 @@ typedef struct {
 /* Global instance */
 extern sgl_egl_state g_sgl;
 
+/* Verbose trace macro for debugging dEQP crashes (set to 0 to disable) */
+#include <stdio.h>
+#define SGL_EGL_VERBOSE 0
+#if SGL_EGL_VERBOSE
+#define SGL_EGL_VTRACE(fmt, ...) do { printf("[SGL] " fmt "\n", ##__VA_ARGS__); fflush(stdout); } while(0)
+#else
+#define SGL_EGL_VTRACE(fmt, ...) do {} while(0)
+#endif
+
 /* EGL internal helpers */
 void sgl_egl_set_error(EGLint error);
+
+/* True if display is our one valid, initialized display. The && short-circuits
+ * before dereferencing a foreign pointer. Shared by all EGL translation units. */
+static inline bool sgl_egl_display_valid(const sgl_display *display) {
+    return display == &g_sgl.display && display->initialized;
+}
 
 /* Ensure frame is ready for rendering */
 void sgl_ensure_frame_ready(void);
