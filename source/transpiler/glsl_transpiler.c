@@ -172,6 +172,19 @@ typedef struct glslt_ctx {
     const glslt_define_table_t *defines;
 } glslt_ctx_t;
 
+/* Declarations scanned out of a shader by collect_declarations() and consumed
+ * by emit_header() / the layout step. Bundling them keeps the phase helpers to
+ * a couple of parameters instead of a dozen. */
+typedef struct {
+    glslt_uniform_t   uniforms[GLSLT_MAX_UNIFORMS];
+    glslt_sampler_t   samplers[GLSLT_MAX_SAMPLERS];
+    glslt_attribute_t attributes[GLSLT_MAX_ATTRIBUTES];
+    glslt_varying_t   varyings[GLSLT_MAX_VARYINGS];
+    int nu, ns, na, nv;
+    int has_frag_color;
+    int max_frag_data;   /* highest gl_FragData[N] index, -1 if none */
+} glslt_decls_t;
+
 static const type_info_t *find_type_info(const char *name) {
     for (const type_info_t *t = s_types; t->name; t++) {
         if (strcmp(t->name, name) == 0) return t;
@@ -2207,155 +2220,16 @@ static int glslt_validate_es100_impl(glslt_ctx_t *ctx, const char *source, glslt
 /*  Main transpile function                                                    */
 /* ========================================================================== */
 
-static glslt_result_t glslt_transpile_impl(glslt_ctx_t *ctx, const char *source, glslt_stage_t stage,
-                               const glslt_options_t *opts) {
-    glslt_result_t result;
-    memset(&result, 0, sizeof(result));
-
-    /* Reset module-global parse state up front so a prior call that bailed
-     * on an error path cannot leak stale structs/replacements into this one. */
-    ctx->num_structs = 0;
-    ctx->num_replacements = 0;
-    ctx->num_struct_array_uniforms = 0;
-
-    if (!source) {
-        snprintf(result.error, sizeof(result.error), "source is NULL");
-        return result;
-    }
-
-    if (!opts) {
-        snprintf(result.error, sizeof(result.error), "opts is NULL");
-        return result;
-    }
-
-    /* Pre-scan source for #define NAME NUMERIC_VALUE (for macro array sizes) */
-    glslt_define_table_t defines;
-    glslt_collect_defines(source, &defines);
-    ctx->defines = &defines;
-
-    /* Check if already modern GLSL - pass through unchanged */
-    {
-        const char *p = skip_ws(source);
-        if (strncmp(p, "#version", 8) == 0) {
-            p = skip_ws(p + 8);
-            int ver = atoi(p);
-            if (ver >= 300 && strstr(p, "es") == NULL) {
-                /* Already desktop GLSL 300+ core, pass through unchanged.
-                 * DkDeviceFlags_DepthMinusOneToOne handles GL→deko3d depth
-                 * natively — no shader-level z transform needed. */
-                int src_len = (int)strlen(source);
-                result.output = (char *)malloc(src_len + 1);
-                if (!result.output) {
-                    snprintf(result.error, sizeof(result.error),
-                             "out of memory (passthrough)");
-                    ctx->defines = NULL;
-                    return result;  /* result.success = 0 (from memset) */
-                }
-                memcpy(result.output, source, src_len + 1);
-                result.output_len = src_len;
-
-                result.success = 1;
-                ctx->defines = NULL;
-                return result;
-            }
-        }
-    }
-
-    /* ---- Preprocessor validation (on raw source, before normalization) ---- */
-    if (!validate_preprocessor_directives(source, result.error, sizeof(result.error))) {
-        ctx->defines = NULL;
-        return result;
-    }
-    if (!validate_preprocessor_undefined(source, result.error, sizeof(result.error))) {
-        ctx->defines = NULL;
-        return result;
-    }
-
-    /* Normalize source: insert newlines after semicolons so each declaration
-     * is on its own line (dEQP puts multiple decls on one line). */
-    char *norm_source = normalize_source(source);
-    if (!norm_source) {
-        snprintf(result.error, sizeof(result.error), "out of memory normalizing source");
-        ctx->defines = NULL;
-        return result;
-    }
-    source = norm_source; /* Use normalized source for all subsequent processing */
-
-    /* ---- GLES 1.00 semantic validation ---- */
-    if (!validate_gles_semantics(source, stage, result.error, sizeof(result.error))) {
-        free(norm_source);
-        ctx->defines = NULL;
-        return result;  /* result.success = 0 (from memset) */
-    }
-    if (!validate_const_initializers(ctx, source, result.error, sizeof(result.error))) {
-        free(norm_source);
-        ctx->defines = NULL;
-        return result;
-    }
-    if (!validate_qualification_order(source, result.error, sizeof(result.error))) {
-        free(norm_source);
-        ctx->defines = NULL;
-        return result;
-    }
-    if (!validate_texture_functions(source, stage, result.error, sizeof(result.error))) {
-        free(norm_source);
-        ctx->defines = NULL;
-        return result;
-    }
-
-    /* ---- Pre-scan: collect struct definitions ---- */
-    collect_struct_defs(ctx, source);
-    ctx->num_replacements = 0;
-    ctx->num_struct_array_uniforms = 0;
-
-    /* ---- Detect gl_DepthRange usage and inject synthetic uniforms ---- */
-    int has_depth_range = (strstr(source, "gl_DepthRange") != NULL) ? 1 : 0;
-    if (has_depth_range) {
-        /* Inject uniform declarations into the source so pass 1 collects them.
-         * Also register struct-style replacements for member access. */
-        const char *dr_decls =
-            "uniform float sgl_dr_near;\n"
-            "uniform float sgl_dr_far;\n"
-            "uniform float sgl_dr_diff;\n";
-        int dr_len = (int)strlen(dr_decls);
-        int src_len = (int)strlen(source);
-        char *new_src = (char *)malloc(src_len + dr_len + 1);
-        if (new_src) {
-            memcpy(new_src, dr_decls, dr_len);
-            memcpy(new_src + dr_len, source, src_len + 1);
-            free(norm_source);
-            norm_source = new_src;
-            source = norm_source;
-        }
-        /* Register replacements: gl_DepthRange.near → sgl_dr_near etc. */
-        if (ctx->num_replacements + 3 <= MAX_STRUCT_REPLS) {
-            strncpy(ctx->replacements[ctx->num_replacements].old_ref, "gl_DepthRange.near",
-                    sizeof(ctx->replacements[0].old_ref) - 1);
-            strncpy(ctx->replacements[ctx->num_replacements].new_ref, "sgl_dr_near",
-                    sizeof(ctx->replacements[0].new_ref) - 1);
-            ctx->num_replacements++;
-            strncpy(ctx->replacements[ctx->num_replacements].old_ref, "gl_DepthRange.far",
-                    sizeof(ctx->replacements[0].old_ref) - 1);
-            strncpy(ctx->replacements[ctx->num_replacements].new_ref, "sgl_dr_far",
-                    sizeof(ctx->replacements[0].new_ref) - 1);
-            ctx->num_replacements++;
-            strncpy(ctx->replacements[ctx->num_replacements].old_ref, "gl_DepthRange.diff",
-                    sizeof(ctx->replacements[0].old_ref) - 1);
-            strncpy(ctx->replacements[ctx->num_replacements].new_ref, "sgl_dr_diff",
-                    sizeof(ctx->replacements[0].new_ref) - 1);
-            ctx->num_replacements++;
-        }
-    }
-
-    /* ---- Pass 1: Collect declarations ---- */
-
-    glslt_uniform_t  uniforms[GLSLT_MAX_UNIFORMS];
-    glslt_sampler_t  samplers[GLSLT_MAX_SAMPLERS];
-    glslt_attribute_t attributes[GLSLT_MAX_ATTRIBUTES];
-    glslt_varying_t  varyings[GLSLT_MAX_VARYINGS];
+/* ---- Pass 1: scan the shader source into a glslt_decls_t ---- */
+static void collect_declarations(glslt_ctx_t *ctx, const char *source,
+                                 glslt_stage_t stage, glslt_decls_t *d) {
+    glslt_uniform_t   *uniforms = d->uniforms;
+    glslt_sampler_t   *samplers = d->samplers;
+    glslt_attribute_t *attributes = d->attributes;
+    glslt_varying_t   *varyings = d->varyings;
     int nu = 0, ns = 0, na = 0, nv = 0;
     int has_frag_color = 0;
-    int max_frag_data = -1;  /* Highest gl_FragData[N] index seen (-1 = none) */
+    int max_frag_data = -1;
     int in_block_comment = 0;
 
     const char *lp = source;
@@ -2511,40 +2385,29 @@ static glslt_result_t glslt_transpile_impl(glslt_ctx_t *ctx, const char *source,
         lp = next_line(lp);
     }
 
-    /* ---- Process: assign locations, compute layout ---- */
+    d->nu = nu; d->ns = ns; d->na = na; d->nv = nv;
+    d->has_frag_color = has_frag_color;
+    d->max_frag_data = max_frag_data;
+}
 
-    /* Attributes */
-    assign_attrib_locations(attributes, na, opts);
-    qsort(attributes, na, sizeof(glslt_attribute_t), cmp_by_location_attr);
-
-    /* Varyings */
-    assign_varying_locations(varyings, nv, opts);
-    qsort(varyings, nv, sizeof(glslt_varying_t), cmp_by_location_varying);
-
-    /* Uniforms: sort alphabetically, compute std140 layout */
-    qsort(uniforms, nu, sizeof(glslt_uniform_t), cmp_by_name_uniform);
-    int ubo_total_size = 0;
-    compute_std140_layout(uniforms, nu, &ubo_total_size);
-    for (int i = 0; i < nu; i++)
-        uniforms[i].binding = opts->ubo_binding;
-
-    /* Samplers: keep declaration order, assign bindings */
-    for (int i = 0; i < ns; i++)
-        samplers[i].binding = opts->sampler_binding_start + i;
-
-    /* ---- Pass 2: Emit output ---- */
-
-    strbuf_t sb;
-    sb_init(&sb);
+/* ---- Emit the GLSL 4.60 header: version, ins/outs, UBO block, samplers, outputs ---- */
+static void emit_header(strbuf_t *sb, glslt_ctx_t *ctx, const glslt_options_t *opts,
+                        glslt_stage_t stage, const glslt_decls_t *d) {
+    const glslt_uniform_t   *uniforms = d->uniforms;    int nu = d->nu;
+    const glslt_sampler_t   *samplers = d->samplers;    int ns = d->ns;
+    const glslt_attribute_t *attributes = d->attributes; int na = d->na;
+    const glslt_varying_t   *varyings = d->varyings;    int nv = d->nv;
+    int has_frag_color = d->has_frag_color;
+    int max_frag_data = d->max_frag_data;
 
     /* Version */
-    sb_printf(&sb, "#version %d\n", opts->target_version);
+    sb_printf(sb, "#version %d\n", opts->target_version);
 
     /* Attributes (vertex shader only) */
     if (stage == GLSLT_VERTEX && na > 0) {
-        sb_append(&sb, "\n");
+        sb_append(sb, "\n");
         for (int i = 0; i < na; i++) {
-            sb_printf(&sb, "layout(location = %d) in %s %s;\n",
+            sb_printf(sb, "layout(location = %d) in %s %s;\n",
                       attributes[i].location,
                       glslt_type_name(attributes[i].type),
                       attributes[i].name);
@@ -2553,17 +2416,17 @@ static glslt_result_t glslt_transpile_impl(glslt_ctx_t *ctx, const char *source,
 
     /* Varyings */
     if (nv > 0) {
-        sb_append(&sb, "\n");
+        sb_append(sb, "\n");
         const char *dir = (stage == GLSLT_VERTEX) ? "out" : "in";
         for (int i = 0; i < nv; i++) {
             if (varyings[i].array_size > 0) {
-                sb_printf(&sb, "layout(location = %d) %s %s %s[%d];\n",
+                sb_printf(sb, "layout(location = %d) %s %s %s[%d];\n",
                           varyings[i].location, dir,
                           glslt_type_name(varyings[i].type),
                           varyings[i].name,
                           varyings[i].array_size);
             } else {
-                sb_printf(&sb, "layout(location = %d) %s %s %s;\n",
+                sb_printf(sb, "layout(location = %d) %s %s %s;\n",
                           varyings[i].location, dir,
                           glslt_type_name(varyings[i].type),
                           varyings[i].name);
@@ -2575,53 +2438,53 @@ static glslt_result_t glslt_transpile_impl(glslt_ctx_t *ctx, const char *source,
     for (int sa = 0; sa < ctx->num_struct_array_uniforms; sa++) {
         struct_def_t *sd = find_struct_def(ctx, ctx->struct_array_uniforms[sa].struct_type);
         if (!sd) continue;
-        sb_printf(&sb, "\nstruct %s {\n", sd->name);
+        sb_printf(sb, "\nstruct %s {\n", sd->name);
         for (int f = 0; f < sd->num_fields; f++) {
             const char *tname = sd->fields[f].is_struct
                 ? sd->fields[f].type_name
                 : glslt_type_name(sd->fields[f].type);
             if (sd->fields[f].array_size > 0) {
-                sb_printf(&sb, "    %s %s[%d];\n", tname, sd->fields[f].name, sd->fields[f].array_size);
+                sb_printf(sb, "    %s %s[%d];\n", tname, sd->fields[f].name, sd->fields[f].array_size);
             } else {
-                sb_printf(&sb, "    %s %s;\n", tname, sd->fields[f].name);
+                sb_printf(sb, "    %s %s;\n", tname, sd->fields[f].name);
             }
         }
-        sb_append(&sb, "};\n");
+        sb_append(sb, "};\n");
     }
 
     /* UBO block (includes flattened scalar uniforms + struct array uniforms) */
     if (nu > 0 || ctx->num_struct_array_uniforms > 0) {
-        sb_append(&sb, "\n");
-        sb_printf(&sb, "layout(std140, binding = %d) uniform %sUniforms {\n",
+        sb_append(sb, "\n");
+        sb_printf(sb, "layout(std140, binding = %d) uniform %sUniforms {\n",
                   opts->ubo_binding,
                   (stage == GLSLT_VERTEX) ? "Vertex" : "Fragment");
         for (int i = 0; i < nu; i++) {
             if (uniforms[i].array_size > 0) {
-                sb_printf(&sb, "    %s %s[%d];\n",
+                sb_printf(sb, "    %s %s[%d];\n",
                           glslt_type_name(uniforms[i].type),
                           uniforms[i].name,
                           uniforms[i].array_size);
             } else {
-                sb_printf(&sb, "    %s %s;\n",
+                sb_printf(sb, "    %s %s;\n",
                           glslt_type_name(uniforms[i].type),
                           uniforms[i].name);
             }
         }
         /* Struct array uniforms (kept as whole structs) */
         for (int i = 0; i < ctx->num_struct_array_uniforms; i++) {
-            sb_printf(&sb, "    %s %s[%d];\n",
+            sb_printf(sb, "    %s %s[%d];\n",
                       ctx->struct_array_uniforms[i].struct_type,
                       ctx->struct_array_uniforms[i].var_name,
                       ctx->struct_array_uniforms[i].array_size);
         }
-        sb_append(&sb, "};\n");
+        sb_append(sb, "};\n");
     }
 
     /* Samplers */
     if (ns > 0) {
-        sb_append(&sb, "\n");
+        sb_append(sb, "\n");
         for (int i = 0; i < ns; i++) {
-            sb_printf(&sb, "layout(binding = %d) uniform %s %s;\n",
+            sb_printf(sb, "layout(binding = %d) uniform %s %s;\n",
                       samplers[i].binding,
                       glslt_type_name(samplers[i].type),
                       samplers[i].name);
@@ -2632,15 +2495,20 @@ static glslt_result_t glslt_transpile_impl(glslt_ctx_t *ctx, const char *source,
     if (stage == GLSLT_FRAGMENT && has_frag_color) {
         if (max_frag_data > 0) {
             /* Multiple render targets: gl_FragData[0]..gl_FragData[N] */
-            sb_append(&sb, "\n");
+            sb_append(sb, "\n");
             for (int i = 0; i <= max_frag_data; i++)
-                sb_printf(&sb, "layout(location = %d) out vec4 fragData_%d;\n", i, i);
+                sb_printf(sb, "layout(location = %d) out vec4 fragData_%d;\n", i, i);
         } else {
-            sb_append(&sb, "\nlayout(location = 0) out vec4 fragColor;\n");
+            sb_append(sb, "\nlayout(location = 0) out vec4 fragColor;\n");
         }
     }
+}
 
-    /* ---- Body: emit non-declaration lines with replacements ---- */
+/* ---- Emit the shader body: non-declaration lines with replacements applied ---- */
+static void emit_body(glslt_ctx_t *ctx, strbuf_t *sb, const char *source,
+                      glslt_stage_t stage) {
+    int in_block_comment = 0;
+    const char *lp;
 
     in_block_comment = 0;
     int body_started = 0;
@@ -2731,29 +2599,207 @@ static glslt_result_t glslt_transpile_impl(glslt_ctx_t *ctx, const char *source,
 
         if (emit) {
             if (!body_started) {
-                sb_append(&sb, "\n");
+                sb_append(sb, "\n");
                 body_started = 1;
             }
 
             if (line_in_comment || line[0] == '\0') {
                 /* Inside block comment or empty line: emit as-is */
-                sb_append(&sb, line);
+                sb_append(sb, line);
             } else {
                 char replaced[MAX_LINE_LEN];
                 apply_body_replacements(line, replaced, sizeof(replaced), stage);
                 if (ctx->num_replacements > 0) {
                     char replaced2[MAX_LINE_LEN];
                     apply_struct_replacements(ctx, replaced, replaced2, sizeof(replaced2));
-                    sb_append(&sb, replaced2);
+                    sb_append(sb, replaced2);
                 } else {
-                    sb_append(&sb, replaced);
+                    sb_append(sb, replaced);
                 }
             }
-            sb_append(&sb, "\n");
+            sb_append(sb, "\n");
         }
 
         lp = next_line(lp);
     }
+}
+
+static glslt_result_t glslt_transpile_impl(glslt_ctx_t *ctx, const char *source, glslt_stage_t stage,
+                               const glslt_options_t *opts) {
+    glslt_result_t result;
+    memset(&result, 0, sizeof(result));
+
+    /* Reset module-global parse state up front so a prior call that bailed
+     * on an error path cannot leak stale structs/replacements into this one. */
+    ctx->num_structs = 0;
+    ctx->num_replacements = 0;
+    ctx->num_struct_array_uniforms = 0;
+
+    if (!source) {
+        snprintf(result.error, sizeof(result.error), "source is NULL");
+        return result;
+    }
+
+    if (!opts) {
+        snprintf(result.error, sizeof(result.error), "opts is NULL");
+        return result;
+    }
+
+    /* Pre-scan source for #define NAME NUMERIC_VALUE (for macro array sizes) */
+    glslt_define_table_t defines;
+    glslt_collect_defines(source, &defines);
+    ctx->defines = &defines;
+
+    /* Check if already modern GLSL - pass through unchanged */
+    {
+        const char *p = skip_ws(source);
+        if (strncmp(p, "#version", 8) == 0) {
+            p = skip_ws(p + 8);
+            int ver = atoi(p);
+            if (ver >= 300 && strstr(p, "es") == NULL) {
+                /* Already desktop GLSL 300+ core, pass through unchanged.
+                 * DkDeviceFlags_DepthMinusOneToOne handles GL→deko3d depth
+                 * natively — no shader-level z transform needed. */
+                int src_len = (int)strlen(source);
+                result.output = (char *)malloc(src_len + 1);
+                if (!result.output) {
+                    snprintf(result.error, sizeof(result.error),
+                             "out of memory (passthrough)");
+                    ctx->defines = NULL;
+                    return result;  /* result.success = 0 (from memset) */
+                }
+                memcpy(result.output, source, src_len + 1);
+                result.output_len = src_len;
+
+                result.success = 1;
+                ctx->defines = NULL;
+                return result;
+            }
+        }
+    }
+
+    /* ---- Preprocessor validation (on raw source, before normalization) ---- */
+    if (!validate_preprocessor_directives(source, result.error, sizeof(result.error))) {
+        ctx->defines = NULL;
+        return result;
+    }
+    if (!validate_preprocessor_undefined(source, result.error, sizeof(result.error))) {
+        ctx->defines = NULL;
+        return result;
+    }
+
+    /* Normalize source: insert newlines after semicolons so each declaration
+     * is on its own line (dEQP puts multiple decls on one line). */
+    char *norm_source = normalize_source(source);
+    if (!norm_source) {
+        snprintf(result.error, sizeof(result.error), "out of memory normalizing source");
+        ctx->defines = NULL;
+        return result;
+    }
+    source = norm_source; /* Use normalized source for all subsequent processing */
+
+    /* ---- GLES 1.00 semantic validation ---- */
+    if (!validate_gles_semantics(source, stage, result.error, sizeof(result.error))) {
+        free(norm_source);
+        ctx->defines = NULL;
+        return result;  /* result.success = 0 (from memset) */
+    }
+    if (!validate_const_initializers(ctx, source, result.error, sizeof(result.error))) {
+        free(norm_source);
+        ctx->defines = NULL;
+        return result;
+    }
+    if (!validate_qualification_order(source, result.error, sizeof(result.error))) {
+        free(norm_source);
+        ctx->defines = NULL;
+        return result;
+    }
+    if (!validate_texture_functions(source, stage, result.error, sizeof(result.error))) {
+        free(norm_source);
+        ctx->defines = NULL;
+        return result;
+    }
+
+    /* ---- Pre-scan: collect struct definitions ---- */
+    collect_struct_defs(ctx, source);
+    ctx->num_replacements = 0;
+    ctx->num_struct_array_uniforms = 0;
+
+    /* ---- Detect gl_DepthRange usage and inject synthetic uniforms ---- */
+    int has_depth_range = (strstr(source, "gl_DepthRange") != NULL) ? 1 : 0;
+    if (has_depth_range) {
+        /* Inject uniform declarations into the source so pass 1 collects them.
+         * Also register struct-style replacements for member access. */
+        const char *dr_decls =
+            "uniform float sgl_dr_near;\n"
+            "uniform float sgl_dr_far;\n"
+            "uniform float sgl_dr_diff;\n";
+        int dr_len = (int)strlen(dr_decls);
+        int src_len = (int)strlen(source);
+        char *new_src = (char *)malloc(src_len + dr_len + 1);
+        if (new_src) {
+            memcpy(new_src, dr_decls, dr_len);
+            memcpy(new_src + dr_len, source, src_len + 1);
+            free(norm_source);
+            norm_source = new_src;
+            source = norm_source;
+        }
+        /* Register replacements: gl_DepthRange.near → sgl_dr_near etc. */
+        if (ctx->num_replacements + 3 <= MAX_STRUCT_REPLS) {
+            strncpy(ctx->replacements[ctx->num_replacements].old_ref, "gl_DepthRange.near",
+                    sizeof(ctx->replacements[0].old_ref) - 1);
+            strncpy(ctx->replacements[ctx->num_replacements].new_ref, "sgl_dr_near",
+                    sizeof(ctx->replacements[0].new_ref) - 1);
+            ctx->num_replacements++;
+            strncpy(ctx->replacements[ctx->num_replacements].old_ref, "gl_DepthRange.far",
+                    sizeof(ctx->replacements[0].old_ref) - 1);
+            strncpy(ctx->replacements[ctx->num_replacements].new_ref, "sgl_dr_far",
+                    sizeof(ctx->replacements[0].new_ref) - 1);
+            ctx->num_replacements++;
+            strncpy(ctx->replacements[ctx->num_replacements].old_ref, "gl_DepthRange.diff",
+                    sizeof(ctx->replacements[0].old_ref) - 1);
+            strncpy(ctx->replacements[ctx->num_replacements].new_ref, "sgl_dr_diff",
+                    sizeof(ctx->replacements[0].new_ref) - 1);
+            ctx->num_replacements++;
+        }
+    }
+
+    /* ---- Pass 1: collect declarations ---- */
+    glslt_decls_t d;
+    collect_declarations(ctx, source, stage, &d);
+
+    glslt_uniform_t   *uniforms = d.uniforms;    int nu = d.nu;
+    glslt_sampler_t   *samplers = d.samplers;    int ns = d.ns;
+    glslt_attribute_t *attributes = d.attributes; int na = d.na;
+    glslt_varying_t   *varyings = d.varyings;    int nv = d.nv;
+
+    /* ---- Process: assign locations, compute layout ---- */
+
+    /* Attributes */
+    assign_attrib_locations(attributes, na, opts);
+    qsort(attributes, na, sizeof(glslt_attribute_t), cmp_by_location_attr);
+
+    /* Varyings */
+    assign_varying_locations(varyings, nv, opts);
+    qsort(varyings, nv, sizeof(glslt_varying_t), cmp_by_location_varying);
+
+    /* Uniforms: sort alphabetically, compute std140 layout */
+    qsort(uniforms, nu, sizeof(glslt_uniform_t), cmp_by_name_uniform);
+    int ubo_total_size = 0;
+    compute_std140_layout(uniforms, nu, &ubo_total_size);
+    for (int i = 0; i < nu; i++)
+        uniforms[i].binding = opts->ubo_binding;
+
+    /* Samplers: keep declaration order, assign bindings */
+    for (int i = 0; i < ns; i++)
+        samplers[i].binding = opts->sampler_binding_start + i;
+
+
+    /* ---- Pass 2: emit output ---- */
+    strbuf_t sb;
+    sb_init(&sb);
+    emit_header(&sb, ctx, opts, stage, &d);
+    emit_body(ctx, &sb, source, stage);
 
     /* DkDeviceFlags_DepthMinusOneToOne handles GL→deko3d depth natively.
      * No shader-level z transform needed. */
