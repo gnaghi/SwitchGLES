@@ -154,6 +154,18 @@ void dk_rebind_render_target(dk_backend_data_t *dk) {
 }
 
 /*
+ * Synchronous flush: finish the current command list, submit it, and block
+ * until the GPU is idle. The minimal building block used by the synchronous
+ * texture/FBO upload and readback paths (dk_texture.c). Does not touch the
+ * deferred VBO free list — see dk_submit_and_reset() for the frame path.
+ */
+void dk_flush_sync(dk_backend_data_t *dk) {
+    DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
+    dkQueueSubmitCommands(dk->queue, cmdlist);
+    dkQueueWaitIdle(dk->queue);
+}
+
+/*
  * Submit current command buffer, wait for GPU, and reset for continued use.
  * Shared implementation for dk_flush(), dk_finish(), and orphan overflow recovery.
  */
@@ -162,9 +174,7 @@ void dk_submit_and_reset(dk_backend_data_t *dk) {
         return;  /* Don't submit to an errored queue */
     }
 
-    DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
-    dkQueueSubmitCommands(dk->queue, cmdlist);
-    dkQueueWaitIdle(dk->queue);
+    dk_flush_sync(dk);
 
     /* Process deferred VBO free list — GPU is idle after WaitIdle,
      * so it's safe to return these blocks to the free list for reuse.

@@ -580,9 +580,7 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle,
         dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &faceView, &dstRect, 0);
 
         /* Submit and wait for copy to complete */
-        DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
-        dkQueueSubmitCommands(dk->queue, cmdlist);
-        dkQueueWaitIdle(dk->queue);
+        dk_flush_sync(dk);
 
         /* Reset command buffer */
         dkCmdBufClear(dk->cmdbuf);
@@ -784,9 +782,7 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
                         dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &faceView, &dstRect, 0);
 
-                        DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
-                        dkQueueSubmitCommands(dk->queue, cmdlist);
-                        dkQueueWaitIdle(dk->queue);
+                        dk_flush_sync(dk);
 
                         dkCmdBufClear(dk->cmdbuf);
                         dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
@@ -873,9 +869,7 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
                     dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &faceView, &dstRect, 0);
 
-                    DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
-                    dkQueueSubmitCommands(dk->queue, cmdlist);
-                    dkQueueWaitIdle(dk->queue);
+                    dk_flush_sync(dk);
 
                     dkCmdBufClear(dk->cmdbuf);
                     dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
@@ -1039,9 +1033,7 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
                 dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &imageView, &dstRect, 0);
 
-                DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
-                dkQueueSubmitCommands(dk->queue, cmdlist);
-                dkQueueWaitIdle(dk->queue);
+                dk_flush_sync(dk);
 
                 dkCmdBufClear(dk->cmdbuf);
                 dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
@@ -1230,9 +1222,7 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
             dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &imageView, &dstRect, 0);
 
             /* Submit and wait for copy to complete */
-            DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
-            dkQueueSubmitCommands(dk->queue, cmdlist);
-            dkQueueWaitIdle(dk->queue);
+            dk_flush_sync(dk);
 
             /* Reset command buffer for continued use */
             dkCmdBufClear(dk->cmdbuf);
@@ -1358,9 +1348,7 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &imageView, &dstRect, 0);
 
     /* Submit and wait for copy to complete */
-    DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
-    dkQueueSubmitCommands(dk->queue, cmdlist);
-    dkQueueWaitIdle(dk->queue);
+    dk_flush_sync(dk);
 
     /* Reset command buffer for continued use */
     dkCmdBufClear(dk->cmdbuf);
@@ -1470,9 +1458,7 @@ void dk_create_black_texture(dk_backend_data_t *dk) {
     DkImageRect dstRect = { 0, 0, 0, 1, 1, 1 };
     dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &biv, &dstRect, 0);
 
-    DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
-    dkQueueSubmitCommands(dk->queue, cmdlist);
-    dkQueueWaitIdle(dk->queue);
+    dk_flush_sync(dk);
 
     dkCmdBufClear(dk->cmdbuf);
     dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
@@ -1536,9 +1522,7 @@ void dk_create_black_texture(dk_backend_data_t *dk) {
             dkCmdBufCopyBufferToImage(dk->cmdbuf, &csrcBuf, &civ, &cdstRect, 0);
         }
 
-        DkCmdList ccmdlist = dkCmdBufFinishList(dk->cmdbuf);
-        dkQueueSubmitCommands(dk->queue, ccmdlist);
-        dkQueueWaitIdle(dk->queue);
+        dk_flush_sync(dk);
 
         dkCmdBufClear(dk->cmdbuf);
         dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
@@ -1808,9 +1792,7 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     /* === Step 1: Finish() — submit pending rendering, wait for idle ===
      * GLOVE pattern: rendering MUST be fully completed in a SEPARATE
      * submission before the readback begins. Not just a barrier. */
-    DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
-    dkQueueSubmitCommands(dk->queue, cmdlist);
-    dkQueueWaitIdle(dk->queue);
+    dk_flush_sync(dk);
 
     dkCmdBufClear(dk->cmdbuf);
     dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
@@ -1850,9 +1832,7 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
     dkCmdBufCopyImageToBuffer(dk->cmdbuf, &srcView, &srcRect, &readbackBuf, 0);
 
-    cmdlist = dkCmdBufFinishList(dk->cmdbuf);
-    dkQueueSubmitCommands(dk->queue, cmdlist);
-    dkQueueWaitIdle(dk->queue);
+    dk_flush_sync(dk);
 
     /* === Step 3: Create/reuse destination texture === */
     DkImage *texImage = &dk->textures[handle];
@@ -2066,9 +2046,7 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
     dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &texView, &dstRect, 0);
 
-    cmdlist = dkCmdBufFinishList(dk->cmdbuf);
-    dkQueueSubmitCommands(dk->queue, cmdlist);
-    dkQueueWaitIdle(dk->queue);
+    dk_flush_sync(dk);
 
     /* === Step 6: Create descriptor AFTER upload completes === */
     if (is_cubemap_face) {
@@ -2179,9 +2157,7 @@ void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
     DkImage *texImage = &dk->textures[handle];
 
     /* === Step 1: Finish() — submit pending rendering, wait for idle === */
-    DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
-    dkQueueSubmitCommands(dk->queue, cmdlist);
-    dkQueueWaitIdle(dk->queue);
+    dk_flush_sync(dk);
 
     dkCmdBufClear(dk->cmdbuf);
     dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
@@ -2216,9 +2192,7 @@ void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
     dkCmdBufCopyImageToBuffer(dk->cmdbuf, &srcView, &srcRect, &readbackBuf, 0);
 
-    cmdlist = dkCmdBufFinishList(dk->cmdbuf);
-    dkQueueSubmitCommands(dk->queue, cmdlist);
-    dkQueueWaitIdle(dk->queue);
+    dk_flush_sync(dk);
 
     /* === Step 3: CPU copy from readback to staging with format conversion === */
     uint8_t *gpuData = (uint8_t *)dkMemBlockGetCpuAddr(readbackMem);
@@ -2296,9 +2270,7 @@ void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle,
 
     dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &dstView, &dstRect, 0);
 
-    cmdlist = dkCmdBufFinishList(dk->cmdbuf);
-    dkQueueSubmitCommands(dk->queue, cmdlist);
-    dkQueueWaitIdle(dk->queue);
+    dk_flush_sync(dk);
 
     /* CRITICAL: Mark texture as needing L2 cache barrier before next sampling.
      * Same reason as CopyTexImage2D: DMA writes bypass the 3D engine's L2 cache.
@@ -2461,9 +2433,7 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
                 DkImageRect dstRect = { 0, 0, 0, (uint32_t)width, (uint32_t)height, 1 };
                 dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &dstView, &dstRect, 0);
 
-                DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
-                dkQueueSubmitCommands(dk->queue, cmdlist);
-                dkQueueWaitIdle(dk->queue);
+                dk_flush_sync(dk);
 
                 dkCmdBufClear(dk->cmdbuf);
                 dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
@@ -2555,9 +2525,7 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
                 dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &dstView, &dstRect, 0);
 
                 /* Flush GPU for mip upload (same pattern as non-compressed mips) */
-                DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
-                dkQueueSubmitCommands(dk->queue, cmdlist);
-                dkQueueWaitIdle(dk->queue);
+                dk_flush_sync(dk);
 
                 dkCmdBufClear(dk->cmdbuf);
                 dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
@@ -2644,9 +2612,7 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle,
             /* Submit and wait for copy to complete — MUST happen before
              * restoring client_array_offset, otherwise subsequent mip uploads
              * overwrite the staging data before the GPU copies level 0. */
-            DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
-            dkQueueSubmitCommands(dk->queue, cmdlist);
-            dkQueueWaitIdle(dk->queue);
+            dk_flush_sync(dk);
 
             dkCmdBufClear(dk->cmdbuf);
             dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);

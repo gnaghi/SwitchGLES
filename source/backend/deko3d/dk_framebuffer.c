@@ -311,9 +311,7 @@ void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y,
      * deko3d requires render pass to be complete before CopyImageToBuffer. */
     {
         dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);
-        DkCmdList flushList = dkCmdBufFinishList(dk->cmdbuf);
-        dkQueueSubmitCommands(dk->queue, flushList);
-        dkQueueWaitIdle(dk->queue);
+        dk_flush_sync(dk);
 
         if (dkQueueIsInErrorState(dk->queue)) {
             SGL_ERROR_BACKEND("read_pixels: GPU error! slot=%d fbo=%u depth=%p draws=%u cmdbuf=%p submitted=%d",
@@ -384,9 +382,7 @@ void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y,
     dkCmdBufCopyImageToBuffer(dk->cmdbuf, &srcView, &srcRect, &dstBuf, 0);
 
     /* Submit and wait for copy to complete */
-    DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
-    dkQueueSubmitCommands(dk->queue, cmdlist);
-    dkQueueWaitIdle(dk->queue);
+    dk_flush_sync(dk);
 
     /* Check if the GPU queue entered an error state during this submit */
     if (dkQueueIsInErrorState(dk->queue)) {

@@ -150,6 +150,20 @@ void dk_insert_barrier(sgl_backend_t *be);
 void dk_submit_and_reset(dk_backend_data_t *dk);
 
 /**
+ * Synchronous flush: finish the current command list, submit it, and block
+ * until the GPU is idle.
+ *
+ * Used by the synchronous texture/FBO upload and readback paths that must see
+ * GPU results immediately (staging copies, glReadPixels, CopyTexImage). Unlike
+ * dk_submit_and_reset(), it does NOT drain the deferred VBO free list — these
+ * call sites run outside the frame loop. Pair with dk_ensure_recordable() when
+ * the operation may follow a swap.
+ *
+ * @param dk    Backend data pointer (not sgl_backend_t)
+ */
+void dk_flush_sync(dk_backend_data_t *dk);
+
+/**
  * Command buffer overflow callback.
  * Safety net called by deko3d when cmdbuf runs out of memory during recording.
  * Submits pending work, waits for GPU, recycles memory, and re-binds essentials.
