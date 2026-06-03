@@ -35,6 +35,13 @@ void sgl_egl_set_error(EGLint error) {
     g_sgl.last_error = error;
 }
 
+/* True if display is our one valid, initialized display. The && short-circuits
+ * before dereferencing a foreign pointer, matching the original
+ * (!sgl_egl_display_valid(display)) guard. */
+static inline bool sgl_egl_display_valid(const sgl_display *display) {
+    return display == &g_sgl.display && display->initialized;
+}
+
 /*
  * Ensure frame is ready for rendering - called at start of frame (e.g., from glClear).
  * This implements the deko_basic pattern of acquiring at frame START, not end.
@@ -377,7 +384,7 @@ GL_APICALL void GL_APIENTRY sglShutdown(void) {
 EGLAPI const char * EGLAPIENTRY eglQueryString(EGLDisplay dpy, EGLint name) {
     sgl_display *display = (sgl_display *)dpy;
 
-    if (display != &g_sgl.display || !display->initialized) {
+    if (!sgl_egl_display_valid(display)) {
         sgl_egl_set_error(EGL_BAD_DISPLAY);
         return NULL;
     }
@@ -401,7 +408,7 @@ EGLAPI EGLBoolean EGLAPIENTRY eglGetConfigs(EGLDisplay dpy, EGLConfig *configs,
                                              EGLint config_size, EGLint *num_config) {
     sgl_display *display = (sgl_display *)dpy;
 
-    if (display != &g_sgl.display || !display->initialized) {
+    if (!sgl_egl_display_valid(display)) {
         sgl_egl_set_error(EGL_BAD_DISPLAY);
         return EGL_FALSE;
     }
@@ -431,7 +438,7 @@ EGLAPI EGLBoolean EGLAPIENTRY eglChooseConfig(EGLDisplay dpy, const EGLint *attr
     SGL_EGL_VTRACE("eglChooseConfig(%p)", dpy);
     sgl_display *display = (sgl_display *)dpy;
 
-    if (display != &g_sgl.display || !display->initialized) {
+    if (!sgl_egl_display_valid(display)) {
         sgl_egl_set_error(EGL_BAD_DISPLAY);
         return EGL_FALSE;
     }
@@ -487,7 +494,7 @@ EGLAPI EGLBoolean EGLAPIENTRY eglGetConfigAttrib(EGLDisplay dpy, EGLConfig confi
     sgl_display *display = (sgl_display *)dpy;
     sgl_config *cfg = (sgl_config *)config;
 
-    if (display != &g_sgl.display || !display->initialized) {
+    if (!sgl_egl_display_valid(display)) {
         sgl_egl_set_error(EGL_BAD_DISPLAY);
         return EGL_FALSE;
     }
@@ -565,7 +572,7 @@ EGLAPI EGLSurface EGLAPIENTRY eglCreateWindowSurface(EGLDisplay dpy, EGLConfig c
     sgl_config *cfg = (sgl_config *)config;
     (void)attrib_list;
 
-    if (display != &g_sgl.display || !display->initialized) {
+    if (!sgl_egl_display_valid(display)) {
         sgl_egl_set_error(EGL_BAD_DISPLAY);
         return EGL_NO_SURFACE;
     }
@@ -764,7 +771,7 @@ EGLAPI EGLBoolean EGLAPIENTRY eglDestroySurface(EGLDisplay dpy, EGLSurface surfa
     sgl_display *display = (sgl_display *)dpy;
     sgl_surface *surf = (sgl_surface *)surface;
 
-    if (display != &g_sgl.display || !display->initialized) {
+    if (!sgl_egl_display_valid(display)) {
         sgl_egl_set_error(EGL_BAD_DISPLAY);
         return EGL_FALSE;
     }
@@ -792,7 +799,7 @@ EGLAPI EGLBoolean EGLAPIENTRY eglQuerySurface(EGLDisplay dpy, EGLSurface surface
     sgl_display *display = (sgl_display *)dpy;
     sgl_surface *surf = (sgl_surface *)surface;
 
-    if (display != &g_sgl.display || !display->initialized) {
+    if (!sgl_egl_display_valid(display)) {
         sgl_egl_set_error(EGL_BAD_DISPLAY);
         return EGL_FALSE;
     }
@@ -828,7 +835,7 @@ EGLAPI EGLContext EGLAPIENTRY eglCreateContext(EGLDisplay dpy, EGLConfig config,
     sgl_display *display = (sgl_display *)dpy;
     (void)share_context;
 
-    if (display != &g_sgl.display || !display->initialized) {
+    if (!sgl_egl_display_valid(display)) {
         sgl_egl_set_error(EGL_BAD_DISPLAY);
         return EGL_NO_CONTEXT;
     }
@@ -903,7 +910,7 @@ EGLAPI EGLBoolean EGLAPIENTRY eglDestroyContext(EGLDisplay dpy, EGLContext conte
     sgl_display *display = (sgl_display *)dpy;
     sgl_context_t *ctx = (sgl_context_t *)context;
 
-    if (display != &g_sgl.display || !display->initialized) {
+    if (!sgl_egl_display_valid(display)) {
         sgl_egl_set_error(EGL_BAD_DISPLAY);
         return EGL_FALSE;
     }
@@ -934,7 +941,7 @@ EGLAPI EGLBoolean EGLAPIENTRY eglMakeCurrent(EGLDisplay dpy, EGLSurface draw,
     sgl_surface *read_surf = (sgl_surface *)read;
     sgl_context_t *ctx = (sgl_context_t *)context;
 
-    if (display != &g_sgl.display || !display->initialized) {
+    if (!sgl_egl_display_valid(display)) {
         sgl_egl_set_error(EGL_BAD_DISPLAY);
         return EGL_FALSE;
     }
@@ -1030,7 +1037,7 @@ EGLAPI EGLBoolean EGLAPIENTRY eglSwapBuffers(EGLDisplay dpy, EGLSurface surface)
     sgl_display *display = (sgl_display *)dpy;
     sgl_surface *surf = (sgl_surface *)surface;
 
-    if (display != &g_sgl.display || !display->initialized) {
+    if (!sgl_egl_display_valid(display)) {
         sgl_egl_set_error(EGL_BAD_DISPLAY);
         return EGL_FALSE;
     }
@@ -1080,7 +1087,7 @@ EGLAPI EGLBoolean EGLAPIENTRY eglSwapInterval(EGLDisplay dpy, EGLint interval) {
     SGL_EGL_VTRACE("eglSwapInterval(%p, %d)", dpy, interval);
     sgl_display *display = (sgl_display *)dpy;
 
-    if (display != &g_sgl.display || !display->initialized) {
+    if (!sgl_egl_display_valid(display)) {
         sgl_egl_set_error(EGL_BAD_DISPLAY);
         return EGL_FALSE;
     }
@@ -1184,7 +1191,7 @@ EGLAPI EGLBoolean EGLAPIENTRY eglQueryContext(EGLDisplay dpy, EGLContext ctx, EG
     sgl_display *display = (sgl_display *)dpy;
     sgl_context_t *context = (sgl_context_t *)ctx;
 
-    if (display != &g_sgl.display || !display->initialized) {
+    if (!sgl_egl_display_valid(display)) {
         sgl_egl_set_error(EGL_BAD_DISPLAY);
         return EGL_FALSE;
     }
