@@ -1,3 +1,11 @@
+> **STATUS — IMPLEMENTED (Jun 2026).** Both the uam emitter and the SwitchGLES
+> consumer are done and compile cleanly; the ~120-entry built-in `strcmp` table
+> has been removed. See [`REFLECTION_SIDECAR.md`](REFLECTION_SIDECAR.md) for how
+> the consumer works, and `uam/README.md` for the format and CLI. Remaining:
+> on-device validation (regenerate an example's `.dksh` with `uam --reflect`,
+> then run a dEQP-GLES2 regression). `sglRegisterUniform()` is kept as the
+> fallback for legacy binaries shipped without a `.refl`.
+
 # Plan : reflection embarquée pour shaders précompilés (uam → SwitchGLES)
 
 **But.** Supprimer la béquille des noms d'uniformes codés en dur dans

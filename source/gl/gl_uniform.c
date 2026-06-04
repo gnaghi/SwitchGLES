@@ -625,126 +625,21 @@ GL_APICALL GLint GL_APIENTRY glGetUniformLocation(GLuint program, const GLchar *
         }
     }
 
-    /* Skip built-in table for transpiled programs — they have complete uniform
-     * metadata from the transpiler. Falling through would return phantom locations
-     * for names like "u_color" that don't exist in the shader, causing spurious
-     * non-packed uniform bindings that interfere with the packed UBO path. */
-    if (prog->num_program_uniforms > 0) {
-        /* Debug: dump stored names when lookup fails */
-        return -1;
-    }
-
-    /* ========== BUILT-IN VERTEX STAGE UNIFORMS ========== */
-
-    /* Vertex binding 0: matrices and scale */
-    if (strcmp(name, "u_mvp") == 0 || strcmp(name, "Transforms") == 0 ||
-        strcmp(name, "u_modelViewProj") == 0 || strcmp(name, "u_mvpMatrix") == 0 ||
-        strcmp(name, "u_matrix") == 0 || strcmp(name, "u_projection") == 0 || /* SDL_Renderer */
-        strcmp(name, "u_testScale") == 0 ||
-        strcmp(name, "ModelViewProjectionMatrix") == 0) { /* es2gears */
-        GLint loc = (0 << 16) | 0;
-        sgl_track_active_uniform(prog, name, loc, GL_FLOAT_MAT4, 1);
-        return loc;
-    }
-
-    /* Vertex binding 1: offset vec2/vec4 or NormalMatrix or Model matrix */
-    if (strcmp(name, "u_offset") == 0 || strcmp(name, "u_normalMatrix") == 0 ||
-        strcmp(name, "u_testOffset2") == 0 || strcmp(name, "u_model") == 0 || /* PBR model matrix */
-        strcmp(name, "Model") == 0 ||                                         /* UBO block name */
-        strcmp(name, "ModelMatrix") == 0 ||  /* blinn_phong block name */
-        strcmp(name, "NormalMatrix") == 0) { /* es2gears */
-        GLint loc = (0 << 16) | 1;
-        sgl_track_active_uniform(prog, name, loc, GL_FLOAT_MAT4, 1);
-        return loc;
-    }
-
-    /* Vertex binding 2: offset3 vec3 or LightSourcePosition */
-    if (strcmp(name, "u_testOffset3") == 0 ||
-        strcmp(name, "LightSourcePosition") == 0) { /* es2gears */
-        GLint loc = (0 << 16) | 2;
-        sgl_track_active_uniform(prog, name, loc, GL_FLOAT_VEC4, 1);
-        return loc;
-    }
-
-    /* Vertex binding 3: mat2 or MaterialColor */
-    if (strcmp(name, "u_testMat2") == 0 || strcmp(name, "MaterialColor") == 0) { /* es2gears */
-        GLint loc = (0 << 16) | 3;
-        sgl_track_active_uniform(prog, name, loc, GL_FLOAT_VEC4, 1);
-        return loc;
-    }
-
-    /* Vertex binding 4: mat3 */
-    if (strcmp(name, "u_testMat3") == 0) {
-        GLint loc = (0 << 16) | 4;
-        sgl_track_active_uniform(prog, name, loc, GL_FLOAT_MAT3, 1);
-        return loc;
-    }
-
-    /* ========== BUILT-IN FRAGMENT STAGE UNIFORMS ========== */
-
-    /* Fragment binding 0: color vec4 or alpha float or blend */
-    if (strcmp(name, "u_color") == 0 || strcmp(name, "FragUniforms") == 0 ||
-        strcmp(name, "u_baseColor") == 0 || strcmp(name, "u_testAlpha") == 0 ||
-        strcmp(name, "u_blend") == 0) {
-        GLint loc = (1 << 16) | 0;
-        sgl_track_active_uniform(prog, name, loc, GL_FLOAT_VEC4, 1);
-        return loc;
-    }
-
-    /* Fragment binding 1: vec2/vec4 or time or Material block (skybox) */
-    if (strcmp(name, "u_testVec2") == 0 || strcmp(name, "u_alpha") == 0 ||
-        strcmp(name, "u_time") == 0 ||
-        strcmp(name, "Material") == 0) { /* UBO block name for skybox */
-        GLint loc = (1 << 16) | 1;
-        sgl_track_active_uniform(prog, name, loc, GL_FLOAT_VEC4, 1);
-        return loc;
-    }
-
-    /* Fragment binding 2: vec3/vec4 or mode or material params (PBR) */
-    if (strcmp(name, "u_testVec3") == 0 || strcmp(name, "u_mode") == 0 ||
-        strcmp(name, "u_material") == 0 ||  /* PBR material params */
-        strcmp(name, "u_light") == 0 ||     /* Blinn-Phong light uniform */
-        strcmp(name, "LightParams") == 0) { /* Blinn-Phong light UBO block */
-        GLint loc = (1 << 16) | 2;
-        sgl_track_active_uniform(prog, name, loc, GL_FLOAT_VEC4, 1);
-        return loc;
-    }
-
-    /* Fragment binding 3: vec4 */
-    if (strcmp(name, "u_testVec4") == 0) {
-        GLint loc = (1 << 16) | 3;
-        sgl_track_active_uniform(prog, name, loc, GL_FLOAT_VEC4, 1);
-        return loc;
-    }
-
-    /* Fragment binding 4: int mode (for alluniform shader) */
-    if (strcmp(name, "u_testMode") == 0) {
-        GLint loc = (1 << 16) | 4;
-        sgl_track_active_uniform(prog, name, loc, GL_INT, 1);
-        return loc;
-    }
-
-    /* Fragment binding 5: ivec2 */
-    if (strcmp(name, "u_testIvec2") == 0) {
-        GLint loc = (1 << 16) | 5;
-        sgl_track_active_uniform(prog, name, loc, GL_INT_VEC2, 1);
-        return loc;
-    }
-
-    /* Fragment binding 6: ivec3 */
-    if (strcmp(name, "u_testIvec3") == 0) {
-        GLint loc = (1 << 16) | 6;
-        sgl_track_active_uniform(prog, name, loc, GL_INT_VEC3, 1);
-        return loc;
-    }
-
-    /* Fragment binding 7: ivec4 */
-    if (strcmp(name, "u_testIvec4") == 0) {
-        GLint loc = (1 << 16) | 7;
-        sgl_track_active_uniform(prog, name, loc, GL_INT_VEC4, 1);
-        return loc;
-    }
-
+    /* No match in any reflection table (user registry, transpiler/Mesa metadata,
+     * or a precompiled `.refl` sidecar). Per GLES2 §2.10.4 the name is not an
+     * active uniform → return -1.
+     *
+     * A ~120-entry strcmp table of hardcoded built-in names (u_mvp, u_color,
+     * ModelViewProjectionMatrix, SDL_Renderer, es2gears, spearmint, dEQP test
+     * uniforms, …) used to live here to serve precompiled DKSH shaders that
+     * carried no reflection. It was removed once uam learned to emit a `.refl`
+     * reflection sidecar (loaded in sgl_load_shader_from_file): precompiled
+     * shaders now populate the same program_uniforms/samplers tables as
+     * runtime-compiled ones, so resolution above already covers every name.
+     *
+     * Precompiled shaders WITHOUT a `.refl` must register names explicitly via
+     * sglRegisterUniform()/sglRegisterPackedUniform() — checked first, and kept
+     * as the documented fallback for legacy binaries. */
     return -1;
 }
 

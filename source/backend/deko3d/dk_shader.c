@@ -52,9 +52,16 @@ bool dk_load_shader_file(sgl_backend_t *be, sgl_handle_t handle, const char *pat
         return false;
     }
 
-    /* Align code offset to 256 bytes */
+    /* Align code offset and size to 256 bytes */
     uint32_t aligned_offset = SGL_ALIGN_UP(dk->code_offset, SGL_CODE_ALIGNMENT);
+    uint32_t aligned_size = (uint32_t)SGL_ALIGN_UP(size, SGL_CODE_ALIGNMENT);
     uint8_t *code_ptr = (uint8_t *)dkMemBlockGetCpuAddr(dk->code_memblock) + aligned_offset;
+
+    /* Zero the aligned region before reading the DKSH (same as the binary path).
+     * dkShaderInitialize / the GPU may read up to the aligned boundary, and uam
+     * does not zero DKSH internal padding — leaving garbage here corrupts the
+     * shader and faults the GPU on draw. */
+    memset(code_ptr, 0, aligned_size);
 
     if (fread(code_ptr, 1, size, f) != (size_t)size) {
         fclose(f);
@@ -81,7 +88,7 @@ bool dk_load_shader_file(sgl_backend_t *be, sgl_handle_t handle, const char *pat
     if (!dk->shader_loaded[handle])
         dk->active_shader_count++;
     dk->shader_loaded[handle] = true;
-    dk->code_offset = aligned_offset + SGL_ALIGN_UP(size, SGL_CODE_ALIGNMENT);
+    dk->code_offset = aligned_offset + aligned_size;
 
     SGL_TRACE_SHADER("load_shader_file: handle=%u path=%s at 0x%lx (valid, active=%u)", handle,
                      path, (unsigned long)code_addr, dk->active_shader_count);

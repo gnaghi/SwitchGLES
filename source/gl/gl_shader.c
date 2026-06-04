@@ -791,6 +791,139 @@ GL_APICALL void GL_APIENTRY glGetShaderSource(GLuint shader, GLsizei bufSize, GL
     }
 }
 
+#ifdef SGL_ENABLE_RUNTIME_COMPILER
+/*
+ * Load a uam reflection sidecar ("<dksh>.refl") for a precompiled shader.
+ *
+ * A precompiled DKSH binary carries only numeric bindings and loses the GL
+ * uniform/attribute names, so glGetUniformLocation() cannot resolve arbitrary
+ * names from it alone. uam can emit a `.refl` next to the `.dksh` (see uam's
+ * uam_write_reflection / CLI --reflect). We parse it into a sgl_mesa_metadata_t
+ * and attach it exactly like the runtime Mesa path: glLinkProgram's
+ * sgl_link_program_mesa() then populates the same program_uniforms / samplers /
+ * attrib tables, so precompiled and runtime-compiled shaders converge on one
+ * reflection code path.
+ *
+ * Returns true if a valid sidecar was loaded. Absence or malformation is not an
+ * error — the shader still works, falling back to sglRegisterUniform().
+ */
+static bool sgl_load_reflection_sidecar(sgl_shader_t *sh, const char *dksh_path) {
+    if (!sh || !dksh_path)
+        return false;
+
+    char refl_path[1024];
+    int n = snprintf(refl_path, sizeof(refl_path), "%s.refl", dksh_path);
+    if (n < 0 || n >= (int)sizeof(refl_path))
+        return false;
+
+    FILE *f = fopen(refl_path, "rb");
+    if (!f)
+        return false;
+
+    uam_refl_header_t hdr;
+    if (fread(&hdr, 1, sizeof(hdr), f) != sizeof(hdr) ||
+        memcmp(hdr.magic, UAM_REFL_MAGIC, sizeof(hdr.magic)) != 0 ||
+        hdr.version != UAM_REFL_VERSION) {
+        fclose(f);
+        return false;
+    }
+
+    sgl_mesa_metadata_t *meta = (sgl_mesa_metadata_t *)calloc(1, sizeof(*meta));
+    if (!meta) {
+        fclose(f);
+        return false;
+    }
+    meta->constbuf_size = hdr.constbuf_size;
+    meta->depth_range_offset = hdr.depth_range_offset;
+
+    bool ok = true;
+
+    /* Uniforms: convert (base_type, vec, mat) → GLenum exactly like the Mesa path. */
+    for (uint32_t i = 0; i < hdr.num_uniforms && ok; i++) {
+        uam_refl_uniform_t rec;
+        if (fread(&rec, 1, sizeof(rec), f) != sizeof(rec)) {
+            ok = false;
+            break;
+        }
+        if (meta->num_uniforms >= SGL_MESA_MAX_UNIFORMS)
+            continue; /* drop overflow but keep reading to stay file-aligned */
+        int slot = meta->num_uniforms++;
+        strncpy(meta->uniforms[slot].name, rec.name, SGL_ATTRIB_NAME_MAX - 1);
+        meta->uniforms[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+        meta->uniforms[slot].offset = rec.offset;
+        meta->uniforms[slot].size_bytes = rec.size_bytes;
+        meta->uniforms[slot].array_elements = rec.array_elements;
+        meta->uniforms[slot].gl_type =
+            uam_base_type_to_gl(rec.base_type, rec.vector_elements, rec.matrix_columns);
+    }
+
+    /* Samplers */
+    for (uint32_t i = 0; i < hdr.num_samplers && ok; i++) {
+        uam_refl_sampler_t rec;
+        if (fread(&rec, 1, sizeof(rec), f) != sizeof(rec)) {
+            ok = false;
+            break;
+        }
+        if (meta->num_samplers >= SGL_MESA_MAX_SAMPLERS)
+            continue;
+        int slot = meta->num_samplers++;
+        strncpy(meta->samplers[slot].name, rec.name, SGL_ATTRIB_NAME_MAX - 1);
+        meta->samplers[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+        meta->samplers[slot].binding = rec.binding;
+        meta->samplers[slot].gl_type = (rec.type == 1) ? GL_SAMPLER_CUBE : GL_SAMPLER_2D;
+    }
+
+    /* Vertex inputs (attributes) */
+    for (uint32_t i = 0; i < hdr.num_inputs && ok; i++) {
+        uam_refl_input_t rec;
+        if (fread(&rec, 1, sizeof(rec), f) != sizeof(rec)) {
+            ok = false;
+            break;
+        }
+        if (meta->num_inputs >= SGL_MESA_MAX_INPUTS)
+            continue;
+        int slot = meta->num_inputs++;
+        strncpy(meta->inputs[slot].name, rec.name, SGL_ATTRIB_NAME_MAX - 1);
+        meta->inputs[slot].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+        meta->inputs[slot].location = rec.location;
+        meta->inputs[slot].gl_type =
+            uam_base_type_to_gl(rec.base_type, rec.vector_elements, rec.matrix_columns);
+    }
+
+    /* Initial driver-constbuf data (Mesa-embedded literals/state) */
+    if (ok && hdr.constbuf_data_size > 0) {
+        meta->initial_data = (uint8_t *)malloc(hdr.constbuf_data_size);
+        if (meta->initial_data &&
+            fread(meta->initial_data, 1, hdr.constbuf_data_size, f) == hdr.constbuf_data_size)
+            meta->initial_data_size = hdr.constbuf_data_size;
+        else
+            ok = false;
+    }
+
+    fclose(f);
+
+    if (!ok) {
+        if (meta->initial_data)
+            free(meta->initial_data);
+        free(meta);
+        return false;
+    }
+
+    /* Attach, replacing any prior metadata, and flag as Mesa-style so the
+     * link path populates program reflection from it. */
+    if (sh->mesa_meta) {
+        if (sh->mesa_meta->initial_data)
+            free(sh->mesa_meta->initial_data);
+        free(sh->mesa_meta);
+    }
+    sh->mesa_meta = meta;
+    sh->compiled_via_mesa = true;
+    SGL_TRACE_SHADER("loaded reflection sidecar %s (%d uniforms, %d samplers, %d inputs)", refl_path,
+                     meta->num_uniforms, meta->num_samplers, meta->num_inputs);
+    return true;
+}
+#endif /* SGL_ENABLE_RUNTIME_COMPILER */
+
 /* Load pre-compiled shader from file - delegates to backend */
 bool sgl_load_shader_from_file(GLuint shader_id, const char *path) {
     sgl_context_t *ctx = sgl_get_current_context();
@@ -806,6 +939,11 @@ bool sgl_load_shader_from_file(GLuint shader_id, const char *path) {
         bool result = ctx->backend->ops->load_shader_file(ctx->backend, shader_id, path);
         if (result) {
             shader->compiled = true;
+#ifdef SGL_ENABLE_RUNTIME_COMPILER
+            /* Pick up an optional uam reflection sidecar so glGetUniformLocation
+             * resolves names without sglRegisterUniform(). */
+            sgl_load_reflection_sidecar(shader, path);
+#endif
         }
         return result;
     }
