@@ -207,14 +207,16 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
                         }
                     } else if (attr->buffer > 0) {
                         /* VBO path: check VBO offset proximity (same interleaving logic)
-                         * Only share if this attribute's offset is within one stride of
+                         * Only share if this attribute's offset is within one stride AFTER
                          * the slot's base offset. Non-interleaved VBOs (offsets differ by
-                         * thousands of bytes) must get separate buffer slots. */
+                         * thousands of bytes) must get separate buffer slots. An attribute
+                         * located BEFORE the slot base (e.g. texcoord @0 when position @16
+                         * created the slot) would get a negative, wrapped offset: it gets
+                         * its own slot instead (GFXBench Egypt/T-Rex layout). */
                         uint32_t baseVBOPtr = bufferVBOPtrs[j];
                         uint32_t thisVBOPtr = (uint32_t)(uintptr_t)attr->pointer;
-                        uint32_t diff = (thisVBOPtr >= baseVBOPtr) ? (thisVBOPtr - baseVBOPtr)
-                                                                   : (baseVBOPtr - thisVBOPtr);
-                        if (diff < (uint32_t)effectiveStride) {
+                        if (thisVBOPtr >= baseVBOPtr &&
+                            thisVBOPtr - baseVBOPtr < (uint32_t)effectiveStride) {
                             bufIdx = j;
                             /* Compute offset relative to buffer slot's base VBO pointer */
                             attrOffset = thisVBOPtr - baseVBOPtr;
