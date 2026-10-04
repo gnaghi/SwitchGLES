@@ -12,6 +12,9 @@
 #include <string.h>
 #include <stdio.h>
 #include <switch.h> /* svcSleepThread */
+#ifdef SGL_ENABLE_RUNTIME_COMPILER
+#include <uam.h>
+#endif
 
 /* SGL_EGL_VERBOSE / SGL_EGL_VTRACE moved to egl_internal.h (shared). */
 
@@ -252,6 +255,13 @@ EGLAPI EGLBoolean EGLAPIENTRY eglInitialize(EGLDisplay dpy, EGLint *major, EGLin
     display->minor_version = 4;
     display->initialized = true;
 
+#ifdef SGL_ENABLE_RUNTIME_COMPILER
+    /* Keep Mesa's GLSL frontend (types + builtin functions) alive while the
+     * display is initialized. Otherwise every per-shader uam compiler rebuilds
+     * all builtins from scratch (~28 ms per shader on Switch, ~3x the compile). */
+    uam_retain_frontend();
+#endif
+
     if (major)
         *major = display->major_version;
     if (minor)
@@ -328,6 +338,10 @@ EGLAPI EGLBoolean EGLAPIENTRY eglTerminate(EGLDisplay dpy) {
      * (OOM after ~20 cycles). The device is only destroyed at process exit. */
     SGL_TRACE_EGL("eglTerminate: device kept alive (anti-fragmentation)");
 
+#ifdef SGL_ENABLE_RUNTIME_COMPILER
+    uam_release_frontend(); /* Balances the retain in eglInitialize */
+#endif
+
     display->initialized = false;
     sgl_set_current_context(NULL);
     g_sgl.current_context = NULL;
@@ -377,6 +391,11 @@ GL_APICALL void GL_APIENTRY sglShutdown(void) {
         dkDeviceDestroy(g_sgl.display.device);
         g_sgl.display.device = NULL;
     }
+
+#ifdef SGL_ENABLE_RUNTIME_COMPILER
+    if (g_sgl.display.initialized)
+        uam_release_frontend(); /* eglTerminate was skipped: balance eglInitialize */
+#endif
 
     g_sgl.display.initialized = false;
     sgl_set_current_context(NULL);

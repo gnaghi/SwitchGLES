@@ -397,11 +397,6 @@ void dk_draw_arrays(sgl_backend_t *be, GLenum mode, GLint first, GLsizei count) 
     dk->draws_since_flush++;
     dkCmdBufDraw(dk->cmdbuf, prim, count, 1, first, 0);
 
-    /* Insert barrier after FBO draws to ensure proper synchronization */
-    if (dk->current_fbo != 0) {
-        dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, 0);
-    }
-
     DK_VERBOSE_PRINT("[DK] draw_arrays: mode=0x%X first=%d count=%d\n", mode, first, count);
     SGL_TRACE_DRAW("draw_arrays mode=0x%X first=%d count=%d", mode, first, count);
 }
@@ -543,11 +538,6 @@ void dk_draw_elements(sgl_backend_t *be, GLenum mode, GLsizei count, GLenum type
     dk->draws_since_flush++;
     dkCmdBufBindIdxBuffer(dk->cmdbuf, idxFormat, idxAddr);
     dkCmdBufDrawIndexed(dk->cmdbuf, prim, count, 1, 0, 0, 0);
-
-    /* Insert barrier after FBO draws to ensure proper synchronization */
-    if (dk->current_fbo != 0) {
-        dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, 0);
-    }
 
     DK_VERBOSE_PRINT("[DK] draw_elements: mode=0x%X count=%d type=0x%X ebo=%u\n", mode, count, type,
                      ebo);

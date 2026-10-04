@@ -460,9 +460,9 @@ static bool sgl_compile_es100_mesa(sgl_context_t *ctx, GLuint shader_id, sgl_sha
         memset(dksh, 0, alloc_size);
         uam_write_code(compiler, dksh);
 
-        /* Store to shader cache */
-        sgl_shader_cache_store(sh->source, (int)stage, dksh, dksh_size);
-
+        /* No shader cache on this path: a cached DKSH alone cannot be reused
+         * (the Mesa metadata above would be missing), and the SD write cost
+         * ~0.6 s per shader vs ~10 ms for the whole Mesa+NV50 compile. */
         if (ctx->backend && ctx->backend->ops->load_shader_binary) {
             result =
                 ctx->backend->ops->load_shader_binary(ctx->backend, shader_id, dksh, dksh_size);

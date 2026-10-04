@@ -1657,6 +1657,11 @@ void dk_generate_mipmap(sgl_backend_t *be, sgl_handle_t handle) {
     bool is_cubemap = dk->texture_is_cubemap[handle];
     int num_faces = is_cubemap ? 6 : 1;
 
+    /* Level 0 may have just been rendered by the 3D pipe (FBO still bound,
+     * e.g. render-to-texture then glGenerateMipmap): drain it and invalidate
+     * caches before the 2D engine reads it. */
+    dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);
+
     /* Generate each mip level by blitting from the previous level.
      * For cubemaps, iterate over all 6 faces per mip level. */
     for (int face = 0; face < num_faces; face++) {
