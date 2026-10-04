@@ -711,6 +711,15 @@ GL_APICALL GLint GL_APIENTRY glGetAttribLocation(GLuint program, const GLchar *n
         }
     }
 
+    /* GLES2 §2.10.4: a name that is not an active attribute returns -1.
+     * The built-in name table below is only a guess for precompiled shaders that
+     * carry no reflection. Applying it to a reflected program hands out a fake
+     * location for a declared-but-unused attribute (e.g. "in_normal" -> 2 in a
+     * depth-only variant), and the app's glVertexAttribPointer on that index then
+     * overwrites a real attribute (GFXBench Egypt Z-prepass skinning). */
+    if (prog->attribs_reflected)
+        return -1;
+
     /* Fall back to built-in attribute name table */
     return lookup_builtin_attrib(name);
 }

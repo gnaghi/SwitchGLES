@@ -222,6 +222,8 @@ typedef struct sgl_program {
     int num_attrib_bindings;
     int num_active_attribs; /* Count of attributes actually in linked shader (for
                                GL_ACTIVE_ATTRIBUTES) */
+    bool attribs_reflected; /* VS attribute set known at link (runtime compile or .refl):
+                               glGetAttribLocation of an inactive name must return -1 */
     /* Active uniform tracking (populated by glGetUniformLocation) */
     sgl_active_uniform_info_t active_uniforms[SGL_MAX_UNIFORMS * 2]; /* VS + FS */
     int num_active_uniforms;

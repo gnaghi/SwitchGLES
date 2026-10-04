@@ -339,6 +339,7 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog, sgl_shade
     /* Populate attrib bindings from VS input metadata */
     if (vs_mesa && vs_sh->mesa_meta) {
         sgl_mesa_metadata_t *meta = vs_sh->mesa_meta;
+        prog->attribs_reflected = true;
         /* GL_ACTIVE_ATTRIBUTES = count of attributes in the compiled shader,
          * NOT the total num_attrib_bindings (which includes inactive user-bound). */
         prog->num_active_attribs =
@@ -1090,6 +1091,7 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program, sgl_p
 
     /* 8. Register attrib bindings from transpiler result into program */
     prog->num_active_attribs = vs_result.num_attributes;
+    prog->attribs_reflected = true;
     /* Clear in_shader flag and linked_location for all existing bindings */
     for (int j = 0; j < prog->num_attrib_bindings; j++) {
         prog->attrib_bindings[j].in_shader = false;
@@ -1173,6 +1175,7 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
 
     /* Reset active attrib count for relink — will be set by Mesa or transpiler path below */
     prog->num_active_attribs = 0;
+    prog->attribs_reflected = false;
 
 #ifdef SGL_ENABLE_RUNTIME_COMPILER
     sgl_shader_t *vs_sh = prog->vertex_shader ? GET_SHADER(prog->vertex_shader) : NULL;
