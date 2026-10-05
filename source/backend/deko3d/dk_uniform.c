@@ -34,14 +34,12 @@ uint32_t dk_alloc_uniform(sgl_backend_t *be, uint32_t size) {
      * This avoids data corruption when the uniform buffer is full: subsequent
      * draws will share the same uniform slot (wrong data) but won't overwrite
      * the first draw's data at offset 0. */
-    if (dk->uniform_offset + alignedSize > SGL_UNIFORM_BUF_SIZE) {
+    if (dk->uniform_offset + alignedSize > dk->uniform_slot_end) {
         dk->diag_uniform_overflows++;
         SGL_ERROR_BACKEND("alloc_uniform: out of uniform memory (need %u, have %u)", alignedSize,
-                          SGL_UNIFORM_BUF_SIZE - dk->uniform_offset);
-        /* Return last valid offset (at least 256 bytes from end) so writes
-         * go to a safe location rather than offset 0 */
-        uint32_t fallback =
-            SGL_UNIFORM_BUF_SIZE > alignedSize ? SGL_UNIFORM_BUF_SIZE - alignedSize : 0;
+                          dk->uniform_slot_end - dk->uniform_offset);
+        /* Return the last block of the slot so writes stay inside it */
+        uint32_t fallback = dk->uniform_slot_end - alignedSize;
         return fallback;
     }
 

@@ -56,7 +56,7 @@ void dk_cmdbuf_overflow_cb(void *userData, DkCmdBuf cmdbuf, size_t minReqSize) {
         dk->client_array_offset = dk->current_slot * per_slot_size;
         dk->client_array_slot_end = (dk->current_slot + 1) * per_slot_size;
     }
-    dk->uniform_offset = 0;
+    dk_reset_uniform_slot(dk, dk->current_slot);
     dk->draws_since_flush = 0;
 
     /* Re-bind essentials lost when cmdbuf was cleared */
@@ -161,6 +161,12 @@ void dk_rebind_render_target(dk_backend_data_t *dk) {
  * texture/FBO upload and readback paths (dk_texture.c). Does not touch the
  * deferred VBO free list — see dk_submit_and_reset() for the frame path.
  */
+void dk_reset_uniform_slot(dk_backend_data_t *dk, int slot) {
+    uint32_t per_slot = (SGL_UNIFORM_BUF_SIZE / SGL_FB_NUM) & ~(SGL_UNIFORM_ALIGNMENT - 1);
+    dk->uniform_offset = (uint32_t)slot * per_slot;
+    dk->uniform_slot_end = dk->uniform_offset + per_slot;
+}
+
 void dk_flush_sync(dk_backend_data_t *dk) {
     DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
     dkQueueSubmitCommands(dk->queue, cmdlist);
@@ -201,7 +207,7 @@ void dk_submit_and_reset(dk_backend_data_t *dk) {
         dk->client_array_offset = dk->current_slot * per_slot_size;
         dk->client_array_slot_end = (dk->current_slot + 1) * per_slot_size;
     }
-    dk->uniform_offset = 0;
+    dk_reset_uniform_slot(dk, dk->current_slot);
 
     /* Eagerly re-bind descriptor sets after cmdbuf clear (matches legacy pattern) */
     dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
@@ -377,10 +383,9 @@ void dk_wait_fence(sgl_backend_t *be, int slot) {
     dk->descriptors_bound = false;
     dk->cmdbuf_submitted = false;
 
-    /* Reset uniform allocator for new frame.
-     * This is safe because pushConstants copied uniform data into the command buffer
-     * at record time, so the GPU no longer references the CPU uniform memory. */
-    dk->uniform_offset = 0;
+    /* Restart this slot's uniform sub-region: the fence wait above guarantees
+     * the GPU finished every draw that read it. */
+    dk_reset_uniform_slot(dk, slot);
 
     SGL_TRACE_BACKEND("wait_fence slot=%d", slot);
 }

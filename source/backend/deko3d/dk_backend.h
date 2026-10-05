@@ -55,7 +55,8 @@ typedef struct dk_backend_data {
 
     /* Uniform buffer region */
     uint32_t uniform_base;
-    uint32_t uniform_offset;
+    uint32_t uniform_offset;   /* Bump allocator, never reused within a frame */
+    uint32_t uniform_slot_end; /* End of the current frame slot's sub-region */
 
     /* Client array region (per-frame, per-slot to avoid GPU race conditions) */
     uint32_t client_array_base;

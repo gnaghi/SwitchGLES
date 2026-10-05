@@ -289,7 +289,7 @@ int dk_init(sgl_backend_t *be, void *device) {
 
     /* Reserve regions within data memory */
     dk->uniform_base = SGL_DATA_MEM_SIZE - SGL_UNIFORM_BUF_SIZE;
-    dk->uniform_offset = 0;
+    dk_reset_uniform_slot(dk, 0);
     dk->client_array_base =
         192 * 1024 *
         1024; /* 192MB for static VBOs (spearmint map+model geo), rest = client arrays */

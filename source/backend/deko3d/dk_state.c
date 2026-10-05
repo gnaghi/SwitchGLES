@@ -31,27 +31,35 @@
  * Viewport State
  * ============================================================================ */
 
-/* Client array exhaustion threshold.
- * Flush when client_array is nearly full. Uniform exhaustion is no longer
- * possible because uniform_offset is reset per-draw (pushConstants captures
- * data in the cmdbuf immediately). cbAddMem callback handles cmdbuf overflow. */
+/* Client array / uniform exhaustion thresholds.
+ * Flush (submit + wait idle, which restarts both allocators) when either
+ * sub-region of the current frame slot is nearly full. A draw needs at most
+ * 4 packed UBOs of SGL_MAX_PACKED_UBO_SIZE plus the legacy uniform blocks.
+ * cbAddMem callback handles cmdbuf overflow. */
 #define DK_CLIENT_ARRAY_MIN_REMAIN (64 * 1024)
+#define DK_UNIFORM_MIN_REMAIN (128 * 1024)
 
 void dk_apply_viewport(sgl_backend_t *be, const sgl_viewport_state_t *state) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
-    /* Reset uniform staging offset — pushConstants already captured previous
-     * draw's data into the cmdbuf, so the staging area can be freely reused.
-     * This eliminates uniform exhaustion entirely regardless of draw count. */
-    dk->uniform_offset = 0;
+    /* Uniform memory is NOT reused between draws of a frame. dkCmdBufPushConstants
+     * makes the GPU write the data into the UBO when it reaches the command, but
+     * the fragments of the previous draws may still be reading constants then:
+     * two draws sharing a UBO address made the earlier one read the later one's
+     * constants (GFXBench Egypt: black ceiling / wrong far room after a program
+     * switch, fixed by a wait-for-idle between the two draws). Each draw gets
+     * fresh space from the frame slot's sub-region, restarted only once the GPU
+     * is done with it (slot fence or wait idle). */
 
-    /* Pre-draw overflow check: flush when client_array is running low.
-     * This runs BEFORE any state is recorded into the cmdbuf, so after flush
-     * sgl_prepare_draw will cleanly re-establish all state in the fresh cmdbuf.
-     * cbAddMem callback handles cmdbuf overflow (safety net). */
+    /* Pre-draw overflow check: flush when client_array or uniform space is
+     * running low. This runs BEFORE any state is recorded into the cmdbuf, so
+     * after flush sgl_prepare_draw will cleanly re-establish all state in the
+     * fresh cmdbuf. cbAddMem callback handles cmdbuf overflow (safety net). */
     {
         uint32_t client_remaining = dk->client_array_slot_end - dk->client_array_offset;
-        if (client_remaining < DK_CLIENT_ARRAY_MIN_REMAIN) {
+        uint32_t uniform_remaining = dk->uniform_slot_end - dk->uniform_offset;
+        if (client_remaining < DK_CLIENT_ARRAY_MIN_REMAIN ||
+            uniform_remaining < DK_UNIFORM_MIN_REMAIN) {
             dk_submit_and_reset(dk);
         }
     }

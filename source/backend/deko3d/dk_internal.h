@@ -172,6 +172,13 @@ void dk_submit_and_reset(dk_backend_data_t *dk);
 void dk_flush_sync(dk_backend_data_t *dk);
 
 /**
+ * Restart the uniform allocator at the beginning of a frame slot's sub-region.
+ * Only valid once the GPU no longer reads that sub-region (slot fence waited,
+ * or queue idle).
+ */
+void dk_reset_uniform_slot(dk_backend_data_t *dk, int slot);
+
+/**
  * Insert a freed block into the sorted VBO free-list, coalescing with adjacent
  * blocks. Shared by dk_buffer_free() and dk_submit_and_reset()'s deferred-free
  * processing.

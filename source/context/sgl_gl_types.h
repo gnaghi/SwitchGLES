@@ -18,7 +18,7 @@
 #define SGL_CODE_MEM_SIZE (16 * 1024 * 1024)  /* 16MB for precompiled shaders */
 #define SGL_CMD_MEM_SIZE (4 * 1024 * 1024)    /* 4MB - large for flush_finish calibration loops */
 #define SGL_DATA_MEM_SIZE (256 * 1024 * 1024) /* 256MB (VBOs + client arrays + uniforms) */
-#define SGL_UNIFORM_BUF_SIZE (1024 * 1024)    /* 1MB (spearmint needs ~30 uniforms × many draws) */
+#define SGL_UNIFORM_BUF_SIZE (15 * 1024 * 1024) /* 15MB: one 5MB sub-region per frame slot */
 #define SGL_UNIFORM_ALIGNMENT 0x100           /* DK_UNIFORM_BUF_ALIGNMENT */
 #define SGL_CODE_ALIGNMENT 0x100              /* Shader code alignment (256 bytes) */
 #define SGL_PAGE_ALIGNMENT 0x1000             /* Memory block page alignment (4KB) */
