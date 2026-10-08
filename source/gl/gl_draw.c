@@ -7,6 +7,7 @@
  */
 
 #include "gl_common.h"
+#include "../util/sgl_perf.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -43,6 +44,7 @@ static bool sgl_is_texture_complete(const sgl_texture_t *tex) {
 static void sgl_prepare_draw(sgl_context_t *ctx) {
     if (!ctx->backend || !ctx->backend->ops)
         return;
+    SGL_PERF_BEGIN(perf_state);
 
     /* Apply viewport - MUST be set before drawing */
     if (ctx->backend->ops->apply_viewport) {
@@ -156,10 +158,15 @@ static void sgl_prepare_draw(sgl_context_t *ctx) {
         }
     }
 
+    SGL_PERF_END(SGL_PERF_STATE, perf_state);
+
     /* Bind program with shaders FIRST (textures must be bound AFTER shaders in deko3d) */
+    SGL_PERF_BEGIN(perf_prog);
     if (ctx->current_program > 0) {
         sgl_bind_program_for_draw(ctx, ctx->current_program);
     }
+    SGL_PERF_END(SGL_PERF_PROGRAM, perf_prog);
+    SGL_PERF_BEGIN(perf_tex);
 
     /* Bind all active texture units AFTER program (deko3d requires bindTextures after bindShaders).
      * Use per-program sampler remap: for each sampler, bind the texture from its tex_unit
@@ -296,6 +303,7 @@ static void sgl_prepare_draw(sgl_context_t *ctx) {
             }
         }
     }
+    SGL_PERF_END(SGL_PERF_TEXTURES, perf_tex);
 }
 
 GL_APICALL void GL_APIENTRY glDrawArrays(GLenum mode, GLint first, GLsizei count) {
@@ -352,6 +360,7 @@ GL_APICALL void GL_APIENTRY glDrawArrays(GLenum mode, GLint first, GLsizei count
     }
 
     /* Prepare state */
+    SGL_PERF_BEGIN(perf_draw);
     sgl_prepare_draw(ctx);
 
     /* Prepare vertex attributes with buffer offsets */
@@ -371,15 +380,20 @@ GL_APICALL void GL_APIENTRY glDrawArrays(GLenum mode, GLint first, GLsizei count
     }
 
     /* Bind vertex attributes via backend */
+    SGL_PERF_BEGIN(perf_attr);
     if (ctx->backend->ops->bind_vertex_attribs) {
         ctx->backend->ops->bind_vertex_attribs(ctx->backend, prepared_attribs, SGL_MAX_ATTRIBS,
                                                first, count);
     }
+    SGL_PERF_END(SGL_PERF_ATTRIBS, perf_attr);
 
     /* Draw via backend */
+    SGL_PERF_BEGIN(perf_bk);
     if (ctx->backend->ops->draw_arrays) {
         ctx->backend->ops->draw_arrays(ctx->backend, mode, first, count);
     }
+    SGL_PERF_END(SGL_PERF_BACKEND_DRAW, perf_bk);
+    SGL_PERF_END(SGL_PERF_DRAW, perf_draw);
 
     SGL_TRACE_DRAW("glDrawArrays(mode=0x%X, first=%d, count=%d)", mode, first, count);
 }
@@ -449,6 +463,7 @@ GL_APICALL void GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum ty
     }
 
     /* Prepare state */
+    SGL_PERF_BEGIN(perf_draw);
     sgl_prepare_draw(ctx);
 
     /* Prepare vertex attributes with buffer offsets */
@@ -474,7 +489,26 @@ GL_APICALL void GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum ty
      * This applies for BOTH client-side indices AND EBO-bound indices,
      * because vertex attributes may still be client pointers. */
     GLsizei vertex_count = count; /* Default: use index count (safe for VBOs) */
-    if (ctx->bound_element_buffer == 0 && indices != NULL) {
+    SGL_PERF_BEGIN(perf_scan);
+
+    /* The backend only uses the vertex count for attributes it has to copy or
+     * convert on the CPU (client arrays, GL_FIXED) and for a VBO pointer past the
+     * end of its buffer; a regular VBO attribute is bound with the full buffer
+     * extent. Skip the max-index scan otherwise: reading every index back from
+     * uncached GPU memory cost 10-70 ms per frame in GFXBench T-Rex/Egypt. */
+    bool need_vertex_count = false;
+    for (int i = 0; i < SGL_MAX_ATTRIBS && !need_vertex_count; i++) {
+        const sgl_vertex_attrib_t *attr = &prepared_attribs[i];
+        if (!attr->enabled)
+            continue;
+        if ((attr->buffer == 0 && attr->pointer != NULL) || attr->type == GL_FIXED ||
+            (attr->buffer > 0 && attr->buffer_data_size <= (uint32_t)(uintptr_t)attr->pointer))
+            need_vertex_count = true;
+    }
+
+    if (!need_vertex_count) {
+        /* VBO-only draw: vertex_count is not used */
+    } else if (ctx->bound_element_buffer == 0 && indices != NULL) {
         /* Client-side indices: scan for max vertex index */
         GLuint max_idx = 0;
         if (type == GL_UNSIGNED_BYTE) {
@@ -542,11 +576,15 @@ GL_APICALL void GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum ty
         }
     }
 
+    SGL_PERF_END(SGL_PERF_INDEX_SCAN, perf_scan);
+
     /* Bind vertex attributes via backend */
+    SGL_PERF_BEGIN(perf_attr);
     if (ctx->backend->ops->bind_vertex_attribs) {
         ctx->backend->ops->bind_vertex_attribs(ctx->backend, prepared_attribs, SGL_MAX_ATTRIBS, 0,
                                                vertex_count);
     }
+    SGL_PERF_END(SGL_PERF_ATTRIBS, perf_attr);
 
     /* Compute index buffer offset if EBO is bound */
     uint32_t ebo_data_offset = 0;
@@ -560,9 +598,13 @@ GL_APICALL void GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum ty
 
     /* Draw elements via backend - pass ebo_data_offset, backend will copy client indices if ebo=0
      */
+    SGL_PERF_BEGIN(perf_bk);
     if (ctx->backend->ops->draw_elements) {
         ctx->backend->ops->draw_elements(ctx->backend, mode, count, type, indices, ebo_data_offset);
     }
+    SGL_PERF_END(SGL_PERF_BACKEND_DRAW, perf_bk);
+    SGL_PERF_ADD(SGL_PERF_INDICES, count);
+    SGL_PERF_END(SGL_PERF_DRAW, perf_draw);
 
     SGL_TRACE_DRAW("glDrawElements(mode=0x%X, count=%d, type=0x%X)", mode, count, type);
 }

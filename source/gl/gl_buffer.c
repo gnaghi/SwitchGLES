@@ -4,6 +4,7 @@
  */
 
 #include "gl_common.h"
+#include "../util/sgl_perf.h"
 #include <string.h>
 
 GL_APICALL void GL_APIENTRY glGenBuffers(GLsizei n, GLuint *buffers) {
@@ -163,8 +164,15 @@ GL_APICALL void GL_APIENTRY glBindBuffer(GLenum target, GLuint buffer) {
     SGL_TRACE_BUFFER("glBindBuffer(0x%X, %u)", target, buffer);
 }
 
+static void sgl_buffer_data_impl(GLenum target, GLsizeiptr size, const void *data, GLenum usage);
 GL_APICALL void GL_APIENTRY glBufferData(GLenum target, GLsizeiptr size, const void *data,
                                          GLenum usage) {
+    SGL_PERF_BEGIN(perf);
+    sgl_buffer_data_impl(target, size, data, usage);
+    SGL_PERF_END(SGL_PERF_BUFFER, perf);
+}
+
+static void sgl_buffer_data_impl(GLenum target, GLsizeiptr size, const void *data, GLenum usage) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
@@ -252,8 +260,17 @@ GL_APICALL void GL_APIENTRY glBufferData(GLenum target, GLsizeiptr size, const v
                      buf->data_offset);
 }
 
+static void sgl_buffer_sub_data_impl(GLenum target, GLintptr offset, GLsizeiptr size,
+                                     const void *data);
 GL_APICALL void GL_APIENTRY glBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size,
                                             const void *data) {
+    SGL_PERF_BEGIN(perf);
+    sgl_buffer_sub_data_impl(target, offset, size, data);
+    SGL_PERF_END(SGL_PERF_BUFFER, perf);
+}
+
+static void sgl_buffer_sub_data_impl(GLenum target, GLintptr offset, GLsizeiptr size,
+                                     const void *data) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;

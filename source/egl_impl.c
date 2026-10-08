@@ -8,6 +8,7 @@
 #include "egl_internal.h"
 #include "context/sgl_state_build.h"
 #include "util/sgl_log.h"
+#include "util/sgl_perf.h"
 #include <GLES2/gl2sgl.h>
 #include <string.h>
 #include <stdio.h>
@@ -656,6 +657,7 @@ EGLAPI EGLBoolean EGLAPIENTRY eglSwapBuffers(EGLDisplay dpy, EGLSurface surface)
     }
 
     int slot = surf->current_slot;
+    SGL_PERF_BEGIN(perf_swap);
 
     /* End frame */
     if (ctx->backend->ops->end_frame) {
@@ -669,6 +671,8 @@ EGLAPI EGLBoolean EGLAPIENTRY eglSwapBuffers(EGLDisplay dpy, EGLSurface surface)
 
     /* Mark that we need to acquire at start of next frame */
     surf->need_acquire = true;
+    SGL_PERF_END(SGL_PERF_SWAP, perf_swap);
+    SGL_PERF_FRAME();
 
     return EGL_TRUE;
 }

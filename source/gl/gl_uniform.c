@@ -4,6 +4,7 @@
  */
 
 #include "gl_common.h"
+#include "../util/sgl_perf.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1441,8 +1442,17 @@ static bool sgl_validate_matrix_uniform(sgl_program_t *prog, GLint location, GLe
  * bool comparison and shadow type differ. glUniform{1..4}{f,i}{,v} go through
  * the set_float_uniform / set_int_uniform wrappers below.
  */
+static void set_scalar_uniform_impl(GLint location, int num_components, GLsizei count,
+                                    const void *values, bool is_int);
 static void set_scalar_uniform(GLint location, int num_components, GLsizei count,
                                const void *values, bool is_int) {
+    SGL_PERF_BEGIN(perf);
+    set_scalar_uniform_impl(location, num_components, count, values, is_int);
+    SGL_PERF_END(SGL_PERF_UNIFORM, perf);
+}
+
+static void set_scalar_uniform_impl(GLint location, int num_components, GLsizei count,
+                                    const void *values, bool is_int) {
     const GLfloat *fv = (const GLfloat *)values;
     const GLint *iv = (const GLint *)values;
     sgl_context_t *ctx = sgl_get_current_context();
@@ -1817,8 +1827,17 @@ GL_APICALL void GL_APIENTRY glUniform4iv(GLint location, GLsizei count, const GL
  * count (cols*cols floats) and the per-column vec4 padding (mat4 needs none).
  * glUniformMatrix{2,3,4}fv are thin wrappers below.
  */
+static void set_matrix_uniform_impl(GLint location, int cols, GLsizei count, GLboolean transpose,
+                                    const GLfloat *value);
 static void set_matrix_uniform(GLint location, int cols, GLsizei count, GLboolean transpose,
                                const GLfloat *value) {
+    SGL_PERF_BEGIN(perf);
+    set_matrix_uniform_impl(location, cols, count, transpose, value);
+    SGL_PERF_END(SGL_PERF_UNIFORM, perf);
+}
+
+static void set_matrix_uniform_impl(GLint location, int cols, GLsizei count, GLboolean transpose,
+                                    const GLfloat *value) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx || !ctx->backend)
         return;

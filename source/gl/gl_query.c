@@ -4,6 +4,7 @@
  */
 
 #include "gl_common.h"
+#include "../util/sgl_perf.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -694,18 +695,24 @@ GL_APICALL void GL_APIENTRY glFlush(void) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
+    SGL_PERF_BEGIN(perf);
     if (ctx->backend && ctx->backend->ops->flush) {
         ctx->backend->ops->flush(ctx->backend);
     }
+    SGL_PERF_END(SGL_PERF_GLFLUSH, perf);
+    SGL_PERF_FRAME();
 }
 
 GL_APICALL void GL_APIENTRY glFinish(void) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
+    SGL_PERF_BEGIN(perf);
     if (ctx->backend && ctx->backend->ops->finish) {
         ctx->backend->ops->finish(ctx->backend);
     }
+    SGL_PERF_END(SGL_PERF_GLFINISH, perf);
+    SGL_PERF_FRAME();
 }
 
 /* Hints (ignored) */
