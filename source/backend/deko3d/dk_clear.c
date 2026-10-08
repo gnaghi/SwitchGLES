@@ -89,7 +89,9 @@ void dk_clear(sgl_backend_t *be, GLbitfield mask, const float *color, float dept
             clearScissor = (DkScissor){(uint32_t)sx, (uint32_t)sy, (uint32_t)sw, (uint32_t)sh};
         }
     } else {
-        clearScissor = (DkScissor){0, 0, dk->fb_width, dk->fb_height};
+        /* Whole bound render target: an FBO can be larger than the window
+         * (e.g. 1024x1024 shadow maps, 1920x1080 offscreen targets). */
+        clearScissor = (DkScissor){0, 0, (uint32_t)fb_w, (uint32_t)fb_h};
     }
 
     if (!scissor_valid) {
