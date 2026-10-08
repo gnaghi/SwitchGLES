@@ -419,9 +419,12 @@ void dk_draw_arrays(sgl_backend_t *be, GLenum mode, GLint first, GLsizei count) 
         return;
     }
 
-    /* Command memory: no threshold here. The ring is rolled before the draw's
-     * state is recorded, in dk_apply_viewport (dk_cmd_ring_check), so the
-     * whole draw lands in one segment. */
+    /* Proactive mid-frame flush: prevent cmdbuf overflow.
+     * Each draw + state setup uses ~500-1000 bytes of cmdbuf space.
+     * With 4MB cmdbuf, flush every ~4000 draws to stay safe. */
+    if (dk->draws_since_flush >= 4000) {
+        dk_submit_and_reset(dk);
+    }
 
     DkPrimitive prim = dk_convert_primitive(mode);
 
@@ -458,7 +461,10 @@ void dk_draw_elements(sgl_backend_t *be, GLenum mode, GLsizei count, GLenum type
         return;
     }
 
-    /* Command memory ring: rolled before the draw in dk_apply_viewport. */
+    /* Proactive mid-frame flush: prevent cmdbuf overflow. */
+    if (dk->draws_since_flush >= 4000) {
+        dk_submit_and_reset(dk);
+    }
 
     DkPrimitive prim = dk_convert_primitive(mode);
 

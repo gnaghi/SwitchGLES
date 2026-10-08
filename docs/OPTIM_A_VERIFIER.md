@@ -611,6 +611,12 @@ Autres :
 
 ## Piste C5 — anneau de mémoire de commandes (plus de WaitIdle en cours de frame)
 
+> **Annulée le 8 octobre 2026** (revert de `9c77873`). Sur console, `gl_trex_off` plante au début du rendu avec
+> la lib `23253e3`, et passe avec la même lib sans C5 (score 2239,7, 40,0 FPS). Le gestionnaire de crash de
+> GFXBench n'a rien intercepté côté CPU (`crash.txt` resté celui d'un ancien crash de `gl_blending`) : faute
+> probablement côté GPU, dès les premiers changements de segment. Cause non trouvée. La remise à zéro E1 de
+> `dk_flush` (2000 draws) et les seuils de 4000 draws reviennent. Ce qui suit décrit la version annulée.
+
 Changement (`dk_command.c`, `dk_internal.h`, `dk_backend.h`, `dk_backend.c`, `dk_state.c`, `dk_clear.c`, `dk_draw.c`,
 `dk_framebuffer.c`, `dk_texture*.c`, `sgl_perf.[ch]`) :
 - Avant : chaque slot donnait ses 4 Mo (`SGL_CMD_MEM_SIZE`) d'un bloc à deko3d ; le seuil de 4 000 draws de

@@ -17,7 +17,7 @@ static uint64_t s_frames;
 static const char *const s_names[SGL_PERF_COUNT] = {
     "draw",   "state",  "program", "textures", "idx_scan", "attribs", "bk_draw",  "indices",
     "uniform", "buffer", "flush_sync", "submit_reset", "glFlush", "glFinish", "swap", "frame_start",
-    "bar_full", "bar_l2", "cmd_roll", "cmd_roll_wait",
+    "bar_full", "bar_l2",
 };
 
 uint64_t sgl_perf_now(void) {

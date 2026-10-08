@@ -247,9 +247,7 @@ int dk_init(sgl_backend_t *be, void *device) {
             return -1;
         }
 
-        /* Command memory is handed out segment by segment, chunk by chunk
-         * (command memory ring, dk_command.c). */
-        dk_cmdbuf_restart(dk, i);
+        dkCmdBufAddMemory(dk->cmdbufs[i], dk->cmdbuf_memblock[i], 0, SGL_CMD_MEM_SIZE);
         dk->fence_active[i] = false;
     }
 

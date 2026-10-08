@@ -609,7 +609,8 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle, G
         dk_flush_sync(dk);
 
         /* Reset command buffer */
-        dk_cmdbuf_restart(dk, dk->current_slot);
+        dk_cmdbuf_clear(dk, dk->cmdbuf);
+        dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
 
         /* Re-bind descriptor sets after cmdbuf clear (matches legacy pattern) */
         dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
@@ -830,7 +831,9 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, 
 
                         dk_flush_sync(dk);
 
-                        dk_cmdbuf_restart(dk, dk->current_slot);
+                        dk_cmdbuf_clear(dk, dk->cmdbuf);
+                        dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0,
+                                          SGL_CMD_MEM_SIZE);
                         dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr,
                                                        SGL_MAX_TEXTURES);
                         dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr,
@@ -904,7 +907,9 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, 
 
                     dk_flush_sync(dk);
 
-                    dk_cmdbuf_restart(dk, dk->current_slot);
+                    dk_cmdbuf_clear(dk, dk->cmdbuf);
+                    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0,
+                                      SGL_CMD_MEM_SIZE);
                     dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr,
                                                    SGL_MAX_TEXTURES);
                     dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr,
@@ -1058,7 +1063,9 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, 
 
                 dk_flush_sync(dk);
 
-                dk_cmdbuf_restart(dk, dk->current_slot);
+                dk_cmdbuf_clear(dk, dk->cmdbuf);
+                dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0,
+                                  SGL_CMD_MEM_SIZE);
 
                 /* Re-bind descriptor sets after cmdbuf clear (matches legacy pattern) */
                 dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr,
@@ -1232,7 +1239,9 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, 
             dk_flush_sync(dk);
 
             /* Reset command buffer for continued use */
-            dk_cmdbuf_restart(dk, dk->current_slot);
+            dk_cmdbuf_clear(dk, dk->cmdbuf);
+            dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0,
+                              SGL_CMD_MEM_SIZE);
 
             /* Re-bind descriptor sets after cmdbuf clear (matches legacy pattern) */
             dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
@@ -1336,7 +1345,8 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum targ
     dk_flush_sync(dk);
 
     /* Reset command buffer for continued use */
-    dk_cmdbuf_restart(dk, dk->current_slot);
+    dk_cmdbuf_clear(dk, dk->cmdbuf);
+    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
 
     /* Re-bind descriptor sets after cmdbuf clear (matches legacy pattern) */
     dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
@@ -1461,7 +1471,8 @@ void dk_create_black_texture(dk_backend_data_t *dk) {
 
     dk_flush_sync(dk);
 
-    dk_cmdbuf_restart(dk, dk->current_slot);
+    dk_cmdbuf_clear(dk, dk->cmdbuf);
+    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
 
     /* Create image and sampler descriptors */
     dkImageDescriptorInitialize(&dk->texture_descriptors[bh], &biv, false, false);
@@ -1528,7 +1539,8 @@ void dk_create_black_texture(dk_backend_data_t *dk) {
 
         dk_flush_sync(dk);
 
-        dk_cmdbuf_restart(dk, dk->current_slot);
+        dk_cmdbuf_clear(dk, dk->cmdbuf);
+        dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
 
         DkImageView civ_full;
         dkImageViewDefaults(&civ_full, &dk->textures[ch]);
@@ -1741,7 +1753,6 @@ void dk_generate_mipmap(sgl_backend_t *be, sgl_handle_t handle) {
     /* Level 0 may have just been rendered by the 3D pipe (FBO still bound,
      * e.g. render-to-texture then glGenerateMipmap): drain it and invalidate
      * caches before the 2D engine reads it. */
-    dk_cmd_ring_check(dk); /* up to 6 faces x 12 levels of blits follow */
     dk_barrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image);
 
     /* Generate each mip level by blitting from the previous level.

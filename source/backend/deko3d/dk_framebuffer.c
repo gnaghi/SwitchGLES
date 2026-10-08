@@ -166,8 +166,6 @@ void dk_blit_framebuffer(sgl_backend_t *be, sgl_handle_t read_fbo, sgl_handle_t 
 
     /* Drain a still-in-flight submitted frame before recording into cmdbuf */
     dk_ensure_recordable(dk);
-    /* Command memory ring: a blit is recorded without a draw check. */
-    dk_cmd_ring_check(dk);
 
     /* Resolve source image */
     DkImage *srcImage = NULL;
@@ -340,7 +338,9 @@ void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y, GLsizei width, GLsizei 
                 dk->diag_draw_count, (void *)dk->cmdbuf, dk->cmdbuf_submitted);
             memset(pixels, 0, (size_t)width * (size_t)height * 4);
             dkMemBlockDestroy(readbackMem);
-            dk_cmdbuf_restart(dk, dk->current_slot);
+            dk_cmdbuf_clear(dk, dk->cmdbuf);
+            dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0,
+                              SGL_CMD_MEM_SIZE);
             dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
             dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr,
                                              SGL_MAX_TEXTURES);
@@ -350,7 +350,8 @@ void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y, GLsizei width, GLsizei 
         }
 
         /* Reset cmdbuf for the copy command */
-        dk_cmdbuf_restart(dk, dk->current_slot);
+        dk_cmdbuf_clear(dk, dk->cmdbuf);
+        dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
         dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
         dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr, SGL_MAX_TEXTURES);
         dk->descriptors_bound = true;
@@ -490,7 +491,8 @@ void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y, GLsizei width, GLsizei 
     dkMemBlockDestroy(readbackMem);
 
     /* Reset command buffer for continued use */
-    dk_cmdbuf_restart(dk, dk->current_slot);
+    dk_cmdbuf_clear(dk, dk->cmdbuf);
+    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
 
     /* Re-bind descriptor sets and render target after cmdbuf clear (matches legacy pattern) */
     dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
