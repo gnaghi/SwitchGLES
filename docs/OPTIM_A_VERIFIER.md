@@ -695,6 +695,62 @@ Conformité dEQP-GLES2 (VK-GL-CTS, jamais `validation_test`) :
 - [ ] Lots longs (sub-batches de 500 tests sans swap entre les tests) : pas de `GPU queue in ERROR STATE`
 - [ ] Passe rapide `lists/optim_oct07.txt` puis régression complète en A/B
 
+## Piste B9 — compression matérielle des textures de FBO (sous-ensemble sûr)
+
+Changement (`dk_texture.c`, `dk_texture_wants_hw_compression`) :
+- `glTexImage2D(GL_TEXTURE_2D, 0, …, NULL)` avec un stockage RGBA8 (c'est le cas de GL_RGB/GL_RGBA/565/4444/5551
+  promus en RGBA8) et au moins 64x64 (`DK_HW_COMPRESSION_MIN_DIM`) crée son `DkImage` avec
+  `DkImageFlags_HwCompression`. Le signal « pas de données » est le seul indice qu'une texture servira de cible :
+  GL ne donne pas d'usage, et `glFramebufferTexture2D` arrive après la création de l'image (SwitchGLES ne
+  réalloue pas : toutes les textures sont déjà créées `UsageRender | Usage2DEngine`). Les textures créées avec
+  des données, les cubemaps, les niveaux > 0 et `glCopyTexImage2D` ne changent pas.
+- Ce que fait deko3d (vérifié dans `dk_image.cpp`, `image_formats.cpp`, `dk_memblock.cpp`) : `pickImageMemoryKind`
+  donne un **kind compressible** (C32_2CRA pour RGBA8) ; `dkImageInitialize` → `getGpuAddrForImage` pose ce kind
+  par `nvAddressSpaceModify` sur la plage de l'image dans la **seconde cartographie** du memblock (celle créée par
+  `DkMemBlockFlags_Image`, que `texture_memblock` possède) ; taille et alignement arrondis à la grande page
+  (`bigPageSize = 0x10000`, 64 Ko). La disposition des données ne change pas ; tous les moteurs lisent via la L2
+  (3D, unité de texture, copy engine des chemins `glTexSubImage2D` / `glReadPixels` / `glCopyTexImage2D`,
+  moteur 2D des blits et mipmaps, que deko3d programme avec `SetCompressionEnable`). Seule la présentation
+  décompresse (`decompressSurface`, à la charge de deko3d).
+- Précédents **sur console** avec ce flag : images de swapchain (`egl_surface.c`, 3 images **à des offsets** d'un
+  même memblock, relues par `glReadPixels` / `glCopyTexImage2D` : `read_pixels.*` et `texture.*` passent),
+  tampons de profondeur par défaut, **tous les renderbuffers** (`dk_framebuffer.c:585`, `fbo.*` passent). Hors
+  SwitchGLES : `nxgputests/other/ra_dk.c` crée **toutes** ses textures avec `HwCompression`, les remplit par
+  `CopyBufferToImage`, les échantillonne, les relit par `CopyImageToBuffer` et les blitte. Ce qui n'a pas encore
+  été exercé par SwitchGLES : **échantillonner** une image compressée et **y copier** par le copy engine (déduit
+  de deko3d et de nxgputests, pas mesuré ici).
+- Mémoire : arrondi à 64 Ko par texture concernée (d'où le seuil 64x64) ; la liste libre absorbe les restes
+  < 128 Ko (`dk_texture_alloc`). Les 128 Mo de `SGL_TEXTURE_MEM_SIZE` ne changent pas.
+- **Non retenu** : RGB565 / RGBA4 / RGB5A1 natifs en cible de rendu. Tous les chemins de relecture et de
+  conversion supposent 4 octets par pixel : `dk_read_pixels` (`width * 4`, `dk_framebuffer.c`), les deux relectures
+  de `dk_texture_copy.c` (`width * 4` + conversions luminance/alpha depuis RGBA8), `dk_unpack_packed_to_rgba8` et
+  `dk_convert_to_staging` (uploads convertis en RGBA8, y compris `glTexSubImage2D` sur une cible), le masquage
+  alpha de `dk_apply_color_mask`, les swizzles de descripteurs, `GL_*_BITS` ; et la compression matérielle sur
+  RGBA8 récupère déjà l'essentiel de la bande passante. À reprendre seulement avec une console pour valider
+  chaque chemin.
+
+Performance :
+- [ ] Egypt (ombre 512x512 RGB565→RGBA8 + 2 FBO de flou + motion blur) et T-Rex (ombres `depth map(color)`,
+      réflexions) : FPS en A/B ; `[PERF]` inchangé côté CPU (la compression est transparente)
+- [ ] Trace `SGL_TRACE_TEXTURE` : lignes `alloc … hw-compressed` pour les textures de FBO (et seulement elles)
+- [ ] Mémoire texture : pas de « Texture memory overflow » sur `gl_blending`, Egypt, T-Rex
+
+Rendu (c'est la vérification critique : si le copy engine ou l'unité de texture ne passait pas par la
+compression, la texture compressée se lirait comme du bruit) :
+- [ ] `--freeze 10000 gl_egypt` / `gl_trex` identiques à Nouveau (ombres, flou, réflexions, motion blur)
+- [ ] Spearmint : rendu normal (FBO désactivés, mais textures `NULL` + `glTexSubImage2D` possibles : HUD, cinématiques)
+
+Conformité dEQP-GLES2 (VK-GL-CTS, jamais `validation_test`) :
+- [ ] `functional.fbo.*` (textures 64x64+ créées à NULL : rendu, `fbo.render.*`, `recreate_*`, `resize`,
+      `no_rebind`, relecture par `glReadPixels` depuis une texture compressée)
+- [ ] `functional.read_pixels.*`, `functional.texture.specification.texsubimage2d*` et `texture.*` créant à NULL
+      puis `glTexSubImage2D` (copy engine vers une image compressée), `texture.mipmap.*` (blits 2D sur image
+      compressée), `functional.texture.*` avec `glCopyTexSubImage2D` vers une texture compressée
+- [ ] `functional.color_clear.*`, `functional.depth_stencil_clear.*` (inchangés : cibles par défaut / renderbuffers)
+- [ ] Lots longs : pas de `GPU queue in ERROR STATE` (échec de `nvAddressSpaceModify` = `DK_ERROR` au
+      `dkImageInitialize`, donc visible dès la création)
+- [ ] Régression complète en A/B
+
 ## Piste B5 — non retenue
 
 Les barrières `None + L2Cache | Descriptors | Zcull` après soumission (`dk_begin_frame`, `dk_submit_and_reset`,

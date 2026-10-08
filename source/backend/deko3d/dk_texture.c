@@ -693,6 +693,42 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle, G
  * Texture Image Upload (glTexImage2D) - 2D textures
  * ============================================================================ */
 
+/* Hardware (framebuffer) compression for the textures that are most likely
+ * FBO colour attachments: level 0 of a 2D texture defined with NULL data and
+ * stored as RGBA8 (GLES2 RGB/RGBA/565/4444/5551 all land there). GL gives no
+ * usage hint and a texture becomes a render target only later
+ * (glFramebufferTexture2D), after the DkImage was created, so the decision
+ * is taken here from the one strong signal applications give: no data.
+ *
+ * What DkImageFlags_HwCompression changes in deko3d (dk_image.cpp,
+ * image_formats.cpp, dk_memblock.cpp): the image gets a compressible memory
+ * kind (C32_2CRA for RGBA8) set on the texture memblock's second GPU mapping
+ * for the image's range (nvAddressSpaceModify, which is why the memblock has
+ * DkMemBlockFlags_Image); size and alignment are rounded up to the big page
+ * (64 KB). The storage layout is unchanged, every engine reads it through
+ * the L2 (3D, texture unit, copy engine for the glTexSubImage2D /
+ * glReadPixels / glCopyTexImage2D paths, 2D engine for blits and mipmaps,
+ * which deko3d programs with SetCompressionEnable), so no SwitchGLES path
+ * has to know. Only presentation needs a decompress, handled by deko3d
+ * (swapchain images already use this flag, as do the default depth buffers
+ * and every renderbuffer, which validated the sub-allocation at offsets and
+ * the readback paths).
+ *
+ * Small textures are left alone: the 64 KB rounding would dominate their
+ * footprint and the bandwidth gain is negligible. Textures created with
+ * data (ordinary sampled textures) are not render targets in practice and
+ * keep the tight packing. */
+#define DK_HW_COMPRESSION_MIN_DIM 64
+
+static bool dk_texture_wants_hw_compression(DkImageFormat fmt, GLsizei width, GLsizei height,
+                                            const void *pixels) {
+    if (pixels != NULL)
+        return false;
+    if (fmt != DkImageFormat_RGBA8_Unorm)
+        return false;
+    return width >= DK_HW_COMPRESSION_MIN_DIM && height >= DK_HW_COMPRESSION_MIN_DIM;
+}
+
 void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, GLint level,
                          GLint internalformat, GLsizei width, GLsizei height, GLint border,
                          GLenum format, GLenum type, const void *pixels) {
@@ -1080,6 +1116,9 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, 
         DkImageLayoutMaker layoutMaker;
         dkImageLayoutMakerDefaults(&layoutMaker, dk->device);
         layoutMaker.flags = DkImageFlags_UsageRender | DkImageFlags_Usage2DEngine;
+        bool hw_compressed = dk_texture_wants_hw_compression(newFormat, width, height, pixels);
+        if (hw_compressed)
+            layoutMaker.flags |= DkImageFlags_HwCompression;
         layoutMaker.format = newFormat;
         layoutMaker.dimensions[0] = width;
         layoutMaker.dimensions[1] = height;
@@ -1103,6 +1142,9 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, 
         dk->texture_gpu_size[handle] = (uint32_t)texSize;
         dk->texture_initialized[handle] = true;
         dk->texture_is_cubemap[handle] = false; /* This is a 2D texture */
+        SGL_TRACE_TEXTURE("texture_image_2d handle=%u alloc %dx%d size=%u align=%u%s", handle,
+                          width, height, (unsigned)texSize, texAlign,
+                          hw_compressed ? " hw-compressed" : "");
 
         /* Store texture dimensions and format for glGenerateMipmap */
         dk->texture_width[handle] = width;
