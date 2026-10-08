@@ -419,6 +419,67 @@ Autres :
 - [ ] Spearmint : rendu identique (attributs désactivés lus comme la valeur générique courante)
 - [ ] GFXBench à l'écran : rendu identique à Nouveau (`--freeze 10000 gl_egypt`, `gl_trex`)
 
+## Piste C3 — préparation des attributs de sommets sans copie, bloc de constantes mis en cache, `dsb st` à la demande
+
+Changement :
+- `gl_draw.c` : plus de copie de `prepared_attribs[32]` (1,5 Ko par draw). `buffer_offset` et
+  `buffer_data_size` sont des champs dérivés, recalculés à chaque draw (un VBO peut avoir été réalloué par
+  `glBufferData`) ; ils sont écrits en place dans `ctx->vertex_attribs`, et la table du contexte est passée
+  telle quelle au backend (contrat de B8 : 32 entrées, `num_attribs` slots à déclarer).
+- `dk_bind_vertex_attribs` (`dk_draw.c`) : les `memset` des tableaux de travail ne couvrent que `numAttribs`
+  entrées (au plus `numAttribs` slots de buffers) ; le tableau `bufferBaseAddrs`, écrit et jamais lu, est
+  supprimé.
+- **Bloc de constantes des attributs désactivés** (`dk_attrib_const_block`) : avant, chaque draw allouait
+  `numAttribs × 16` octets (512 o alignés 256) dans l'espace client-array et y réécrivait les valeurs génériques
+  de tous les attributs désactivés (≈ 30 écritures de 16 o en mémoire non cachée, ≈ 1,3 Mo par frame sur
+  `driver`). Maintenant : un bloc de 32 × vec4 (512 o) par **jeu de valeurs** ; le slot désactivé `i` lit l'offset
+  `i*16` (stride 0). À chaque draw, les valeurs des slots désactivés déclarés sont comparées à l'ombre CPU
+  (`attrib_const_shadow`, 16 o par slot, mémoire cachée) ; un nouveau bloc n'est écrit que si l'une diffère, à
+  une **nouvelle adresse** (jamais en place : les draws précédents de la frame le lisent encore — même règle
+  que pour les UBO de B6). Le bloc contient toujours les 32 valeurs, l'ombre décrit donc tout le bloc quel que
+  soit le nombre de slots déclarés par le draw suivant. Repli `isFixed` inchangé si l'espace manque.
+  Invalidation (`attrib_const_valid = false`) aux trois endroits où l'allocateur client-array repart :
+  `dk_begin_frame` (nouveau slot), `dk_submit_and_reset`, callback de dépassement. Les chemins synchrones de
+  texture sauvegardent/restaurent `client_array_offset` au-dessus du bloc : il reste valide.
+- **`dsb st` à la demande** : la barrière ARM était émise à chaque draw dans `dk_bind_vertex_attribs`. Elle
+  couvrait aussi, de fait, les écritures de VBO de `dk_buffer.c` (`glBufferData`/`glBufferSubData`), qui n'ont pas
+  de barrière à elles. Nouveau drapeau `dk->cpu_store_pending`, levé par **tout** écrivain CPU de mémoire
+  visible GPU sur le chemin des sommets : `dk_buffer.c` (3 sites), conversion GL_FIXED, copie des tableaux
+  client, écriture du bloc de constantes. Il est consommé par `dk_flush_cpu_stores()` (`dsb st` + remise à
+  zéro) **avant** `BindVtxAttribState` (emplacement validé d'origine) et, pour les draws où la liaison des
+  attributs a été sautée, avant `dkCmdBufDraw` / `dkCmdBufDrawIndexed`. La barrière n'est donc omise que
+  lorsqu'aucune de ces écritures n'a eu lieu depuis la précédente. Les chemins qui écrivent et enregistrent au
+  même endroit (indices client / conversion u8→u16, textures, descripteurs) gardent leur `dsb st` immédiat ;
+  jamais `dsb sy`.
+- Limite connue, préexistante pour tout staging : si le callback de dépassement (chemin principal, WaitIdle +
+  remise à zéro de l'allocateur) se déclenche **au milieu** d'un draw, le draw en cours référence encore une
+  adresse que le draw suivant peut réutiliser. Le bloc partagé entre draws ne change pas la classe du risque
+  (un bloc différent n'est réécrit que si les valeurs génériques changent entre ces deux draws).
+
+Performance :
+- [ ] `driver` GFXBench (2 attributs activés sur 2 lus… et 30 désactivés avant B8) : `[PERF]` `attribs` en
+      forte baisse ; espace client-array par frame ≈ 0 sur un draw VBO (avant ≈ 512 o par draw)
+- [ ] Egypt / T-Rex : FPS en A/B ; `diag_orphan_flushes` / `dk_submit_and_reset` par frame inchangés ou en baisse
+- [ ] Compter les `dsb st` par frame (instrumentation `SGL_PERF` si besoin) : ≈ nombre de `glBuffer*Data` +
+      draws avec tableaux client, et non plus = nombre de draws
+
+Conformité dEQP-GLES2 (VK-GL-CTS, jamais `validation_test`) :
+- [ ] `functional.vertex_arrays.*` (tableaux client : copie + `dsb st` ; GL_FIXED ; `glVertexAttrib*` entre deux
+      draws sans tableau : nouveau bloc à chaque changement ; valeurs identiques : bloc réutilisé)
+- [ ] `functional.buffer.*` (`buffer.write.*`, `buffer.data`, `buffer.sub_data`, orphaning : `cpu_store_pending`
+      levé par `dk_buffer.c`, drainé avant le draw, en plus de l'invalidation L2 `vbo_data_dirty`)
+- [ ] `functional.draw.*` (draw_arrays / draw_elements, indices client et EBO u8/u16/u32)
+- [ ] `functional.shaders.*` (attributs génériques : `shaders.linkage.*`, `shaders.indexing.*` avec
+      `glVertexAttrib4f`), `functional.attribute_location.*`, `functional.state_query.*` (`glGetVertexAttrib*`)
+- [ ] `functional.flush_finish.*` et `functional.fbo.*` (reset d'allocateur en cours de frame : bloc réécrit après
+      `dk_submit_and_reset` ; chemins synchrones : bloc conservé)
+- [ ] Régression complète en A/B
+
+Autres :
+- [ ] Spearmint : rendu identique (attributs désactivés = valeur générique courante), pas de scintillement
+      (`dsb st` des descripteurs inchangé), longue partie sans débordement de client-array
+- [ ] GFXBench à l'écran : rendu identique à Nouveau (`--freeze 10000 gl_egypt`, `gl_trex`)
+
 ## Piste B5 — non retenue
 
 Les barrières `None + L2Cache | Descriptors | Zcull` après soumission (`dk_begin_frame`, `dk_submit_and_reset`,

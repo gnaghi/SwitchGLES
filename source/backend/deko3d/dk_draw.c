@@ -36,6 +36,53 @@ static void dk_convert_fixed_to_float(void *dst, const void *src, GLsizei vertex
  * Handles both VBO-based and client-side vertex arrays.
  * ============================================================================ */
 
+/* The disabled attributes of a draw read a shared constant buffer: one
+ * SGL_MAX_ATTRIBS x vec4 block, stride 0, slot i at offset i*16. The block is
+ * allocated from the frame slot's client-array space and kept across draws:
+ * a new one is written only when a disabled slot of the draw does not hold the
+ * value already in the block (attrib_const_shadow), never in place, since the
+ * draws recorded earlier may still read the old block. attrib_const_valid is
+ * dropped with the client-array allocator (frame start, dk_submit_and_reset,
+ * overflow callback). Returns false when there is no room for a new block. */
+static bool dk_attrib_const_block(dk_backend_data_t *dk, const sgl_vertex_attrib_t *attribs,
+                                  int numAttribs, uint8_t *data_cpu_base) {
+    if (dk->attrib_const_valid) {
+        bool same = true;
+        for (int i = 0; i < numAttribs; i++) {
+            if (!attribs[i].enabled &&
+                memcmp(dk->attrib_const_shadow[i], attribs[i].current_value,
+                       sizeof(attribs[i].current_value)) != 0) {
+                same = false;
+                break;
+            }
+        }
+        if (same)
+            return true;
+    }
+
+    uint32_t alignedOff = SGL_ALIGN_UP(dk->client_array_offset, SGL_UNIFORM_ALIGNMENT);
+    uint32_t totalSize = SGL_MAX_ATTRIBS * 16;
+    if (alignedOff + totalSize > dk->client_array_slot_end)
+        return false;
+
+    uint32_t addr = dk->client_array_base + alignedOff;
+    float *dst = (float *)(data_cpu_base + addr);
+    /* Every slot is written (the table always has SGL_MAX_ATTRIBS entries) so
+     * that the shadow describes the whole block, whatever a later draw declares. */
+    for (int i = 0; i < SGL_MAX_ATTRIBS; i++) {
+        dst[i * 4 + 0] = attribs[i].current_value[0];
+        dst[i * 4 + 1] = attribs[i].current_value[1];
+        dst[i * 4 + 2] = attribs[i].current_value[2];
+        dst[i * 4 + 3] = attribs[i].current_value[3];
+        memcpy(dk->attrib_const_shadow[i], attribs[i].current_value, sizeof(float[4]));
+    }
+    dk->client_array_offset = alignedOff + totalSize;
+    dk->attrib_const_addr = addr;
+    dk->attrib_const_valid = true;
+    dk->cpu_store_pending = true; /* drained before the draw command */
+    return true;
+}
+
 void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attribs, int num_attribs,
                             GLint first, GLsizei count) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
@@ -80,31 +127,30 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
     if (numAttribs < 1)
         numAttribs = 1;
 
-    /* Initialize arrays to zero */
-    memset(attribStates, 0, sizeof(attribStates));
-    memset(bufferStates, 0, sizeof(bufferStates));
-    memset(bufferExtents, 0, sizeof(bufferExtents));
-    memset(boundBuffers, 0, sizeof(boundBuffers));
-
-    /* Track base address for each buffer slot to compute relative offsets */
-    DkGpuAddr bufferBaseAddrs[SGL_MAX_ATTRIBS];
-    memset(bufferBaseAddrs, 0, sizeof(bufferBaseAddrs));
+    /* Only the first numAttribs entries are declared, and at most numAttribs
+     * buffer slots are created (one per enabled attribute, one shared by the
+     * disabled ones): initialize just those. */
+    size_t nInit = (size_t)numAttribs;
+    memset(attribStates, 0, nInit * sizeof(attribStates[0]));
+    memset(bufferStates, 0, nInit * sizeof(bufferStates[0]));
+    memset(bufferExtents, 0, nInit * sizeof(bufferExtents[0]));
+    memset(boundBuffers, 0, nInit * sizeof(boundBuffers[0]));
 
     /* Track original client pointers for computing offsets in interleaved data */
     uintptr_t bufferClientPtrs[SGL_MAX_ATTRIBS];
-    memset(bufferClientPtrs, 0, sizeof(bufferClientPtrs));
+    memset(bufferClientPtrs, 0, nInit * sizeof(bufferClientPtrs[0]));
 
     /* Track VBO pointer offsets per buffer slot (for interleaving detection) */
     uint32_t bufferVBOPtrs[SGL_MAX_ATTRIBS];
-    memset(bufferVBOPtrs, 0, sizeof(bufferVBOPtrs));
+    memset(bufferVBOPtrs, 0, nInit * sizeof(bufferVBOPtrs[0]));
 
     /*
-     * Shared constant buffer for disabled attributes.
-     * Allocates one buffer slot for ALL disabled attributes, with stride=0
-     * so every vertex reads the same constant value per attribute.
+     * Shared constant buffer for disabled attributes (dk_attrib_const_block):
+     * one buffer slot for ALL disabled attributes, with stride=0 so every
+     * vertex reads the same constant value per attribute.
      */
     int constBufSlot = -1;
-    uint32_t constBufOffset = 0; /* offset within constant buffer */
+    bool constBufUnavailable = false;
 
     /* Build attribute and buffer states */
     for (int i = 0; i < numAttribs; i++) {
@@ -112,50 +158,37 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
 
         if (!attr->enabled) {
             /* Disabled attribute - use constant value from glVertexAttrib*f */
-            if (constBufSlot < 0) {
-                /* First disabled attribute: allocate shared constant buffer */
-                uint32_t alignedOff = SGL_ALIGN_UP(dk->client_array_offset, SGL_UNIFORM_ALIGNMENT);
-                uint32_t totalSize = numAttribs * 16; /* worst case: all disabled */
-                uint32_t clientAddr = dk->client_array_base + alignedOff;
-
-                if (alignedOff + totalSize <= dk->client_array_slot_end) {
+            if (constBufSlot < 0 && !constBufUnavailable) {
+                /* First disabled attribute: reference the shared constant block */
+                if (dk_attrib_const_block(dk, attribs, numAttribs, data_cpu_base)) {
                     constBufSlot = numBuffers;
                     boundBuffers[numBuffers] = 0xFFFFFFFF; /* marker for constant buffer */
                     bufferStates[numBuffers].stride = 0;   /* same value for all vertices */
                     bufferStates[numBuffers].divisor = 0;
-                    bufferExtents[numBuffers].addr = data_gpu_base + clientAddr;
-                    bufferExtents[numBuffers].size = totalSize;
-                    dk->client_array_offset = alignedOff + totalSize;
+                    bufferExtents[numBuffers].addr = data_gpu_base + dk->attrib_const_addr;
+                    bufferExtents[numBuffers].size = SGL_MAX_ATTRIBS * 16;
                     numBuffers++;
                 } else {
-                    /* Fallback: use isFixed if out of memory */
-                    attribStates[i].bufferId = 0;
-                    attribStates[i].isFixed = 1;
-                    attribStates[i].offset = 0;
-                    attribStates[i].size = DkVtxAttribSize_1x32;
-                    attribStates[i].type = DkVtxAttribType_Float;
-                    attribStates[i].isBgra = 0;
-                    continue;
+                    constBufUnavailable = true;
                 }
             }
-
-            /* Write constant value (vec4) to the shared buffer */
-            uint32_t writeAddr =
-                (uint32_t)(bufferExtents[constBufSlot].addr - data_gpu_base) + constBufOffset;
-            float *dst = (float *)(data_cpu_base + writeAddr);
-            dst[0] = attr->current_value[0];
-            dst[1] = attr->current_value[1];
-            dst[2] = attr->current_value[2];
-            dst[3] = attr->current_value[3];
+            if (constBufSlot < 0) {
+                /* Fallback: use isFixed if out of memory */
+                attribStates[i].bufferId = 0;
+                attribStates[i].isFixed = 1;
+                attribStates[i].offset = 0;
+                attribStates[i].size = DkVtxAttribSize_1x32;
+                attribStates[i].type = DkVtxAttribType_Float;
+                attribStates[i].isBgra = 0;
+                continue;
+            }
 
             attribStates[i].bufferId = (uint32_t)constBufSlot;
             attribStates[i].isFixed = 0;
-            attribStates[i].offset = constBufOffset;
+            attribStates[i].offset = (uint32_t)i * 16; /* slot i of the block */
             attribStates[i].size = DkVtxAttribSize_4x32;
             attribStates[i].type = DkVtxAttribType_Float;
             attribStates[i].isBgra = 0;
-
-            constBufOffset += 16;
             continue;
         }
 
@@ -268,9 +301,9 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
                     void *dst = data_cpu_base + clientArrayAddr;
                     dk_convert_fixed_to_float(dst, src, totalVertices, attr->size, effectiveStride,
                                               effectiveStride);
+                    dk->cpu_store_pending = true;
 
                     bufferExtents[numBuffers].addr = data_gpu_base + clientArrayAddr;
-                    bufferBaseAddrs[numBuffers] = bufferExtents[numBuffers].addr;
                     bufferExtents[numBuffers].size = dataSize;
 
                     dk->client_array_offset = alignedOffset + dataSize;
@@ -286,7 +319,6 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
                 uint32_t vboBase = attr->buffer_offset - (uint32_t)(uintptr_t)attr->pointer;
                 uint32_t thisPtr = (uint32_t)(uintptr_t)attr->pointer;
                 bufferExtents[numBuffers].addr = data_gpu_base + vboBase + thisPtr;
-                bufferBaseAddrs[numBuffers] = bufferExtents[numBuffers].addr;
                 bufferVBOPtrs[numBuffers] = thisPtr;
                 /* Size: use full remaining VBO space from this attribute's start.
                  * Using (first+count)*stride is WRONG for indexed draws where indices
@@ -316,9 +348,9 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
                     /* Copy vertex data from client memory to GPU memory */
                     void *dst = data_cpu_base + clientArrayAddr;
                     memcpy(dst, attr->pointer, dataSize);
+                    dk->cpu_store_pending = true;
 
                     bufferExtents[numBuffers].addr = data_gpu_base + clientArrayAddr;
-                    bufferBaseAddrs[numBuffers] = bufferExtents[numBuffers].addr;
                     bufferExtents[numBuffers].size = dataSize;
 
                     /* Store client pointer for computing offsets in interleaved data */
@@ -361,10 +393,12 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
     DK_VERBOSE_PRINT("[DK] bind_vertex_attribs: numAttribs=%d numBuffers=%d\n", numAttribs,
                      numBuffers);
 
-    /* Ensure all CPU writes to client array staging area are committed to DRAM
-     * before recording GPU commands that reference them. CpuUncached writes
-     * bypass the CPU cache but may sit in the ARM write combine buffer. */
-    DK_ARM_STORE_BARRIER();
+    /* Ensure all CPU writes to GPU-visible memory (staging above, VBO data from
+     * dk_buffer.c) are committed to DRAM before recording GPU commands that
+     * reference them. CpuUncached writes bypass the CPU cache but may sit in
+     * the ARM write combine buffer. Issued only when such a write is pending:
+     * a VBO-only draw with an unchanged constant block wrote nothing. */
+    dk_flush_cpu_stores(dk);
 
     dkCmdBufBindVtxAttribState(dk->cmdbuf, attribStates, numAttribs);
     dkCmdBufBindVtxBufferState(dk->cmdbuf, bufferStates, numBuffers);
@@ -402,6 +436,10 @@ void dk_draw_arrays(sgl_backend_t *be, GLenum mode, GLint first, GLsizei count) 
         dk_barrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_L2Cache);
         dk->vbo_data_dirty = false;
     }
+
+    /* VBO data written since the last draw (dk_buffer.c) when the attribute
+     * binding above was skipped: drain the ARM store buffer before the draw. */
+    dk_flush_cpu_stores(dk);
 
     dk->diag_draw_count++;
     dk->draws_since_flush++;
@@ -542,6 +580,9 @@ void dk_draw_elements(sgl_backend_t *be, GLenum mode, GLsizei count, GLenum type
         dk_barrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_L2Cache);
         dk->vbo_data_dirty = false;
     }
+
+    /* See dk_draw_arrays: pending VBO writes when the attribute binding was skipped. */
+    dk_flush_cpu_stores(dk);
 
     /* Bind index buffer and draw */
     dk->diag_draw_count++;

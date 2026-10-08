@@ -188,6 +188,20 @@ typedef struct dk_backend_data {
     uint32_t draws_since_flush; /* Draws since last dk_submit_and_reset */
     bool in_overflow_callback;  /* Re-entrancy guard for overflow callback */
     bool vbo_data_dirty;        /* true after CPU writes to VBO region — need GPU L2 invalidation */
+    /* true after a CPU write to GPU-visible memory (VBO data, vertex staging,
+     * constant block) that has not been followed by a `dsb st` yet; drained by
+     * dk_flush_cpu_stores before the vertex bindings / draw command. */
+    bool cpu_store_pending;
+
+    /* Shared constant buffer of the disabled vertex attributes (dk_draw.c):
+     * one SGL_MAX_ATTRIBS x vec4 block in the frame slot's client-array space,
+     * reused by every draw whose disabled slots hold the values recorded in
+     * the shadow; a new block is written otherwise. Invalidated with the
+     * client-array allocator (dk_begin_frame, dk_submit_and_reset, overflow
+     * callback). */
+    bool attrib_const_valid;
+    uint32_t attrib_const_addr; /* offset within data_memblock */
+    float attrib_const_shadow[SGL_MAX_ATTRIBS][4];
 
 /* Deferred VBO free list — blocks freed only after GPU sync: the fence of the
  * slot recorded with each entry (dk_wait_fence), or WaitIdle

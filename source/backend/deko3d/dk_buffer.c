@@ -177,6 +177,7 @@ uint32_t dk_buffer_data(sgl_backend_t *be, sgl_handle_t handle, GLenum target, G
                 void *dst = (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock) + aligned;
                 memcpy(dst, data, size);
                 dk->vbo_data_dirty = true;
+                dk->cpu_store_pending = true;
             }
 
             SGL_TRACE_BUFFER("buffer_data: reused free block at offset=%u size=%zu (free_count=%d)",
@@ -199,6 +200,7 @@ uint32_t dk_buffer_data(sgl_backend_t *be, sgl_handle_t handle, GLenum target, G
         void *dst = (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock) + aligned_offset;
         memcpy(dst, data, size);
         dk->vbo_data_dirty = true;
+        dk->cpu_store_pending = true;
     }
 
     dk->data_offset = aligned_offset + size;
@@ -263,5 +265,6 @@ void dk_buffer_sub_data(sgl_backend_t *be, sgl_handle_t handle, uint32_t buffer_
         void *dst = (uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock) + buffer_offset;
         memcpy(dst, data, size);
         dk->vbo_data_dirty = true;
+        dk->cpu_store_pending = true;
     }
 }

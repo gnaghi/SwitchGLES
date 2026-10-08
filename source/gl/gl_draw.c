@@ -378,11 +378,13 @@ GL_APICALL void GL_APIENTRY glDrawArrays(GLenum mode, GLint first, GLsizei count
     SGL_PERF_BEGIN(perf_draw);
     sgl_prepare_draw(ctx);
 
-    /* Prepare vertex attributes with buffer offsets, for the slots the
-     * program's VS can read (num_attrib_slots) */
+    /* Resolve the GPU offsets of the VBO attributes, for the slots the
+     * program's VS can read (num_attrib_slots). buffer_offset and
+     * buffer_data_size are per-draw derived fields of the context table
+     * (a VBO may have been reallocated by glBufferData since the last draw);
+     * they are written in place, the table itself is handed to the backend. */
     int num_slots = sgl_draw_attrib_slots(ctx);
-    sgl_vertex_attrib_t prepared_attribs[SGL_MAX_ATTRIBS];
-    memcpy(prepared_attribs, ctx->vertex_attribs, sizeof(prepared_attribs));
+    sgl_vertex_attrib_t *prepared_attribs = ctx->vertex_attribs;
 
     for (int i = 0; i < num_slots; i++) {
         sgl_vertex_attrib_t *attr = &prepared_attribs[i];
@@ -483,11 +485,13 @@ GL_APICALL void GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum ty
     SGL_PERF_BEGIN(perf_draw);
     sgl_prepare_draw(ctx);
 
-    /* Prepare vertex attributes with buffer offsets, for the slots the
-     * program's VS can read (num_attrib_slots) */
+    /* Resolve the GPU offsets of the VBO attributes, for the slots the
+     * program's VS can read (num_attrib_slots). buffer_offset and
+     * buffer_data_size are per-draw derived fields of the context table
+     * (a VBO may have been reallocated by glBufferData since the last draw);
+     * they are written in place, the table itself is handed to the backend. */
     int num_slots = sgl_draw_attrib_slots(ctx);
-    sgl_vertex_attrib_t prepared_attribs[SGL_MAX_ATTRIBS];
-    memcpy(prepared_attribs, ctx->vertex_attribs, sizeof(prepared_attribs));
+    sgl_vertex_attrib_t *prepared_attribs = ctx->vertex_attribs;
 
     for (int i = 0; i < num_slots; i++) {
         sgl_vertex_attrib_t *attr = &prepared_attribs[i];

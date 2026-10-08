@@ -59,6 +59,7 @@ void dk_cmdbuf_overflow_cb(void *userData, DkCmdBuf cmdbuf, size_t minReqSize) {
         dk->client_array_offset = dk->current_slot * per_slot_size;
         dk->client_array_slot_end = (dk->current_slot + 1) * per_slot_size;
     }
+    dk->attrib_const_valid = false;
     dk_reset_uniform_slot(dk, dk->current_slot);
     dk->draws_since_flush = 0;
 
@@ -230,6 +231,7 @@ void dk_submit_and_reset(dk_backend_data_t *dk) {
         dk->client_array_offset = dk->current_slot * per_slot_size;
         dk->client_array_slot_end = (dk->current_slot + 1) * per_slot_size;
     }
+    dk->attrib_const_valid = false;
     dk_reset_uniform_slot(dk, dk->current_slot);
 
     /* Eagerly re-bind descriptor sets after cmdbuf clear (matches legacy pattern) */
@@ -320,6 +322,9 @@ void dk_begin_frame(sgl_backend_t *be, int slot) {
         dk->client_array_offset = slot * per_slot_size;
         dk->client_array_slot_end = (slot + 1) * per_slot_size;
     }
+    /* The constant block of disabled attributes lived in the previous slot's
+     * client-array space: the next draw writes a new one. */
+    dk->attrib_const_valid = false;
 
     /* Eagerly bind descriptor sets (matches legacy pattern: bind right after cmdbuf setup).
      * The legacy code binds descriptor sets at frame start, NOT lazily at first draw.

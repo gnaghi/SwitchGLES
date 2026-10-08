@@ -160,6 +160,21 @@ static inline void dk_cmdbuf_clear(dk_backend_data_t *dk, DkCmdBuf cmdbuf) {
 }
 
 /**
+ * `dsb st` if a CPU write to GPU-visible memory (VBO data, vertex staging,
+ * constant block of the disabled attributes) is still pending. Called before
+ * the vertex bindings and the draw command are recorded, so that the GPU
+ * never executes a draw whose data may sit in the ARM store buffers. The
+ * paths that write and record in the same place (index staging, textures,
+ * descriptors) keep their own immediate barrier.
+ */
+static inline void dk_flush_cpu_stores(dk_backend_data_t *dk) {
+    if (dk->cpu_store_pending) {
+        DK_ARM_STORE_BARRIER();
+        dk->cpu_store_pending = false;
+    }
+}
+
+/**
  * Flush pending GPU commands without waiting.
  *
  * @param be    Backend pointer
