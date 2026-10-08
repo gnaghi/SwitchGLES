@@ -174,6 +174,39 @@ Conformité dEQP-GLES2 :
 - [ ] Si tout passe, essai supplémentaire : retirer aussi `DkBarrier_Tiles` pour les clears stencil et relancer
       `fragment_ops.stencil*` + `fbo.render.stencil*` (la barrière n'a aucun effet documenté)
 
+## Piste B4 — Zcull plus invalidé après le clear de profondeur
+
+Changement (`dk_clear.c`) : après `dkCmdBufClearDepthStencil`, plus de barrière `Zcull` et plus de
+`dk_rebind_render_target` (qui en remettait une, avec un Full, dans les FBO avec profondeur). Justification
+lue dans deko3d (`gpu_3d_base.cpp`) : `dkCmdBufClearDepthStencil` écrit `ZcullClearDepth` (indices
+IsLessThanHalf / IsOneOrZero) juste avant `ClearBuffers`, c'est le clear qui initialise le Zcull ; l'invalider
+ensuite privait toute la passe du rejet hiérarchique. Le clear ne touche pas aux registres de cible de rendu, le
+rebind réécrivait les mêmes valeurs. Les invalidations conservées : `dkCmdBufBindRenderTargets` (macro
+`ConditionalZcullInvalidate` de deko3d, à chaque changement d'adresse du depth target), `dk_bind_framebuffer`
+(chaque changement de FBO), `dk_rebind_render_target` (uploads, réallocations, resets), début de frame.
+
+Performance (le gain attendu est côté GPU, sur le fill de la passe principale) :
+- [ ] `[PERF]` Egypt : `bar_full` encore en baisse d'environ 1 par frame dans les FBO avec profondeur (rebind)
+- [ ] FPS Egypt à l'écran : la passe principale (default framebuffer, clear depth puis ~60 draws) doit profiter
+      du Zcull ; comparer à Nouveau (69,5 FPS). T-Rex : FBO d'ombre avec depth16
+- [ ] Test `fill` GFXBench inchangé ou mieux
+
+Rendu :
+- [ ] `--freeze 10000 gl_egypt` et `gl_trex` identiques à Nouveau. Signature d'un Zcull incohérent : fragments
+      rejetés à tort (trous, géométrie manquante derrière des surfaces proches) ou surdessin (profondeur ignorée)
+- [ ] Spearmint : plusieurs cartes, pas de trous dans les murs ni d'objets visibles à travers
+
+Conformité dEQP-GLES2 (ce sont les lots qui avaient motivé les invalidations Zcull en mars) :
+- [ ] `functional.depth_stencil_clear.*`, `functional.fragment_ops.depth*`, `functional.depth_range.*`,
+      `functional.clipping.*`
+- [ ] `functional.fbo.render.depth*`, `fbo.render.stencil*`, `fbo.render.recreate_depthbuffer*`,
+      `fbo.render.recreate_stencilbuffer*`, `fbo.render.resize.*`, `fbo.render.no_rebind*`
+      (FBO avec profondeur : le rebind après clear est parti)
+- [ ] File d'attente GPU jamais en erreur (`dkQueueIsInErrorState`, message `GPU queue in ERROR STATE` dans
+      la sortie nxlink) sur un lot complet enchaînant des centaines de tests sans swap
+- [ ] Si une régression apparaît seulement dans les FBO avec profondeur : remettre d'abord le
+      `dk_rebind_render_target` après le clear (sans la barrière Zcull) pour isoler les deux sous-changements
+
 ## Passe rapide de non-régression (A2 + A3 + B1 + B2), préparée le 7 octobre
 
 Liste : `VK-GL-CTS/framework/platform/switch/lists/optim_oct07.txt` (1 479 tests, extraits de `regress_oct06.txt`) :

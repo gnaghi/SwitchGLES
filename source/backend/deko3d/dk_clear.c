@@ -209,12 +209,23 @@ void dk_clear(sgl_backend_t *be, GLbitfield mask, const float *color, float dept
                 dkCmdBufClearDepthStencil(dk->cmdbuf, clearDepth, depth, stencilMask,
                                           (uint8_t)stencil);
 
-                /* No pipeline drain after the clear: like the color clear above,
-                 * ClearBuffers is ordered by the 3D engine with the depth and
-                 * stencil tests of the draws that follow into the same target.
-                 * Zcull is invalidated so the hierarchical depth metadata never
-                 * carries values from before the clear. */
-                dk_barrier(dk->cmdbuf, DkBarrier_None, DkInvalidateFlags_Zcull);
+                /* No pipeline drain and no Zcull invalidation after the clear:
+                 * like the color clear above, ClearBuffers is ordered by the 3D
+                 * engine with the depth and stencil tests of the draws that
+                 * follow into the same target. The clear is what initialises the
+                 * hierarchical depth metadata: dkCmdBufClearDepthStencil writes
+                 * ZcullClearDepth (IsLessThanHalf / IsOneOrZero hints) right
+                 * before ClearBuffers so that Zcull takes the clear value.
+                 * Invalidating Zcull here threw that away and left the whole
+                 * pass without hierarchical depth rejection. Zcull is already
+                 * invalidated where the depth buffer actually changes: by
+                 * deko3d in dkCmdBufBindRenderTargets (ConditionalZcullInvalidate
+                 * on a new depth target address), by dk_bind_framebuffer at every
+                 * FBO switch, by dk_rebind_render_target after uploads and
+                 * reallocations, and at frame start / cmdbuf resets. No render
+                 * target rebind either: the clear leaves the RT registers
+                 * untouched (gpu_3d_base.cpp), the rebind only re-wrote the same
+                 * values behind a Full + Zcull barrier. */
 
                 /* Tiled-cache barrier, stencil clears only. It was added in March
                  * 2026 as a hypothesis for the stencil-op failures (Replace, Zero,
@@ -228,12 +239,6 @@ void dk_clear(sgl_backend_t *be, GLbitfield mask, const float *color, float dept
                  * introduced (DepthMinusOneToOne, March 11). */
                 if (stencilMask != 0x00) {
                     dk_barrier(dk->cmdbuf, DkBarrier_Tiles, 0);
-                }
-
-                /* Rebind render target after depth clear if FBO is active */
-                if (dk->current_fbo != 0 && dk->current_fbo_color > 0 &&
-                    (dk->current_fbo_depth > 0 || dk->current_fbo_stencil > 0)) {
-                    dk_rebind_render_target(dk);
                 }
             }
         } /* has_depth_stencil */
