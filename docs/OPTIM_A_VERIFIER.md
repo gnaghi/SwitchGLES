@@ -609,6 +609,92 @@ Conformité dEQP-GLES2 (VK-GL-CTS, jamais `validation_test`) :
 Autres :
 - [ ] Spearmint et GFXBench à l'écran : rendu identique (`--freeze 10000 gl_egypt`, `gl_trex`)
 
+## Piste C5 — anneau de mémoire de commandes (plus de WaitIdle en cours de frame)
+
+Changement (`dk_command.c`, `dk_internal.h`, `dk_backend.h`, `dk_backend.c`, `dk_state.c`, `dk_clear.c`, `dk_draw.c`,
+`dk_framebuffer.c`, `dk_texture*.c`, `sgl_perf.[ch]`) :
+- Avant : chaque slot donnait ses 4 Mo (`SGL_CMD_MEM_SIZE`) d'un bloc à deko3d ; le seuil de 4 000 draws de
+  `dk_draw_*` déclenchait `dk_submit_and_reset` (submit + **WaitIdle**), et comme T-Rex consomme ~1,1 Ko par draw,
+  le bloc se remplissait vers 3 500 draws, avant le seuil : le callback `cbAddMem` (submit + WaitIdle + clear +
+  rebinds **au milieu d'une commande**) se déclenchait régulièrement et plantait `gl_trex_off`. Le correctif E1
+  (`dk_flush` → `dk_submit_and_reset` tous les 2 000 draws) l'évitait au prix d'un WaitIdle régulier.
+- Maintenant : les 4 Mo de chaque slot forment un **anneau de 4 segments de 1 Mo** (`DK_CMD_RING_SEGMENTS`,
+  `DK_CMD_SEG_SIZE`). deko3d ne reçoit jamais un segment entier : le callback `cbAddMem` (son rôle normal
+  dans deko3d) lui donne le segment courant par **morceaux de 64 Ko** (`DK_CMD_CHUNK_SIZE`), sans rien soumettre,
+  ce qui rend `cmd_seg_used` (octets remis à deko3d) une borne exacte de ce qui a été enregistré — deko3d n'expose
+  pas sa position d'écriture, et une estimation par nombre de draws est précisément ce qui a échoué sur T-Rex.
+- **Roulement** (`dk_cmd_ring_roll`), vérifié **avant** chaque draw (`dk_apply_viewport`, après le contrôle de
+  budget uniforms / client arrays), chaque `glClear`, chaque blit et chaque `glGenerateMipmap`
+  (`dk_cmd_ring_check`) : si le segment courant a moins de 128 Ko (`DK_CMD_ROLL_MARGIN`) à distribuer, on enregistre
+  `dkCmdBufSignalFence` (fence du segment), `dkCmdBufFinishList`, `dkQueueSubmitCommands`, `dkQueueFlush` (même
+  séquence que le `glFlush` asynchrone A3, validé sur console, plus la fence), puis `dk_cmdbuf_clear` (recyclage de
+  la mémoire de contrôle, invalidation de `bound_program` et du cache d'état comme à tout clear), passage au
+  segment suivant, et **attente de la fence de ce segment seulement si elle est encore en vol** : il a été soumis
+  3 segments (~3 Mo de commandes) plus tôt. Le CPU peut donc avoir ~3 Mo d'avance sur le GPU sans jamais
+  attendre l'idle (schéma de l'anneau de commandes de la Queue deko3d : `addCmdMemory` / `flushRing` /
+  `waitFenceRing`). Les descriptor sets et la cible de rendu sont reliés comme après `dk_submit_and_reset`.
+- Ce que le roulement **ne fait pas**, et pourquoi : pas de remise à zéro des allocateurs uniforms /
+  client-array (aucun WaitIdle : les draws précédents de la frame lisent encore ces adresses ; ils restent linéaires
+  dans le slot, gardés par le contrôle de budget pré-draw de `dk_apply_viewport` et par E1 dans `dk_flush`) ; pas
+  de bump de `uniform_generation` ni d'invalidation de `attrib_const_valid` (rien n'est perdu : la liste est
+  soumise, pas abandonnée, et aucune adresse n'est redistribuée) ; pas de barrière L2 / Descriptors (le CPU n'a
+  réécrit aucune mémoire que le GPU pourrait avoir en cache, les écritures de descripteurs et de sommets gardent
+  leur `dsb st`, et `Queue::postSubmitFlush` de deko3d invalide déjà Image | Shader | Descriptors | L2 à chaque
+  `dkQueueFlush`) ; pas de vidage de la liste différée des VBO.
+- **Fences** : `cmd_seg_fence[slot][segment]` + `cmd_seg_fence_active[][]` (même logique que `fence_active[]`).
+  `dk_end_frame` signale toujours la fence du slot sur la liste courante ; elle est postérieure, dans la même queue,
+  à toutes les fences de segment de la frame, donc `dk_wait_fence` (début de frame) rend l'anneau entier du slot
+  réutilisable : `dk_cmdbuf_restart(slot)` = clear + segment 0 + fences de segment oubliées + premier morceau.
+  Même redémarrage après tout WaitIdle (`dk_submit_and_reset`, `dk_ensure_recordable`, chemins synchrones de
+  texture / FBO / `glReadPixels` : les 20 sites « clear + `dkCmdBufAddMemory(0, 4 Mo)` » passent par
+  `dk_cmdbuf_restart`, seul endroit avec le roulement où deko3d reçoit de la mémoire), et à l'init.
+- `glFlush` (A3 + E1) : le critère « 2 000 draws » (`DK_FLUSH_RESET_DRAWS`, supprimé) était un critère de mémoire
+  de commandes, remplacé par l'anneau ; les critères « moitié du budget uniforms / client arrays » restent
+  (toujours un `dk_submit_and_reset` avec WaitIdle, hors périmètre C5). Le chemin asynchrone continue
+  d'enregistrer dans le même segment après `FinishList` : le comptage par octets distribués n'en dépend pas, la
+  fence du segment posée au roulement couvre aussi ces listes.
+- Les seuils de 4 000 draws de `dk_draw_arrays` / `dk_draw_elements` sont supprimés (plus de `dk_submit_and_reset`
+  pour la mémoire de commandes). `draws_since_flush` ne sert plus qu'aux traces.
+- **Callback `cbAddMem`** : rôle normal = distribuer le morceau suivant du segment (jamais de soumission).
+  Dernier recours, inchangé, si un segment entier est consommé **à l'intérieur d'une commande** (le contrôle avant
+  la commande n'a pas suffi) : submit + WaitIdle + `dk_cmdbuf_restart` + remise à zéro des allocateurs + rebinds +
+  barrière, et le chemin réentrant. Il ne doit jamais être atteint : la marge de 128 Ko couvre largement un draw
+  (au plus ~40 Ko : 4 UBO packés de 8 Ko poussés inline + liaisons ; la plus grosse réservation unique de deko3d
+  est 32 Ko, `dkCmdBufPushConstants`). Trace `cbAddMem: segment ... used up inside a command` si ça arrive.
+- `[PERF]` : `cmd_roll` (temps et nombre de roulements par frame) et `cmd_roll_wait` (attentes de fence de
+  segment réellement bloquantes : doit rester à 0 ou presque).
+
+Performance :
+- [ ] Hors écran (`run_campaign.sh`, `gl_trex_off` ×3, `gl_egypt_off`, 540p et 1080p) : `submit_reset` par frame ne
+      doit plus compter que les budgets uniforms / client arrays ; `cmd_roll` ≈ 1 par ~900 Ko de commandes
+      (T-Rex off : ~1 tous les 4 frames), `cmd_roll_wait` ≈ 0 ; FPS `gl_trex_off` ≥ 38,2 / 34,2 / 37,6 (E1) et
+      `gl_egypt_off` ≥ 65,7, en A/B (C2 contre C2 + C5)
+- [ ] À l'écran (`gl_egypt`, `gl_trex`) : une frame lourde (> 900 Ko de commandes) roule en cours de frame sans
+      attendre ; `cmd_roll_wait` ≈ 0 ; FPS inchangés ou mieux ; `driver` / `alu` / `fill` / `blending` inchangés
+- [ ] Aucun `cbAddMem: ... used up inside a command` dans la sortie nxlink, aucune `GPU queue in ERROR STATE`
+
+Rendu (ce qui change : une frame est désormais découpée en plusieurs listes soumises au fil de l'eau, avec un
+`dk_cmdbuf_clear` + rebind de la cible entre deux, sans barrière d'invalidation) :
+- [ ] `--freeze 10000 gl_egypt` et `gl_trex` identiques à Nouveau ; passes FBO (ombres, flou) traversées par un
+      roulement : rebind de la cible avec sa barrière Full dans `dk_rebind_render_target`, pas de trou ni de
+      texture noire
+- [ ] Spearmint : plusieurs cartes, HUD, longue partie (roulements en cours de frame sur les scènes chargées), pas
+      de scintillement de texture (pas de nouvelle invalidation, `dsb st` inchangés)
+
+Conformité dEQP-GLES2 (VK-GL-CTS, jamais `validation_test`) :
+- [ ] `functional.flush_finish.*` : calibration jusqu'à 2^20 draws sans swap : ~1 100 roulements par test, aucun
+      débordement, aucun blocage (chaque fence attendue a été soumise **et** kickée par `dkQueueFlush`) ;
+      `flush` et `finish` Pass, `wait` inchangé
+- [ ] `functional.draw.*`, `functional.buffer.*` (orphaning : liste différée vidée seulement par la fence de slot
+      / WaitIdle, inchangé), `functional.vertex_arrays.*` (bloc de constantes conservé à travers un roulement)
+- [ ] `functional.uniform_api.*`, `functional.shaders.*` (UBO packés reliés à leur ancienne adresse après un
+      roulement sans nouveau push : `uniform_generation` non bumpé)
+- [ ] `functional.fbo.*` (rebind de cible à chaque roulement, `no_rebind`, `recreate_*`, `resize`),
+      `functional.read_pixels.*`, `functional.texture.*` (chemins synchrones → `dk_cmdbuf_restart`), `texture.mipmap`
+      et `fbo.render` avec blits (contrôle du ring avant `dk_generate_mipmap` / `dk_blit_framebuffer`)
+- [ ] Lots longs (sub-batches de 500 tests sans swap entre les tests) : pas de `GPU queue in ERROR STATE`
+- [ ] Passe rapide `lists/optim_oct07.txt` puis régression complète en A/B
+
 ## Piste B5 — non retenue
 
 Les barrières `None + L2Cache | Descriptors | Zcull` après soumission (`dk_begin_frame`, `dk_submit_and_reset`,

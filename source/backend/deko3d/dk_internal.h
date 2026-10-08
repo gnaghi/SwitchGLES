@@ -234,9 +234,48 @@ static inline uint32_t dk_client_array_slot_size(const dk_backend_data_t *dk) {
     return (dk->uniform_base - dk->client_array_base) / SGL_FB_NUM;
 }
 
-/* Draws recorded without a cmdbuf reset after which glFlush recycles the
- * frame's resources (dk_flush): half the 4 MB cmdbuf at ~1.1 KB per draw. */
-#define DK_FLUSH_RESET_DRAWS 2000
+/* ============================================================================
+ * Command memory ring (dk_command.c, see dk_backend_data_t::cmd_seg)
+ * ============================================================================ */
+
+/* Size of one ring segment: SGL_CMD_MEM_SIZE / DK_CMD_RING_SEGMENTS (1 MB). */
+#define DK_CMD_SEG_SIZE (SGL_CMD_MEM_SIZE / DK_CMD_RING_SEGMENTS)
+/* Piece of the current segment handed to deko3d per add-memory callback. */
+#define DK_CMD_CHUNK_SIZE (64 * 1024)
+/* A draw or clear starts only in a segment with at least this much left to
+ * hand out, else the ring rolls first. The largest command sequence recorded
+ * between two checks is one draw: at most ~40 KB (4 packed UBO pushes of
+ * SGL_MAX_PACKED_UBO_SIZE inline + bindings), a 32 KB single reserve being
+ * deko3d's own maximum (dkCmdBufPushConstants). */
+#define DK_CMD_ROLL_MARGIN (128 * 1024)
+
+/**
+ * Restart a slot's cmdbuf on segment 0 of its command memory: clear it
+ * (dk_cmdbuf_clear), forget the segment fences and hand out the first chunk.
+ * The caller guarantees the GPU no longer reads that memory (slot fence
+ * waited, or queue idle). Every "clear + re-add memory" site uses this; the
+ * descriptor sets and the render target are re-bound by the caller.
+ */
+void dk_cmdbuf_restart(dk_backend_data_t *dk, int slot);
+
+/**
+ * Roll the current slot's recording to the next ring segment without
+ * waiting for the GPU: fence + finish + submit + kick the recorded list,
+ * then clear the cmdbuf and continue in the next segment (whose fence is
+ * waited only if still pending). Allocators are not touched: nothing was
+ * dropped, every address handed out so far stays valid.
+ */
+void dk_cmd_ring_roll(dk_backend_data_t *dk);
+
+/**
+ * Roll if the current segment has less than DK_CMD_ROLL_MARGIN left to hand
+ * out. Called before a draw or a clear is recorded (clean points, nothing of
+ * the command in the cmdbuf yet).
+ */
+static inline void dk_cmd_ring_check(dk_backend_data_t *dk) {
+    if (DK_CMD_SEG_SIZE - dk->cmd_seg_used[dk->current_slot] < DK_CMD_ROLL_MARGIN)
+        dk_cmd_ring_roll(dk);
+}
 
 /**
  * Insert a freed block into the sorted VBO free-list, coalescing with adjacent
@@ -250,9 +289,12 @@ static inline uint32_t dk_client_array_slot_size(const dk_backend_data_t *dk) {
 void dk_vbo_free_insert(dk_backend_data_t *dk, uint32_t offset, uint32_t size);
 
 /**
- * Command buffer overflow callback.
- * Safety net called by deko3d when cmdbuf runs out of memory during recording.
- * Submits pending work, waits for GPU, recycles memory, and re-binds essentials.
+ * deko3d add-memory callback (DkCmdBufMaker::cbAddMem), called from inside a
+ * command when the memory handed out so far is used up. Normal role: hand
+ * out the next DK_CMD_CHUNK_SIZE piece of the current ring segment (pure
+ * bookkeeping, no submission). Last resort, if the whole segment is used up
+ * inside one command (the pre-command roll check failed to prevent it):
+ * submit pending work, wait for GPU, recycle memory and re-bind essentials.
  */
 void dk_cmdbuf_overflow_cb(void *userData, DkCmdBuf cmdbuf, size_t minReqSize);
 

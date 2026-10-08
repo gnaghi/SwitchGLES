@@ -66,8 +66,7 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
      * submission before the readback begins. Not just a barrier. */
     dk_flush_sync(dk);
 
-    dk_cmdbuf_clear(dk, dk->cmdbuf);
-    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+    dk_cmdbuf_restart(dk, dk->current_slot);
     dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
     dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr, SGL_MAX_TEXTURES);
     dk->descriptors_bound = true;
@@ -317,8 +316,7 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
     dkMemBlockDestroy(readbackMem);
 
     /* === Step 5: Upload staging to texture (same as dk_texture_image_2d) === */
-    dk_cmdbuf_clear(dk, dk->cmdbuf);
-    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+    dk_cmdbuf_restart(dk, dk->current_slot);
     dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
     dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr, SGL_MAX_TEXTURES);
     dk->descriptors_bound = true;
@@ -372,8 +370,7 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
     dk->texture_level_mask[handle] |= (1u << level);
 
     /* === Step 7: Restore command buffer state === */
-    dk_cmdbuf_clear(dk, dk->cmdbuf);
-    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+    dk_cmdbuf_restart(dk, dk->current_slot);
 
     /* Re-bind descriptor sets after cmdbuf clear (matches legacy pattern) */
     dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
@@ -442,8 +439,7 @@ void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum tar
     /* === Step 1: Finish() — submit pending rendering, wait for idle === */
     dk_flush_sync(dk);
 
-    dk_cmdbuf_clear(dk, dk->cmdbuf);
-    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+    dk_cmdbuf_restart(dk, dk->current_slot);
     dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
     dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr, SGL_MAX_TEXTURES);
     dk->descriptors_bound = true;
@@ -528,8 +524,7 @@ void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum tar
     dkMemBlockDestroy(readbackMem);
 
     /* === Step 4: Upload staging to texture sub-region === */
-    dk_cmdbuf_clear(dk, dk->cmdbuf);
-    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+    dk_cmdbuf_restart(dk, dk->current_slot);
     dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
     dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr, SGL_MAX_TEXTURES);
     dk->descriptors_bound = true;
@@ -572,8 +567,7 @@ void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum tar
     dk_write_image_descriptor_to_gpu(dk, handle);
 
     /* === Step 5: Restore command buffer state === */
-    dk_cmdbuf_clear(dk, dk->cmdbuf);
-    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+    dk_cmdbuf_restart(dk, dk->current_slot);
 
     /* Re-bind descriptor sets after cmdbuf clear (matches legacy pattern) */
     dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);

@@ -89,6 +89,23 @@ typedef struct dk_backend_data {
     DkFence fences[SGL_FB_NUM];
     bool fence_active[SGL_FB_NUM];
 
+    /* Command memory ring (dk_command.c). Each slot's cmdbuf_memblock is
+     * split into DK_CMD_RING_SEGMENTS segments used in turn within a frame:
+     * the segment being recorded is handed to deko3d in DK_CMD_CHUNK_SIZE
+     * pieces by the add-memory callback, so cmd_seg_used is an exact count
+     * of the bytes deko3d may have written. When fewer than
+     * DK_CMD_ROLL_MARGIN bytes are left, the next draw or clear rolls to the
+     * next segment (dk_cmd_ring_roll): the recorded list is submitted with a
+     * fence on it and recording continues in the next segment, after waiting
+     * that segment's own fence only if it is still pending. The slot fence of
+     * dk_end_frame is later than every segment fence of the frame, so
+     * dk_wait_fence makes the whole ring of the slot reusable at once. */
+#define DK_CMD_RING_SEGMENTS 4
+    DkFence cmd_seg_fence[SGL_FB_NUM][DK_CMD_RING_SEGMENTS];
+    bool cmd_seg_fence_active[SGL_FB_NUM][DK_CMD_RING_SEGMENTS];
+    int cmd_seg[SGL_FB_NUM];           /* segment being recorded */
+    uint32_t cmd_seg_used[SGL_FB_NUM]; /* bytes of it handed to deko3d so far */
+
     /* Shader code memory */
     DkMemBlock code_memblock;
     uint32_t code_offset;
@@ -225,12 +242,13 @@ typedef struct dk_backend_data {
     uint32_t diag_draw_count;        /* Total draw calls this frame */
     uint32_t diag_texture_binds;     /* Total texture bind calls this frame */
 
-    /* Mid-frame flush tracking for overflow protection.
-     * flush_finish tests do up to 2^20 draws without eglSwapBuffers.
-     * We periodically flush to avoid cmdbuf (~4MB, ~4K draws) and
-     * client_array (~16MB/slot) overflow. */
-    uint32_t draws_since_flush; /* Draws since last dk_submit_and_reset */
-    bool in_overflow_callback;  /* Re-entrancy guard for overflow callback */
+    /* Draws and clears recorded since the last dk_submit_and_reset
+     * (diagnostic: traces and the last-resort overflow path). The cmdbuf
+     * itself is protected by the command memory ring above, the
+     * client-array / uniform allocators by the pre-draw budget check of
+     * dk_apply_viewport. */
+    uint32_t draws_since_flush;
+    bool in_overflow_callback; /* Re-entrancy guard for the last-resort overflow path */
     bool vbo_data_dirty;        /* true after CPU writes to VBO region — need GPU L2 invalidation */
     /* true after a CPU write to GPU-visible memory (VBO data, vertex staging,
      * constant block) that has not been followed by a `dsb st` yet; drained by

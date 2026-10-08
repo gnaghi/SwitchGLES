@@ -77,7 +77,8 @@ void dk_apply_viewport(sgl_backend_t *be, const sgl_viewport_state_t *state) {
     /* Pre-draw overflow check: flush when client_array or uniform space is
      * running low. This runs BEFORE any state is recorded into the cmdbuf, so
      * after flush sgl_prepare_draw will cleanly re-establish all state in the
-     * fresh cmdbuf. cbAddMem callback handles cmdbuf overflow (safety net).
+     * fresh cmdbuf. The command memory ring is checked right after (below);
+     * the cbAddMem callback feeds it and stays the last-resort safety net.
      * It is the first thing sgl_prepare_draw does, and it runs for EVERY
      * draw, before the cache lookup below: an unchanged viewport must not
      * skip it. */
@@ -89,6 +90,12 @@ void dk_apply_viewport(sgl_backend_t *be, const sgl_viewport_state_t *state) {
             dk_submit_and_reset(dk);
         }
     }
+
+    /* Command memory: roll the ring to its next segment (submit + kick, no
+     * wait) if the current one cannot take a whole draw. Same clean point:
+     * nothing of this draw is recorded yet. After a dk_submit_and_reset
+     * above the ring is back on a fresh segment 0, so this is a no-op. */
+    dk_cmd_ring_check(dk);
 
     /* DkDeviceFlags_OriginLowerLeft makes deko3d use GL-style coordinates
      * where y=0 is at the bottom of the window. No manual Y-flip needed —

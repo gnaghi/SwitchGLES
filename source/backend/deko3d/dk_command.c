@@ -14,17 +14,134 @@
 #include "../../util/sgl_perf.h"
 
 /* ============================================================================
- * Command Buffer Overflow Callback
+ * Command Memory Ring
  *
- * Safety net: called by deko3d when the cmdbuf runs out of memory during
- * command recording. Submits pending work, waits, and recycles the memory.
- * Under normal operation the pre-draw threshold in dk_apply_viewport should
- * prevent this from ever firing; this handles edge cases (very large state
- * or unexpected command sizes).
+ * Each slot owns SGL_CMD_MEM_SIZE of command memory, used as a ring of
+ * DK_CMD_RING_SEGMENTS segments within a frame. deko3d is never given a whole
+ * segment: the add-memory callback hands it out DK_CMD_CHUNK_SIZE at a time,
+ * which makes cmd_seg_used an exact upper bound of the bytes recorded (deko3d
+ * has no API to read its write position, and a draw-count estimate is what
+ * let the 4 MB fill up before the old 4000-draw threshold on T-Rex, ~1.1 KB
+ * per draw). Before each draw or clear, dk_cmd_ring_check rolls to the next
+ * segment when less than DK_CMD_ROLL_MARGIN is left: the list recorded so far
+ * is submitted behind a fence and recording goes on in the next segment. The
+ * only wait is that segment's own fence, if the GPU has not consumed it yet
+ * (it was submitted DK_CMD_RING_SEGMENTS-1 segments ago), so the CPU may run
+ * up to ~3 MB of commands ahead of the GPU instead of serializing on a
+ * WaitIdle every 4000 draws. This is the scheme of deko3d's own Queue
+ * command ring (dk_queue.cpp: addCmdMemory / flushRing / waitFenceRing).
+ * ============================================================================ */
+
+static int dk_cmdbuf_slot(const dk_backend_data_t *dk, DkCmdBuf cmdbuf) {
+    for (int i = 0; i < SGL_FB_NUM; i++) {
+        if (dk->cmdbufs[i] == cmdbuf)
+            return i;
+    }
+    return dk->current_slot;
+}
+
+/* Hand the next piece of the slot's current segment to deko3d: at least
+ * min_size bytes (a single command's need), DK_CMD_CHUNK_SIZE otherwise, never
+ * past the end of the segment. Returns false when the segment cannot hold
+ * min_size more bytes. */
+static bool dk_cmd_ring_add_chunk(dk_backend_data_t *dk, int slot, size_t min_size) {
+    uint32_t used = dk->cmd_seg_used[slot];
+    uint32_t remaining = DK_CMD_SEG_SIZE - used;
+    uint32_t need = (uint32_t)((min_size + DK_CMDMEM_ALIGNMENT - 1) & ~(DK_CMDMEM_ALIGNMENT - 1));
+    if (need > remaining)
+        return false;
+    uint32_t chunk = need > DK_CMD_CHUNK_SIZE ? need : DK_CMD_CHUNK_SIZE;
+    if (chunk > remaining)
+        chunk = remaining;
+    uint32_t offset = (uint32_t)dk->cmd_seg[slot] * DK_CMD_SEG_SIZE + used;
+    dkCmdBufAddMemory(dk->cmdbufs[slot], dk->cmdbuf_memblock[slot], offset, chunk);
+    dk->cmd_seg_used[slot] = used + chunk;
+    return true;
+}
+
+void dk_cmdbuf_restart(dk_backend_data_t *dk, int slot) {
+    dk_cmdbuf_clear(dk, dk->cmdbufs[slot]);
+    for (int s = 0; s < DK_CMD_RING_SEGMENTS; s++)
+        dk->cmd_seg_fence_active[slot][s] = false;
+    dk->cmd_seg[slot] = 0;
+    dk->cmd_seg_used[slot] = 0;
+    dk_cmd_ring_add_chunk(dk, slot, DK_CMD_CHUNK_SIZE);
+}
+
+void dk_cmd_ring_roll(dk_backend_data_t *dk) {
+    int slot = dk->current_slot;
+    int seg = dk->cmd_seg[slot];
+    int next = (seg + 1) % DK_CMD_RING_SEGMENTS;
+
+    if (dkQueueIsInErrorState(dk->queue)) {
+        return; /* Nothing can be submitted; the callback keeps feeding chunks. */
+    }
+    SGL_PERF_BEGIN(perf);
+
+    /* Fence on the segment, then submit and kick what was recorded in it
+     * (the same sequence as the asynchronous glFlush of dk_flush, plus the
+     * fence). Nothing is dropped: the GPU register state set by those
+     * commands persists in the queue, and every uniform / client-array /
+     * constant-block address handed out so far stays valid, so the uniform
+     * generation is not bumped and the allocators go on linearly. */
+    dkCmdBufSignalFence(dk->cmdbuf, &dk->cmd_seg_fence[slot][seg], false);
+    dk->cmd_seg_fence_active[slot][seg] = true;
+    DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
+    if (cmdlist) {
+        dkQueueSubmitCommands(dk->queue, cmdlist);
+        dkQueueFlush(dk->queue);
+    }
+
+    /* The next segment was submitted DK_CMD_RING_SEGMENTS-1 rolls ago (or in
+     * a previous use of this slot, already covered by the slot fence wait of
+     * dk_wait_fence): its fence is normally long signaled. */
+    if (dk->cmd_seg_fence_active[slot][next]) {
+        SGL_PERF_BEGIN(perf_wait);
+        dkFenceWait(&dk->cmd_seg_fence[slot][next], -1);
+        dk->cmd_seg_fence_active[slot][next] = false;
+        SGL_PERF_END(SGL_PERF_CMD_ROLL_WAIT, perf_wait);
+    }
+
+    /* dk_cmdbuf_clear recycles deko3d's control memory (the submitted list is
+     * consumed synchronously by dkQueueSubmitCommands) and forgets the
+     * recorded-state shortcuts (bound_program, state cache), as every clear
+     * site does; the descriptor sets and the render target are re-bound like
+     * after dk_submit_and_reset. No L2 / descriptor invalidation here: the CPU
+     * rewrote nothing the GPU may have cached (no allocator restarted), the
+     * descriptor and vertex writes keep their own `dsb st`, and deko3d's
+     * postSubmitFlush already invalidates Image | Shader | Descriptors | L2
+     * on the dkQueueFlush above. */
+    dk_cmdbuf_clear(dk, dk->cmdbuf);
+    dk->cmd_seg[slot] = next;
+    dk->cmd_seg_used[slot] = 0;
+    dk_cmd_ring_add_chunk(dk, slot, DK_CMD_CHUNK_SIZE);
+
+    dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
+    dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr, SGL_MAX_TEXTURES);
+    dk->descriptors_bound = true;
+
+    dk_rebind_render_target(dk);
+
+    SGL_PERF_END(SGL_PERF_CMD_ROLL, perf);
+    SGL_TRACE_BACKEND("cmd ring roll slot=%d seg %d -> %d (draws=%u)", slot, seg, next,
+                      dk->draws_since_flush);
+}
+
+/* ============================================================================
+ * Add-Memory Callback
+ *
+ * Normal role: feed the current ring segment to deko3d chunk by chunk (no
+ * submission, no wait: this is the bookkeeping that makes cmd_seg_used exact).
+ *
+ * Last resort, never reached as long as DK_CMD_ROLL_MARGIN covers one command
+ * sequence: the segment is used up inside a command. Submits pending work,
+ * waits, and recycles the memory. Kept as the safety net of the ring: it
+ * fires from inside a deko3d command, which is exactly what the ring avoids.
  * ============================================================================ */
 
 void dk_cmdbuf_overflow_cb(void *userData, DkCmdBuf cmdbuf, size_t minReqSize) {
     dk_backend_data_t *dk = (dk_backend_data_t *)userData;
+    int slot = dk_cmdbuf_slot(dk, cmdbuf);
 
     /* Re-entrancy guard: dkCmdBufFinishList itself may need a few bytes,
      * triggering this callback recursively when the cmdbuf is completely full.
@@ -32,25 +149,32 @@ void dk_cmdbuf_overflow_cb(void *userData, DkCmdBuf cmdbuf, size_t minReqSize) {
      * will be lost, but it prevents an infinite loop / stack overflow). */
     if (dk->in_overflow_callback) {
         SGL_TRACE_BACKEND("cbAddMem: re-entrant overflow — emergency clear");
-        dk_cmdbuf_clear(dk, cmdbuf);
-        dkCmdBufAddMemory(cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+        dk_cmdbuf_restart(dk, slot);
         /* Recorded pushes were just dropped: no address may be rebound as-is. */
         dk_bump_uniform_generation(dk);
         return;
     }
+
+    /* Normal case: the current segment still has room for this command. */
+    if (dk_cmd_ring_add_chunk(dk, slot, minReqSize)) {
+        return;
+    }
+
     dk->in_overflow_callback = true;
 
-    SGL_TRACE_BACKEND("cbAddMem: cmdbuf overflow (need %zu bytes, draws=%u) — flushing", minReqSize,
-                      dk->draws_since_flush);
+    SGL_TRACE_BACKEND("cbAddMem: segment %d of slot %d used up inside a command (need %zu bytes, "
+                      "draws=%u) — flushing",
+                      dk->cmd_seg[slot], slot, minReqSize, dk->draws_since_flush);
 
     /* Submit whatever commands have been recorded so far */
     DkCmdList cmdlist = dkCmdBufFinishList(cmdbuf);
     dkQueueSubmitCommands(dk->queue, cmdlist);
     dkQueueWaitIdle(dk->queue);
 
-    /* Recycle the same memory block */
-    dk_cmdbuf_clear(dk, cmdbuf);
-    dkCmdBufAddMemory(cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+    /* Recycle the memory: back to segment 0 (GPU idle, every fence is done).
+     * The first chunk (64 KB) holds the re-binds below plus the interrupted
+     * command (at most a 32 KB reserve, dkCmdBufPushConstants' limit). */
+    dk_cmdbuf_restart(dk, slot);
 
     /* Reset client array and uniform allocators */
     {
@@ -225,9 +349,9 @@ void dk_submit_and_reset(dk_backend_data_t *dk) {
     /* GPU is idle after WaitIdle: every deferred VBO block can be reused. */
     dk_drain_deferred_free(dk, -1);
 
-    /* Reset command buffer for continued use */
-    dk_cmdbuf_clear(dk, dk->cmdbuf);
-    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+    /* Reset command buffer for continued use: ring back on segment 0 (GPU
+     * idle, every segment fence is done). */
+    dk_cmdbuf_restart(dk, dk->current_slot);
 
     /* Reset client array and uniform allocators — safe because WaitIdle
      * ensures all GPU work referencing old data has completed. */
@@ -277,8 +401,7 @@ void dk_ensure_recordable(dk_backend_data_t *dk) {
         dkQueueWaitIdle(dk->queue);
     }
 
-    dk_cmdbuf_clear(dk, dk->cmdbuf);
-    dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+    dk_cmdbuf_restart(dk, dk->current_slot);
 
     dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
     dkCmdBufBindSamplerDescriptorSet(dk->cmdbuf, dk->sampler_descriptor_addr, SGL_MAX_TEXTURES);
@@ -426,9 +549,10 @@ void dk_wait_fence(sgl_backend_t *be, int slot) {
     }
     SGL_PERF_END(SGL_PERF_FRAME_START, perf);
 
-    /* Reset command buffer for new frame */
-    dk_cmdbuf_clear(dk, dk->cmdbufs[slot]);
-    dkCmdBufAddMemory(dk->cmdbufs[slot], dk->cmdbuf_memblock[slot], 0, SGL_CMD_MEM_SIZE);
+    /* Reset command buffer for new frame: ring back on segment 0. The slot
+     * fence signaled by dk_end_frame comes after every segment fence of that
+     * frame in the same queue, so the whole ring of the slot is free. */
+    dk_cmdbuf_restart(dk, slot);
 
     /* Reset descriptors_bound flag since command buffer was cleared */
     dk->descriptors_bound = false;
@@ -473,17 +597,17 @@ void dk_flush(sgl_backend_t *be) {
      * (dk_wait_fence) or a WaitIdle (dk_submit_and_reset). Only glFinish
      * waits.
      *
-     * The command memory, uniforms and client arrays therefore fill up across
-     * every glFlush until the next swap: GFXBench off-screen flushes each
-     * frame but swaps only every ~100 frames. Left alone, the cmdbuf ran out
-     * mid-command (T-Rex: ~1.1 KB per draw, full after ~3500 draws, before
-     * the 4000-draw threshold of dk_draw_*) and the overflow callback, which
-     * submits, waits and rebinds state from inside a deko3d command, crashed
-     * gl_trex_off (2 runs out of 3). Recycle everything here instead, at a
-     * clean point between frames, once half of a budget is used: one wait
-     * every ~10 T-Rex frames, the frames in between keep overlapping. */
-    if (dk->draws_since_flush >= DK_FLUSH_RESET_DRAWS ||
-        dk->uniform_slot_end - dk->uniform_offset < dk_uniform_slot_size() / 2 ||
+     * The uniforms and client arrays therefore fill up across every glFlush
+     * until the next swap: GFXBench off-screen flushes each frame but swaps
+     * only every ~100 frames. Recycle them here, at a clean point between
+     * frames, once half of a budget is used (one wait every few tens of
+     * T-Rex frames; the frames in between keep overlapping). The command
+     * memory itself no longer needs this: it is a ring rolled segment by
+     * segment before the draws (dk_cmd_ring_check), without waiting. Before
+     * the ring, the 4 MB cmdbuf ran out mid-command across ~18 flushed T-Rex
+     * frames and the overflow callback crashed gl_trex_off (Oct 8, 2026);
+     * the 2000-draw reset that fixed it (E1) is replaced by the ring. */
+    if (dk->uniform_slot_end - dk->uniform_offset < dk_uniform_slot_size() / 2 ||
         dk->client_array_slot_end - dk->client_array_offset < dk_client_array_slot_size(dk) / 2) {
         dk_submit_and_reset(dk);
         return;

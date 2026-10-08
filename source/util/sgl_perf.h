@@ -31,6 +31,8 @@ enum {
     SGL_PERF_FRAME_START,  /* acquire + slot fence wait */
     SGL_PERF_BARRIER_FULL, /* count only: DkBarrier_Full barriers recorded */
     SGL_PERF_BARRIER_L2,   /* count only: barriers invalidating the whole L2 */
+    SGL_PERF_CMD_ROLL,     /* dk_cmd_ring_roll (whole: submit + kick + rebinds) */
+    SGL_PERF_CMD_ROLL_WAIT, /* dk_cmd_ring_roll: wait on a still-pending segment fence */
     SGL_PERF_COUNT
 };
 

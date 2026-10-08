@@ -28,8 +28,9 @@ void dk_clear(sgl_backend_t *be, GLbitfield mask, const float *color, float dept
     /* No flush before the clear: unlike a Vulkan render pass loadOp (GLOVE),
      * a deko3d clear is a 3D-engine command recorded in order with the draws
      * of the same command buffer. Accumulation without eglSwapBuffers is
-     * bounded by the draw/allocator thresholds and the cmdbuf overflow
-     * callback. */
+     * bounded by the allocator thresholds of dk_apply_viewport and, for the
+     * command memory, by the ring rolled here and before each draw. */
+    dk_cmd_ring_check(dk);
 
     /* Per GL spec: glClear is affected by the scissor test.
      * If GL_SCISSOR_TEST is enabled, only the scissor region is cleared.
