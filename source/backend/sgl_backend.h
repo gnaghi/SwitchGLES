@@ -165,7 +165,6 @@ struct sgl_backend_ops {
     /* ======== Sync Operations ======== */
     void (*flush)(sgl_backend_t *be);
     void (*finish)(sgl_backend_t *be);
-    void (*insert_barrier)(sgl_backend_t *be);
 
     /* ======== Misc Operations ======== */
     void (*set_line_width)(sgl_backend_t *be, GLfloat width);

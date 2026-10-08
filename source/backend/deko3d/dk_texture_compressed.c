@@ -182,10 +182,10 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLen
             dk_write_image_descriptor_to_gpu(dk, handle);
             dk_write_sampler_descriptor_to_gpu(dk, handle);
 
-            /* Mark cubemap as needing L2 cache barrier before first sampling.
-             * The DMA copy engine writes directly to DRAM, but the texture sampler
-             * reads through L2 cache. Without invalidation, the sampler may read
-             * stale (zero) data from L2 instead of the freshly DMA'd face data. */
+            /* Mark cubemap as needing a barrier before first sampling:
+             * invalidate the texture data and descriptor caches, which may hold
+             * stale (zero) data for the freshly copied faces. The copy engine
+             * goes through the L2, and the upload's WaitIdle already flushed it. */
             dk->cubemap_needs_barrier[handle] = true;
             dk->texture_used_as_rt[handle] = true;
         }
@@ -421,10 +421,11 @@ void dk_compressed_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle, 
 
     DkImage *texImage = &dk->textures[handle];
 
-    /* Save staging offset — restore after GPU copy (staging is temporary) */
-    uint32_t saved_client_offset = dk->client_array_offset;
+    /* Staging stays allocated until the slot's client-array region is reset
+     * (frame start after the slot fence, or a WaitIdle): the copy below is
+     * only recorded, not executed, so the next draw must not reuse it. */
     uint32_t stagingOffset = SGL_ALIGN_UP(dk->client_array_offset, DK_LINEAR_STRIDE_ALIGNMENT);
-    if (stagingOffset + (uint32_t)imageSize > dk->uniform_base - dk->client_array_base) {
+    if (stagingOffset + (uint32_t)imageSize > dk->client_array_slot_end) {
         SGL_ERROR_TEXTURE("Compressed sub-image staging memory exhausted");
         return;
     }
@@ -452,10 +453,8 @@ void dk_compressed_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle, 
     dstRect.depth = 1;
 
     dkCmdBufCopyBufferToImage(dk->cmdbuf, &srcBuf, &dstView, &dstRect, 0);
-    dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
+    dk_barrier(dk->cmdbuf, DkBarrier_Full,
                     DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);
-    /* Restore — staging data consumed by GPU copy, can be reused */
-    dk->client_array_offset = saved_client_offset;
 
     SGL_TRACE_TEXTURE("compressed_texture_sub_image_2d handle=%u offset(%d,%d) %dx%d size=%d",
                       handle, xoffset, yoffset, width, height, imageSize);

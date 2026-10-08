@@ -25,10 +25,11 @@ void dk_clear(sgl_backend_t *be, GLbitfield mask, const float *color, float dept
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
     sgl_context_t *ctx = sgl_get_current_context();
 
-    /* GLOVE pattern: flush pending operations before starting a new clear. */
-    if (dk->draws_since_flush > 0) {
-        dk_submit_and_reset(dk);
-    }
+    /* No flush before the clear: unlike a Vulkan render pass loadOp (GLOVE),
+     * a deko3d clear is a 3D-engine command recorded in order with the draws
+     * of the same command buffer. Accumulation without eglSwapBuffers is
+     * bounded by the draw/allocator thresholds and the cmdbuf overflow
+     * callback. */
 
     /* Per GL spec: glClear is affected by the scissor test.
      * If GL_SCISSOR_TEST is enabled, only the scissor region is cleared.
@@ -143,10 +144,9 @@ void dk_clear(sgl_backend_t *be, GLbitfield mask, const float *color, float dept
 
         dkCmdBufClearColorFloat(dk->cmdbuf, 0, dkMask, color[0], color[1], color[2], color[3]);
 
-        /* Add barrier after color clear to ensure it's committed before any RT switch
-         * Include L2Cache invalidation for proper cache coherency with subsequent sampling */
-        dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
-                        DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);
+        /* Add barrier after color clear to ensure it's committed before any RT switch.
+         * GPU->GPU only: no L2 invalidation needed (see dk_barrier). */
+        dk_barrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image);
     }
 
     if (mask & (GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)) {
@@ -214,10 +214,9 @@ void dk_clear(sgl_backend_t *be, GLbitfield mask, const float *color, float dept
                  * 3. Zcull — reset fast depth metadata to prevent stale culling.
                  * Both barriers are needed: Full for pipeline ordering, Tiles for the
                  * hardware compression cache that Full does NOT flush. */
-                dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
-                                DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache |
-                                    DkInvalidateFlags_Zcull);
-                dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Tiles, 0);
+                dk_barrier(dk->cmdbuf, DkBarrier_Full,
+                           DkInvalidateFlags_Image | DkInvalidateFlags_Zcull);
+                dk_barrier(dk->cmdbuf, DkBarrier_Tiles, 0);
 
                 /* Rebind render target after depth clear if FBO is active */
                 if (dk->current_fbo != 0 && dk->current_fbo_color > 0 &&

@@ -19,6 +19,14 @@ typedef struct {
     uint32_t size;
 } sgl_vbo_free_block_t;
 
+/* Orphaned VBO block awaiting reuse, tagged with the frame slot whose fence
+ * covers every draw that may still read it. */
+typedef struct {
+    uint32_t offset;
+    uint32_t size;
+    int slot;
+} dk_deferred_free_t;
+
 /* deko3d backend-specific data */
 typedef struct dk_backend_data {
     /* Device (shared with display) */
@@ -104,6 +112,7 @@ typedef struct dk_backend_data {
     bool texture_initialized[SGL_MAX_TEXTURES];
     bool texture_is_cubemap[SGL_MAX_TEXTURES];   /* true if texture is cubemap, false if 2D */
     bool texture_used_as_rt[SGL_MAX_TEXTURES];   /* true if texture was used as FBO render target */
+    bool sampler_dirty[SGL_MAX_TEXTURES];        /* descriptor rewritten by the CPU mid-frame */
     uint8_t cubemap_face_mask[SGL_MAX_TEXTURES]; /* bitmask of uploaded cubemap faces (6 bits) */
     bool cubemap_needs_barrier[SGL_MAX_TEXTURES]; /* true after cubemap complete, cleared after
                                                      first barrier */
@@ -165,16 +174,18 @@ typedef struct dk_backend_data {
     /* Mid-frame flush tracking for overflow protection.
      * flush_finish tests do up to 2^20 draws without eglSwapBuffers.
      * We periodically flush to avoid cmdbuf (~4MB, ~4K draws) and
-     * client_array (~85MB/slot) overflow. */
+     * client_array (~16MB/slot) overflow. */
     uint32_t draws_since_flush; /* Draws since last dk_submit_and_reset */
     bool in_overflow_callback;  /* Re-entrancy guard for overflow callback */
     bool vbo_data_dirty;        /* true after CPU writes to VBO region — need GPU L2 invalidation */
 
-/* Deferred VBO free list — blocks freed only after GPU sync (WaitIdle).
- * Used by buffer orphaning: old allocation can't be freed immediately
- * because in-flight draws may still reference it. */
-#define SGL_DEFERRED_FREE_MAX 64
-    sgl_vbo_free_block_t deferred_free[SGL_DEFERRED_FREE_MAX];
+/* Deferred VBO free list — blocks freed only after GPU sync: the fence of the
+ * slot recorded with each entry (dk_wait_fence), or WaitIdle
+ * (dk_submit_and_reset). Used by buffer orphaning: old allocation can't be
+ * freed immediately because in-flight draws may still reference it.
+ * Sized for SGL_FB_NUM frames of orphaning in flight. */
+#define SGL_DEFERRED_FREE_MAX 256
+    dk_deferred_free_t deferred_free[SGL_DEFERRED_FREE_MAX];
     int deferred_free_count;
 } dk_backend_data_t;
 

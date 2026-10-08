@@ -93,7 +93,7 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
     uint32_t dk_src_y = (uint32_t)y;
 
     /* Readback in a separate command list (GLOVE uses auxiliary command buffer) */
-    dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image);
+    dk_barrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image);
 
     DkImageView srcView;
     dkImageViewDefaults(&srcView, srcImage);
@@ -362,11 +362,10 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
         dk_write_sampler_descriptor_to_gpu(dk, handle);
     }
 
-    /* CRITICAL: Mark texture as needing L2 cache barrier before first sampling.
-     * CopyBufferToImage uses the DMA/2D engine which writes directly to DRAM.
-     * The 3D engine's texture sampler reads through its own L2 cache.
-     * Without invalidation, the sampler may read stale (zero/white) data.
-     * The standalone deko3d test proves this barrier is required. */
+    /* CRITICAL: Mark texture as needing a barrier before first sampling.
+     * Without invalidating the texture data cache, the sampler may read stale
+     * (zero/white) data. The standalone deko3d test proves this barrier is
+     * required. */
     dk->texture_used_as_rt[handle] = true;
 
     /* Track this level as defined for completeness */
@@ -466,7 +465,7 @@ void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum tar
     /* With OriginLowerLeft, CopyImageToBuffer uses GL coordinates — no Y-flip. */
     uint32_t dk_src_y = (uint32_t)y;
 
-    dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image);
+    dk_barrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image);
 
     DkImageView srcView;
     dkImageViewDefaults(&srcView, srcImage);
@@ -559,8 +558,8 @@ void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum tar
 
     dk_flush_sync(dk);
 
-    /* CRITICAL: Mark texture as needing L2 cache barrier before next sampling.
-     * Same reason as CopyTexImage2D: DMA writes bypass the 3D engine's L2 cache.
+    /* CRITICAL: Mark texture as needing a barrier before next sampling.
+     * Same reason as CopyTexImage2D: stale texture data cache.
      * Also recreate the descriptor to ensure consistency after the DMA copy. */
     dk->texture_used_as_rt[handle] = true;
 

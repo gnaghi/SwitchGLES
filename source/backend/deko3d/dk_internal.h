@@ -13,6 +13,7 @@
 
 #include "dk_backend.h"
 #include "../../util/sgl_log.h"
+#include "../../util/sgl_perf.h"
 #include <GLES2/gl2ext.h>
 #include <stdlib.h>
 #include <string.h>
@@ -129,6 +130,24 @@ int dk_acquire_image(sgl_backend_t *be);
 void dk_wait_fence(sgl_backend_t *be, int slot);
 
 /**
+ * Record a dkCmdBufBarrier. Every backend barrier goes through here so that
+ * SGL_PERF can count Full drains and whole-L2 invalidations per frame.
+ *
+ * L2Cache (L2FlushDirty + L2SysmemInvalidate on the whole L2) is only needed
+ * when the CPU and the GPU exchange data: CPU writes to CpuUncached memory the
+ * GPU may already have cached, or GPU results read back by the CPU. Every GPU
+ * client (ROP, texture, copy and 2D engines) goes through the L2, so GPU->GPU
+ * dependencies (render target -> sampling, blits, mipmaps) need Image only.
+ */
+static inline void dk_barrier(DkCmdBuf cmdbuf, DkBarrier mode, uint32_t flags) {
+    if (mode == DkBarrier_Full)
+        SGL_PERF_ADD(SGL_PERF_BARRIER_FULL, 1);
+    if (flags & DkInvalidateFlags_L2Cache)
+        SGL_PERF_ADD(SGL_PERF_BARRIER_L2, 1);
+    dkCmdBufBarrier(cmdbuf, mode, flags);
+}
+
+/**
  * Flush pending GPU commands without waiting.
  *
  * @param be    Backend pointer
@@ -141,13 +160,6 @@ void dk_flush(sgl_backend_t *be);
  * @param be    Backend pointer
  */
 void dk_finish(sgl_backend_t *be);
-
-/**
- * Insert a full pipeline barrier.
- *
- * @param be    Backend pointer
- */
-void dk_insert_barrier(sgl_backend_t *be);
 
 /**
  * Submit current command buffer, wait for GPU, and reset for continued use.
@@ -178,10 +190,22 @@ void dk_flush_sync(dk_backend_data_t *dk);
  */
 void dk_reset_uniform_slot(dk_backend_data_t *dk, int slot);
 
+/* Size of one frame slot's uniform / client-array sub-region. */
+static inline uint32_t dk_uniform_slot_size(void) {
+    return (SGL_UNIFORM_BUF_SIZE / SGL_FB_NUM) & ~(SGL_UNIFORM_ALIGNMENT - 1);
+}
+static inline uint32_t dk_client_array_slot_size(const dk_backend_data_t *dk) {
+    return (dk->uniform_base - dk->client_array_base) / SGL_FB_NUM;
+}
+
+/* Draws recorded without a cmdbuf reset after which glFlush recycles the
+ * frame's resources (dk_flush): half the 4 MB cmdbuf at ~1.1 KB per draw. */
+#define DK_FLUSH_RESET_DRAWS 2000
+
 /**
  * Insert a freed block into the sorted VBO free-list, coalescing with adjacent
- * blocks. Shared by dk_buffer_free() and dk_submit_and_reset()'s deferred-free
- * processing.
+ * blocks. Shared by dk_buffer_free() and the deferred-free processing
+ * (dk_submit_and_reset, dk_wait_fence).
  *
  * @param dk      Backend data pointer (not sgl_backend_t)
  * @param offset  Byte offset of the freed block in the data memblock

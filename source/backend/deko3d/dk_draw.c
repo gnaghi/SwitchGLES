@@ -391,7 +391,7 @@ void dk_draw_arrays(sgl_backend_t *be, GLenum mode, GLint first, GLsizei count) 
      * same addresses from a previous draw. Without this, glBufferSubData
      * updates are invisible to subsequent draws (dEQP buffer.write.random). */
     if (dk->vbo_data_dirty) {
-        dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_L2Cache);
+        dk_barrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_L2Cache);
         dk->vbo_data_dirty = false;
     }
 
@@ -531,7 +531,7 @@ void dk_draw_elements(sgl_backend_t *be, GLenum mode, GLsizei count, GLenum type
     /* Invalidate GPU L2 cache if VBO data was written by CPU since last draw.
      * See dk_draw_arrays for detailed explanation. */
     if (dk->vbo_data_dirty) {
-        dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_L2Cache);
+        dk_barrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_L2Cache);
         dk->vbo_data_dirty = false;
     }
 

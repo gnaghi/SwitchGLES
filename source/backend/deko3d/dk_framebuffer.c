@@ -50,15 +50,14 @@ void dk_bind_framebuffer(sgl_backend_t *be, sgl_handle_t handle, sgl_handle_t co
 
     /* Insert barrier before switching render targets.
      * This ensures any previous rendering is complete before we switch.
-     * Include L2Cache invalidation for proper cache coherency when switching
-     * between render target and texture sampling.
+     * No L2 invalidation: render target -> sampling is a GPU->GPU dependency
+     * (see dk_barrier); the first sampling is guarded in dk_bind_texture.
      * Zcull: NVIDIA's fast depth metadata is render-target-specific.
      * When (re)binding a render target, stale Zcull data from prior binds
      * causes GPU errors in subsequent depth clears/tests (observed when
      * glu::resetState repeatedly rebinds FBO 0 between dEQP tests). */
-    dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
-                    DkInvalidateFlags_Image | DkInvalidateFlags_Descriptors |
-                        DkInvalidateFlags_L2Cache | DkInvalidateFlags_Zcull);
+    dk_barrier(dk->cmdbuf, DkBarrier_Full,
+               DkInvalidateFlags_Image | DkInvalidateFlags_Descriptors | DkInvalidateFlags_Zcull);
 
     if (handle == 0) {
         /* Bind default framebuffer (swapchain image) - use per-slot depth buffer */
@@ -191,8 +190,7 @@ void dk_blit_framebuffer(sgl_backend_t *be, sgl_handle_t read_fbo, sgl_handle_t 
     }
 
     /* Ensure all prior rendering is complete before blit */
-    dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
-                    DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);
+    dk_barrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image);
 
     /* Create image views */
     DkImageView srcView, dstView;
@@ -247,8 +245,7 @@ void dk_blit_framebuffer(sgl_backend_t *be, sgl_handle_t read_fbo, sgl_handle_t 
     dkCmdBufBlitImage(dk->cmdbuf, &srcView, &srcRect, &dstView, &dstRect, blitFlags, 0);
 
     /* Barrier after blit to ensure data is visible */
-    dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
-                    DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);
+    dk_barrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image);
 
     SGL_TRACE_FBO("blit_framebuffer read_fbo=%u(tex=%u) -> write_fbo=%u(tex=%u) %ux%u->%ux%u",
                   read_fbo, read_color_tex, write_fbo, write_color_tex, sw, sh, dw, dh);
@@ -324,7 +321,7 @@ void dk_read_pixels(sgl_backend_t *be, GLint x, GLint y, GLsizei width, GLsizei 
      * This ensures the render target contents are finalized BEFORE we copy.
      * deko3d requires render pass to be complete before CopyImageToBuffer. */
     {
-        dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
+        dk_barrier(dk->cmdbuf, DkBarrier_Full,
                         DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);
         dk_flush_sync(dk);
 

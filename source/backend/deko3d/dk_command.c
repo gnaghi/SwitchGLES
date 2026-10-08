@@ -11,6 +11,7 @@
  */
 
 #include "dk_internal.h"
+#include "../../util/sgl_perf.h"
 
 /* ============================================================================
  * Command Buffer Overflow Callback
@@ -66,7 +67,7 @@ void dk_cmdbuf_overflow_cb(void *userData, DkCmdBuf cmdbuf, size_t minReqSize) {
 
     dk_rebind_render_target(dk);
 
-    dkCmdBufBarrier(cmdbuf, DkBarrier_None,
+    dk_barrier(cmdbuf, DkBarrier_None,
                     DkInvalidateFlags_L2Cache | DkInvalidateFlags_Descriptors |
                         DkInvalidateFlags_Zcull);
 
@@ -98,9 +99,9 @@ void dk_rebind_render_target(dk_backend_data_t *dk) {
          * Without this, GPU caches (L2, Zcull) from the previous render target
          * can interfere with rendering to the new target — especially after
          * glTexImage2D / glRenderbufferStorage resize while attached to FBO. */
-        dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
-                        DkInvalidateFlags_Image | DkInvalidateFlags_Descriptors |
-                            DkInvalidateFlags_L2Cache | DkInvalidateFlags_Zcull);
+        dk_barrier(dk->cmdbuf, DkBarrier_Full,
+                   DkInvalidateFlags_Image | DkInvalidateFlags_Descriptors |
+                       DkInvalidateFlags_Zcull);
 
         /* Use type flags to pick correct array (avoids renderbuffer/texture ID collision) */
         DkImageView colorView;
@@ -162,15 +163,34 @@ void dk_rebind_render_target(dk_backend_data_t *dk) {
  * deferred VBO free list — see dk_submit_and_reset() for the frame path.
  */
 void dk_reset_uniform_slot(dk_backend_data_t *dk, int slot) {
-    uint32_t per_slot = (SGL_UNIFORM_BUF_SIZE / SGL_FB_NUM) & ~(SGL_UNIFORM_ALIGNMENT - 1);
+    uint32_t per_slot = dk_uniform_slot_size();
     dk->uniform_offset = (uint32_t)slot * per_slot;
     dk->uniform_slot_end = dk->uniform_offset + per_slot;
 }
 
 void dk_flush_sync(dk_backend_data_t *dk) {
+    SGL_PERF_BEGIN(perf);
     DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
     dkQueueSubmitCommands(dk->queue, cmdlist);
     dkQueueWaitIdle(dk->queue);
+    SGL_PERF_END(SGL_PERF_FLUSH_SYNC, perf);
+}
+
+/*
+ * Return orphaned VBO blocks to the free list once the GPU no longer reads
+ * them: those tagged with `slot` after that slot's fence wait, or all of them
+ * (slot < 0) after WaitIdle.
+ */
+static void dk_drain_deferred_free(dk_backend_data_t *dk, int slot) {
+    int kept = 0;
+    for (int i = 0; i < dk->deferred_free_count; i++) {
+        if (slot < 0 || dk->deferred_free[i].slot == slot) {
+            dk_vbo_free_insert(dk, dk->deferred_free[i].offset, dk->deferred_free[i].size);
+        } else {
+            dk->deferred_free[kept++] = dk->deferred_free[i];
+        }
+    }
+    dk->deferred_free_count = kept;
 }
 
 /*
@@ -181,19 +201,12 @@ void dk_submit_and_reset(dk_backend_data_t *dk) {
     if (dkQueueIsInErrorState(dk->queue)) {
         return; /* Don't submit to an errored queue */
     }
+    SGL_PERF_BEGIN(perf);
 
     dk_flush_sync(dk);
 
-    /* Process deferred VBO free list — GPU is idle after WaitIdle,
-     * so it's safe to return these blocks to the free list for reuse.
-     * This handles buffer orphaning: old allocations are deferred until
-     * in-flight draws that reference them have completed. */
-    if (dk->deferred_free_count > 0) {
-        for (int i = 0; i < dk->deferred_free_count; i++) {
-            dk_vbo_free_insert(dk, dk->deferred_free[i].offset, dk->deferred_free[i].size);
-        }
-        dk->deferred_free_count = 0;
-    }
+    /* GPU is idle after WaitIdle: every deferred VBO block can be reused. */
+    dk_drain_deferred_free(dk, -1);
 
     /* Reset command buffer for continued use */
     dkCmdBufClear(dk->cmdbuf);
@@ -224,9 +237,10 @@ void dk_submit_and_reset(dk_backend_data_t *dk) {
      * Descriptors: force TIC/TSC to re-read from DRAM on next texture fetch.
      * Zcull: invalidate fast-depth metadata to prevent stale data from prior
      * depth operations causing GPU errors in subsequent depth clears/tests. */
-    dkCmdBufBarrier(dk->cmdbuf, DkBarrier_None,
+    dk_barrier(dk->cmdbuf, DkBarrier_None,
                     DkInvalidateFlags_L2Cache | DkInvalidateFlags_Descriptors |
                         DkInvalidateFlags_Zcull);
+    SGL_PERF_END(SGL_PERF_SUBMIT_RESET, perf);
 }
 
 /*
@@ -306,7 +320,7 @@ void dk_begin_frame(sgl_backend_t *be, int slot) {
      * Stale Zcull data from a previous frame's depth operations can cause GPU
      * errors in the new frame's depth clears/tests. Must invalidate at frame
      * start to ensure clean depth state. */
-    dkCmdBufBarrier(dk->cmdbuf, DkBarrier_None,
+    dk_barrier(dk->cmdbuf, DkBarrier_None,
                     DkInvalidateFlags_L2Cache | DkInvalidateFlags_Descriptors |
                         DkInvalidateFlags_Zcull);
 
@@ -370,10 +384,12 @@ int dk_acquire_image(sgl_backend_t *be) {
 void dk_wait_fence(sgl_backend_t *be, int slot) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
+    SGL_PERF_BEGIN(perf);
     if (dk->fence_active[slot]) {
         dkFenceWait(&dk->fences[slot], -1);
         dk->fence_active[slot] = false;
     }
+    SGL_PERF_END(SGL_PERF_FRAME_START, perf);
 
     /* Reset command buffer for new frame */
     dkCmdBufClear(dk->cmdbufs[slot]);
@@ -386,6 +402,9 @@ void dk_wait_fence(sgl_backend_t *be, int slot) {
     /* Restart this slot's uniform sub-region: the fence wait above guarantees
      * the GPU finished every draw that read it. */
     dk_reset_uniform_slot(dk, slot);
+
+    /* Same guarantee for VBO blocks orphaned during that slot's frame. */
+    dk_drain_deferred_free(dk, slot);
 
     SGL_TRACE_BACKEND("wait_fence slot=%d", slot);
 }
@@ -403,15 +422,43 @@ void dk_flush(sgl_backend_t *be) {
         return;
     }
 
+    /* After eglSwapBuffers the frame is already submitted and kicked off by
+     * dkQueuePresentImage: nothing to do. cmdbuf_submitted stays set so that
+     * dk_ensure_recordable keeps protecting the synchronous paths. */
     if (dk->cmdbuf_submitted) {
-        dkQueueWaitIdle(dk->queue);
-        dk->cmdbuf_submitted = false;
-        SGL_TRACE_BACKEND("flush (already submitted, waited idle)");
+        SGL_TRACE_BACKEND("flush (frame already submitted)");
         return;
     }
 
-    dk_submit_and_reset(dk);
-    SGL_TRACE_BACKEND("flush");
+    /* Asynchronous glFlush (GLES 2.0 §5.1): submit what is recorded and kick
+     * the GPU, without waiting, clearing the cmdbuf or resetting allocators.
+     * dkCmdBufFinishList does not rewind the command memory, so recording
+     * continues after the submitted range. That memory, and the uniform and
+     * client-array space it references, is only reused after the slot fence
+     * (dk_wait_fence) or a WaitIdle (dk_submit_and_reset). Only glFinish
+     * waits.
+     *
+     * The command memory, uniforms and client arrays therefore fill up across
+     * every glFlush until the next swap: GFXBench off-screen flushes each
+     * frame but swaps only every ~100 frames. Left alone, the cmdbuf ran out
+     * mid-command (T-Rex: ~1.1 KB per draw, full after ~3500 draws, before
+     * the 4000-draw threshold of dk_draw_*) and the overflow callback, which
+     * submits, waits and rebinds state from inside a deko3d command, crashed
+     * gl_trex_off (2 runs out of 3). Recycle everything here instead, at a
+     * clean point between frames, once half of a budget is used: one wait
+     * every ~10 T-Rex frames, the frames in between keep overlapping. */
+    if (dk->draws_since_flush >= DK_FLUSH_RESET_DRAWS ||
+        dk->uniform_slot_end - dk->uniform_offset < dk_uniform_slot_size() / 2 ||
+        dk->client_array_slot_end - dk->client_array_offset < dk_client_array_slot_size(dk) / 2) {
+        dk_submit_and_reset(dk);
+        return;
+    }
+    DkCmdList cmdlist = dkCmdBufFinishList(dk->cmdbuf);
+    if (cmdlist) {
+        dkQueueSubmitCommands(dk->queue, cmdlist);
+        dkQueueFlush(dk->queue);
+    }
+    SGL_TRACE_BACKEND("flush (async)");
 }
 
 void dk_finish(sgl_backend_t *be) {
@@ -436,16 +483,3 @@ void dk_finish(sgl_backend_t *be) {
     SGL_TRACE_BACKEND("finish");
 }
 
-void dk_insert_barrier(sgl_backend_t *be) {
-    dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
-
-    /* Include Zcull: This barrier is emitted before render target switches.
-     * Zcull metadata is render-target-specific and must be invalidated
-     * when switching targets, otherwise subsequent depth operations may
-     * reference stale fast-depth data and produce GPU errors. */
-    dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
-                    DkInvalidateFlags_Image | DkInvalidateFlags_Descriptors |
-                        DkInvalidateFlags_Zcull);
-
-    SGL_TRACE_BACKEND("insert_barrier");
-}

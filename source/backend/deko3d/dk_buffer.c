@@ -215,7 +215,8 @@ uint32_t dk_buffer_data(sgl_backend_t *be, sgl_handle_t handle, GLenum target, G
  * new data without conflicting with GPU reads of the previous region.
  *
  * We allocate from the VBO region (free-list + bump). The old allocation is
- * added to a deferred free list, processed after the next GPU sync (WaitIdle).
+ * added to a deferred free list, processed once the GPU is done with it: when
+ * the fence of the current frame slot is waited, or at the next WaitIdle.
  * This avoids client_array which is reset by dk_submit_and_reset (called by
  * glReadPixels), which would corrupt orphaned buffer data during verification.
  * ============================================================================ */
@@ -225,13 +226,16 @@ uint32_t dk_buffer_data_orphan(sgl_backend_t *be, GLsizeiptr size, uint32_t old_
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
     /* Defer-free old allocation: can't free immediately because in-flight
-     * draws may still reference it. Will be freed in dk_submit_and_reset
-     * after WaitIdle guarantees the GPU is done. */
+     * draws may still reference it. Every such draw was recorded before this
+     * call, so the fence signalled at the end of the current slot's frame
+     * covers them all: freed in dk_wait_fence for that slot, or earlier in
+     * dk_submit_and_reset after WaitIdle. */
     if (old_offset != 0 && old_size != 0 &&
         old_offset < dk->client_array_base && /* Only VBO region blocks */
         dk->deferred_free_count < SGL_DEFERRED_FREE_MAX) {
         dk->deferred_free[dk->deferred_free_count].offset = old_offset;
         dk->deferred_free[dk->deferred_free_count].size = old_size;
+        dk->deferred_free[dk->deferred_free_count].slot = dk->current_slot;
         dk->deferred_free_count++;
     }
 

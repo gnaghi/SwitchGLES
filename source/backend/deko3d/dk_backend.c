@@ -121,7 +121,6 @@ const sgl_backend_ops_t dk_backend_ops = {
     /* Sync Operations (dk_command.c) */
     .flush = dk_flush,
     .finish = dk_finish,
-    .insert_barrier = dk_insert_barrier,
 
     /* Misc Operations (dk_state.c) */
     .set_line_width = NULL,

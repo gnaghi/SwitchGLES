@@ -199,8 +199,8 @@ GL_APICALL void GL_APIENTRY glBindFramebuffer(GLenum target, GLuint framebuffer)
     }
 
     /* Skip GPU commands if the draw target isn't changing.
-     * The GLOVE-pattern flush in dk_clear handles the accumulation problem
-     * (NotSupported tests that skip eglSwapBuffers). No need for barriers here. */
+     * Accumulation without eglSwapBuffers is bounded by the backend's mid-frame
+     * flush thresholds. No need for barriers here. */
     if (framebuffer == prev_draw_fbo) {
         SGL_TRACE_FBO("glBindFramebuffer(0x%X, %u) (no-op, already bound)", target, framebuffer);
         return;
@@ -208,10 +208,9 @@ GL_APICALL void GL_APIENTRY glBindFramebuffer(GLenum target, GLuint framebuffer)
 
     sgl_ensure_frame_ready();
 
-    /* Insert barrier when switching render targets */
-    if (ctx->backend->ops->insert_barrier) {
-        ctx->backend->ops->insert_barrier(ctx->backend);
-    }
+    /* The render-target switch barrier is emitted by the backend's
+     * bind_framebuffer, which also serves glFramebufferTexture2D,
+     * glFramebufferRenderbuffer and the delete paths. */
 
     /* Delegate render target switch to backend */
     if (ctx->backend->ops->bind_framebuffer) {

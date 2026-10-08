@@ -382,6 +382,7 @@ void dk_delete_texture(sgl_backend_t *be, sgl_handle_t handle) {
     uint8_t *desc_cpu = (uint8_t *)dkMemBlockGetCpuAddr(dk->descriptor_memblock);
     memset(desc_cpu + handle * sizeof(DkImageDescriptor), 0, sizeof(DkImageDescriptor));
     DK_ARM_STORE_BARRIER();
+    dk->sampler_dirty[handle] = true; /* descriptor rewritten mid-frame */
 }
 
 /* Invalidate texture backend state without GPU commands.
@@ -643,10 +644,10 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle, G
             dk_write_image_descriptor_to_gpu(dk, handle);
             dk_write_sampler_descriptor_to_gpu(dk, handle);
 
-            /* Mark cubemap as needing L2 cache barrier before first sampling.
-             * The DMA copy engine writes directly to DRAM, but the texture sampler
-             * reads through L2 cache. Without invalidation, the sampler may read
-             * stale (zero) data from L2 instead of the freshly DMA'd face data. */
+            /* Mark cubemap as needing a barrier before first sampling:
+             * invalidate the texture data and descriptor caches, which may hold
+             * stale (zero) data for the freshly copied faces. The copy engine
+             * goes through the L2, and the upload's WaitIdle already flushed it. */
             dk->cubemap_needs_barrier[handle] = true;
             dk->texture_used_as_rt[handle] = true; /* Belt-and-suspenders: also set RT flag */
 
@@ -1315,11 +1316,10 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum targ
 
     dk_rebind_render_target(dk);
 
-    /* Mark texture as needing L2 cache barrier before next sampling.
-     * The DMA copy engine writes new data directly to DRAM, but the GPU's
-     * texture cache (L2) may still hold stale data from before the update.
-     * Without invalidation, the GPU reads old texture content instead of
-     * the freshly uploaded data. Critical for cinematic video frames. */
+    /* Mark texture as needing a barrier before next sampling: the texture
+     * data cache may still hold stale data from before the update. Without
+     * invalidation, the GPU reads old texture content instead of the freshly
+     * uploaded data. Critical for cinematic video frames. */
     dk->texture_used_as_rt[handle] = true;
 
     SGL_TRACE_TEXTURE("texture_sub_image_2d handle=%u target=0x%X offset=(%d,%d) %dx%d", handle,
@@ -1368,6 +1368,9 @@ void dk_texture_parameter(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
      * NOT on every draw (thanks to the early-out above). */
     if (dk->texture_initialized[handle]) {
         dk_write_sampler_descriptor_to_gpu(dk, handle);
+        /* Invalidated at the next bind (dk_bind_texture), never here: a
+         * barrier in this function crashed the console (glu::resetState). */
+        dk->sampler_dirty[handle] = true;
     }
 
     SGL_TRACE_TEXTURE("texture_parameter handle=%u pname=0x%X param=0x%X", handle, pname, param);
@@ -1595,14 +1598,20 @@ void dk_bind_texture(sgl_backend_t *be, GLuint unit, sgl_handle_t handle, int st
     }
 
     /* Insert barrier if this texture was used as a render target (FBO),
-     * freshly-completed cubemap, or updated via sub-image/copy needing cache coherency.
-     * Invalidate Image (texture cache), L2, AND TIC/TSC descriptor caches. */
-    if (dk->texture_used_as_rt[handle] || dk->cubemap_needs_barrier[handle]) {
-        dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
-                        DkInvalidateFlags_Image | DkInvalidateFlags_Descriptors |
-                            DkInvalidateFlags_L2Cache);
+     * freshly-completed cubemap, or updated via sub-image/copy: wait for the
+     * writes and invalidate the texture data and TIC/TSC caches. These are
+     * GPU->GPU dependencies, so the L2 is coherent. A sampler descriptor
+     * rewritten by the CPU mid-frame (glTexParameter, delete) additionally
+     * needs the L2 invalidated, since the GPU may hold the old line. */
+    if (dk->texture_used_as_rt[handle] || dk->cubemap_needs_barrier[handle] ||
+        dk->sampler_dirty[handle]) {
+        uint32_t flags = DkInvalidateFlags_Image | DkInvalidateFlags_Descriptors;
+        if (dk->sampler_dirty[handle])
+            flags |= DkInvalidateFlags_L2Cache;
+        dk_barrier(dk->cmdbuf, DkBarrier_Full, flags);
         dk->texture_used_as_rt[handle] = false;
         dk->cubemap_needs_barrier[handle] = false;
+        dk->sampler_dirty[handle] = false;
     }
 
     /* Fallback: bind descriptor sets if somehow not already bound.
@@ -1660,7 +1669,7 @@ void dk_generate_mipmap(sgl_backend_t *be, sgl_handle_t handle) {
     /* Level 0 may have just been rendered by the 3D pipe (FBO still bound,
      * e.g. render-to-texture then glGenerateMipmap): drain it and invalidate
      * caches before the 2D engine reads it. */
-    dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);
+    dk_barrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image);
 
     /* Generate each mip level by blitting from the previous level.
      * For cubemaps, iterate over all 6 faces per mip level. */
@@ -1701,8 +1710,7 @@ void dk_generate_mipmap(sgl_backend_t *be, sgl_handle_t handle) {
                               DkBlitFlag_FilterLinear, 0);
 
             /* Add barrier between mip levels to ensure proper synchronization */
-            dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
-                            DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);
+            dk_barrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image);
 
             src_width = dst_width;
             src_height = dst_height;
@@ -1710,8 +1718,7 @@ void dk_generate_mipmap(sgl_backend_t *be, sgl_handle_t handle) {
     }
 
     /* Final barrier to ensure all mipmap generation is complete before sampling */
-    dkCmdBufBarrier(dk->cmdbuf, DkBarrier_Full,
-                    DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);
+    dk_barrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image);
 
     /* All mip levels are now defined */
     dk->texture_level_mask[handle] = (mip_levels >= 32) ? 0xFFFFFFFF : ((1u << mip_levels) - 1);
