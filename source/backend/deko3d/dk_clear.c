@@ -100,6 +100,9 @@ void dk_clear(sgl_backend_t *be, GLbitfield mask, const float *color, float dept
         return;
     }
     dkCmdBufSetScissors(dk->cmdbuf, 0, &clearScissor, 1);
+    /* The scissor registers now hold the clear rectangle, not what the
+     * draw-time cache recorded: the next draw records its scissor again. */
+    dk_state_cache_invalidate_mask(dk, DK_SC_SCISSOR);
 
     if (mask & GL_COLOR_BUFFER_BIT) {
         /* Per GL spec: glClear is affected by glColorMask */
@@ -205,6 +208,11 @@ void dk_clear(sgl_backend_t *be, GLbitfield mask, const float *color, float dept
                  * Per GL spec, stencil clear is affected by glStencilMask. */
                 dkCmdBufSetStencil(dk->cmdbuf, DkFace_Front, stencilMask, 0, 0xFF);
                 dkCmdBufSetStencil(dk->cmdbuf, DkFace_Back, stencilMask, 0, 0xFF);
+                /* The depth-stencil registers now hold the clear's state (and
+                 * dkCmdBufClearDepthStencil itself rewrites StencilFrontMask):
+                 * the next draw, or the re-apply glClear does after a stencil
+                 * clear, records the group again. */
+                dk_state_cache_invalidate_mask(dk, DK_SC_DEPTH_STENCIL);
 
                 dkCmdBufClearDepthStencil(dk->cmdbuf, clearDepth, depth, stencilMask,
                                           (uint8_t)stencil);

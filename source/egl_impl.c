@@ -80,6 +80,9 @@ void sgl_ensure_frame_ready(void) {
     } else {
         dkCmdBufBindRenderTarget(dk->cmdbuf, &colorView, NULL);
     }
+    /* Fresh cmdbuf + render-target bind: the state applied below and at the
+     * first draw must be recorded whatever the backend cache remembers. */
+    dk_state_cache_invalidate(dk);
 
     /* Store framebuffer info in backend - per-slot depth buffers */
     dk->framebuffers = surf->framebuffers;
@@ -590,6 +593,10 @@ EGLAPI EGLBoolean EGLAPIENTRY eglMakeCurrent(EGLDisplay dpy, EGLSurface draw, EG
         sgl_egl_set_error(EGL_BAD_CONTEXT);
         return EGL_FALSE;
     }
+
+    /* Context switch: the fixed-function state recorded for this backend is
+     * not trusted across a MakeCurrent; the next applies record everything. */
+    dk_state_cache_invalidate(dk);
 
     /* Store framebuffer info - per-slot depth buffers */
     if (draw_surf) {

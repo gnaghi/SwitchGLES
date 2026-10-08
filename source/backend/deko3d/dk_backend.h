@@ -27,6 +27,50 @@ typedef struct {
     int slot;
 } dk_deferred_free_t;
 
+/* Fixed-function state recorded in the current command buffer, per group
+ * (dk_state.c). Each entry holds the deko3d-side values that were last
+ * recorded (after FBO clamping / forcing), so an apply whose derived values
+ * are identical records nothing. A group's bit in `valid` is dropped whenever
+ * the recorded commands may be lost or the GPU registers overwritten behind
+ * the cache's back: dk_cmdbuf_clear (every cmdbuf clear), render-target
+ * (re)binds, dk_clear (own scissor + depth-stencil), frame start, context
+ * switch. See dk_state_cache_invalidate(). */
+#define DK_SC_VIEWPORT (1u << 0)
+#define DK_SC_SCISSOR (1u << 1)
+#define DK_SC_BLEND (1u << 2)
+#define DK_SC_DEPTH_STENCIL (1u << 3)
+#define DK_SC_RASTER (1u << 4)
+#define DK_SC_COLOR_MASK (1u << 5)
+
+typedef struct dk_blend_key {
+    uint32_t enabled;
+    DkBlendState blend; /* zero when disabled (not recorded) */
+    float color[4];     /* zero when disabled (not recorded) */
+} dk_blend_key_t;
+
+typedef struct dk_depth_stencil_key {
+    DkDepthStencilState ds;
+    uint8_t front[3]; /* write mask, ref, func mask */
+    uint8_t back[3];
+    uint8_t pad[2];
+} dk_depth_stencil_key_t;
+
+typedef struct dk_raster_key {
+    DkRasterizerState raster;
+    float bias_units;  /* zero when polygon offset is disabled (not recorded) */
+    float bias_factor; /* idem */
+} dk_raster_key_t;
+
+typedef struct dk_state_cache {
+    uint32_t valid; /* DK_SC_* bits of the groups whose entry is recorded */
+    DkViewport viewport;
+    DkScissor scissor;
+    dk_blend_key_t blend;
+    dk_depth_stencil_key_t depth_stencil;
+    dk_raster_key_t raster;
+    uint32_t color_mask;
+} dk_state_cache_t;
+
 /* deko3d backend-specific data */
 typedef struct dk_backend_data {
     /* Device (shared with display) */
@@ -203,6 +247,9 @@ typedef struct dk_backend_data {
     uint32_t attrib_const_addr; /* offset within data_memblock */
     float attrib_const_shadow[SGL_MAX_ATTRIBS][4];
 
+    /* Last fixed-function state recorded per group (see dk_state_cache_t). */
+    dk_state_cache_t state_cache;
+
 /* Deferred VBO free list — blocks freed only after GPU sync: the fence of the
  * slot recorded with each entry (dk_wait_fence), or WaitIdle
  * (dk_submit_and_reset). Used by buffer orphaning: old allocation can't be
@@ -212,6 +259,21 @@ typedef struct dk_backend_data {
     dk_deferred_free_t deferred_free[SGL_DEFERRED_FREE_MAX];
     int deferred_free_count;
 } dk_backend_data_t;
+
+/**
+ * Forget the fixed-function state recorded by dk_state.c for the groups in
+ * `mask` (DK_SC_* bits): their next apply records the state again whatever
+ * its value. Called wherever the recorded commands may be dropped or the
+ * GPU registers of a group written behind the cache's back (dk_cmdbuf_clear,
+ * render-target binds, dk_clear, frame start, eglMakeCurrent).
+ */
+static inline void dk_state_cache_invalidate_mask(dk_backend_data_t *dk, uint32_t mask) {
+    dk->state_cache.valid &= ~mask;
+}
+
+static inline void dk_state_cache_invalidate(dk_backend_data_t *dk) {
+    dk->state_cache.valid = 0;
+}
 
 /* Backend operations table */
 extern const sgl_backend_ops_t dk_backend_ops;

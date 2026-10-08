@@ -82,6 +82,11 @@ void dk_cmdbuf_overflow_cb(void *userData, DkCmdBuf cmdbuf, size_t minReqSize) {
  * ============================================================================ */
 
 void dk_rebind_default_render_target(dk_backend_data_t *dk) {
+    /* Render-target bind: the draw-time state is recorded again afterwards
+     * (scissor clamp, depth forcing and alpha masking depend on the target;
+     * deko3d's bind rewrites screen scissor / Zcull registers). */
+    dk_state_cache_invalidate(dk);
+
     if (!dk->framebuffers)
         return;
 
@@ -97,6 +102,7 @@ void dk_rebind_default_render_target(dk_backend_data_t *dk) {
 }
 
 void dk_rebind_render_target(dk_backend_data_t *dk) {
+    dk_state_cache_invalidate(dk); /* see dk_rebind_default_render_target */
     if (dk->current_fbo != 0 && dk->current_fbo_color > 0) {
         /* Barrier before switching render targets.
          * Without this, GPU caches (L2, Zcull) from the previous render target
@@ -298,6 +304,10 @@ void dk_begin_frame(sgl_backend_t *be, int slot) {
     dk->current_slot = slot;
     dk->cmdbuf = dk->cmdbufs[slot];
     dk->current_cmdbuf = slot;
+
+    /* New cmdbuf (cleared by dk_wait_fence): nothing of the fixed-function
+     * state is recorded in it yet. */
+    dk_state_cache_invalidate(dk);
 
     /* New cmdbuf: every packed UBO is pushed again on its first bind of the
      * frame (dk_wait_fence already bumped when it restarted the slot; this

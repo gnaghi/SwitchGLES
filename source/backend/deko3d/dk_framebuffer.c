@@ -48,6 +48,12 @@ void dk_bind_framebuffer(sgl_backend_t *be, sgl_handle_t handle, sgl_handle_t co
         dk->texture_used_as_rt[color_tex] = true;
     }
 
+    /* Render-target switch: the draw-time state cache is dropped, every
+     * group is recorded again for the new target (the scissor clamp, the
+     * depth forcing and the alpha masking depend on it, and deko3d's bind
+     * rewrites screen scissor / Zcull registers). */
+    dk_state_cache_invalidate(dk);
+
     /* Insert barrier before switching render targets.
      * This ensures any previous rendering is complete before we switch.
      * No L2 invalidation: render target -> sampling is a GPU->GPU dependency

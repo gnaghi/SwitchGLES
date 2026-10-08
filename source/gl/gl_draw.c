@@ -53,13 +53,18 @@ static int sgl_draw_attrib_slots(sgl_context_t *ctx) {
     return n;
 }
 
-/* Prepare state before draw - delegates to backend */
+/* Prepare state before draw - delegates to backend.
+ * Every fixed-function group is handed to the backend at every draw; the
+ * backend records a group only when its derived values differ from what the
+ * current command buffer already holds (dk_state.c, dk->state_cache). */
 static void sgl_prepare_draw(sgl_context_t *ctx) {
     if (!ctx->backend || !ctx->backend->ops)
         return;
     SGL_PERF_BEGIN(perf_state);
 
-    /* Apply viewport - MUST be set before drawing */
+    /* Apply viewport - MUST be set before drawing. Also the pre-draw budget
+     * check of the client-array / uniform allocators (dk_apply_viewport runs
+     * it before its cache lookup, for every draw). */
     if (ctx->backend->ops->apply_viewport) {
         sgl_viewport_state_t vs = {
             ctx->viewport_state.viewport_x,     ctx->viewport_state.viewport_y,

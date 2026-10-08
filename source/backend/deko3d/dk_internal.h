@@ -151,12 +151,14 @@ static inline void dk_barrier(DkCmdBuf cmdbuf, DkBarrier mode, uint32_t flags) {
  * The only way the backend clears a command buffer. Whatever was recorded
  * and not yet submitted is dropped, so every "skip if already recorded"
  * shortcut must be forgotten here: the shaders bound by dk_bind_program
- * (bound_program) are recorded again at the next draw. (The packed-UBO
- * shortcut is handled separately through dk_bump_uniform_generation.)
+ * (bound_program) and the fixed-function state of dk_state.c (state_cache)
+ * are recorded again at the next draw. (The packed-UBO shortcut is handled
+ * separately through dk_bump_uniform_generation.)
  */
 static inline void dk_cmdbuf_clear(dk_backend_data_t *dk, DkCmdBuf cmdbuf) {
     dkCmdBufClear(cmdbuf);
     dk->bound_program = 0;
+    dk_state_cache_invalidate(dk);
 }
 
 /**

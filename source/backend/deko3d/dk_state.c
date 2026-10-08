@@ -11,6 +11,19 @@
  * - Rasterizer state (culling, front face)
  * - Color write mask
  * - Depth bias (polygon offset)
+ *
+ * Every apply first derives the deko3d-side values (FBO clamping of the
+ * scissor, depth forced off on FBOs without depth, alpha masked out on RGB
+ * targets, ...) and compares them with the entry of its group in
+ * dk->state_cache: identical values record nothing. The entry is written
+ * after the commands were recorded, so an overflow callback or a
+ * dk_submit_and_reset that fires during the recording (both go through
+ * dk_cmdbuf_clear, which drops every entry) leaves the group marked as
+ * recorded in the fresh cmdbuf, where the commands actually landed. The
+ * groups are invalidated wherever their GPU registers are written behind
+ * the cache's back (dk_clear: scissor + depth-stencil) or the recorded
+ * commands may be lost (cmdbuf clears, render-target binds, frame start,
+ * context switch): see dk_state_cache_invalidate() in dk_internal.h.
  */
 
 #include "dk_internal.h"
@@ -26,6 +39,16 @@
 /* Worst-case 32-bit words emitted by the blend recording sequence
  * (BindColorState + BindBlendStates + raw patch + SetBlendConst). Generous. */
 #define DK_BLEND_SEQ_RESERVE_WORDS 64
+
+/* True when the group's entry is recorded and equal to `key`. */
+#define DK_SC_SAME(dk, bit, field, key)                                                            \
+    (((dk)->state_cache.valid & (bit)) && memcmp(&(dk)->state_cache.field, (key), sizeof(*(key))) == 0)
+
+#define DK_SC_STORE(dk, bit, field, key)                                                           \
+    do {                                                                                           \
+        memcpy(&(dk)->state_cache.field, (key), sizeof(*(key)));                                   \
+        (dk)->state_cache.valid |= (bit);                                                          \
+    } while (0)
 
 /* ============================================================================
  * Viewport State
@@ -54,7 +77,10 @@ void dk_apply_viewport(sgl_backend_t *be, const sgl_viewport_state_t *state) {
     /* Pre-draw overflow check: flush when client_array or uniform space is
      * running low. This runs BEFORE any state is recorded into the cmdbuf, so
      * after flush sgl_prepare_draw will cleanly re-establish all state in the
-     * fresh cmdbuf. cbAddMem callback handles cmdbuf overflow (safety net). */
+     * fresh cmdbuf. cbAddMem callback handles cmdbuf overflow (safety net).
+     * It is the first thing sgl_prepare_draw does, and it runs for EVERY
+     * draw, before the cache lookup below: an unchanged viewport must not
+     * skip it. */
     {
         uint32_t client_remaining = dk->client_array_slot_end - dk->client_array_offset;
         uint32_t uniform_remaining = dk->uniform_slot_end - dk->uniform_offset;
@@ -69,7 +95,12 @@ void dk_apply_viewport(sgl_backend_t *be, const sgl_viewport_state_t *state) {
      * GL viewport coordinates pass through directly. */
     DkViewport viewport = {(float)state->x,      (float)state->y, (float)state->width,
                            (float)state->height, state->near_val, state->far_val};
+
+    if (DK_SC_SAME(dk, DK_SC_VIEWPORT, viewport, &viewport))
+        return;
+
     dkCmdBufSetViewports(dk->cmdbuf, 0, &viewport, 1);
+    DK_SC_STORE(dk, DK_SC_VIEWPORT, viewport, &viewport);
 
     SGL_TRACE_STATE("apply_viewport %d,%d %dx%d", state->x, state->y, state->width, state->height);
 }
@@ -127,8 +158,16 @@ void dk_apply_scissor(sgl_backend_t *be, const sgl_scissor_state_t *state) {
         sh = 0;
     }
 
+    /* The key is the clamped rectangle: a render target of another size
+     * changes it, so an FBO switch re-records the scissor even when the GL
+     * rectangle did not change (the binds invalidate the group as well). */
     DkScissor scissor = {(uint32_t)sx, (uint32_t)sy, (uint32_t)sw, (uint32_t)sh};
+
+    if (DK_SC_SAME(dk, DK_SC_SCISSOR, scissor, &scissor))
+        return;
+
     dkCmdBufSetScissors(dk->cmdbuf, 0, &scissor, 1);
+    DK_SC_STORE(dk, DK_SC_SCISSOR, scissor, &scissor);
 
     SGL_TRACE_STATE("apply_scissor %d,%d %dx%d", state->x, state->y, state->width, state->height);
 }
@@ -139,6 +178,26 @@ void dk_apply_scissor(sgl_backend_t *be, const sgl_scissor_state_t *state) {
 
 void dk_apply_blend(sgl_backend_t *be, const sgl_blend_state_t *state) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
+
+    /* Derived values first: factors, ops and constant color are only
+     * recorded when blending is enabled, so they are zero in the key
+     * otherwise (a change while disabled records nothing). */
+    dk_blend_key_t key;
+    memset(&key, 0, sizeof(key));
+    key.enabled = state->enabled ? 1u : 0u;
+    if (state->enabled) {
+        dkBlendStateDefaults(&key.blend);
+        dkBlendStateSetFactors(&key.blend, dk_convert_blend_factor(state->src_rgb),
+                               dk_convert_blend_factor(state->dst_rgb),
+                               dk_convert_blend_factor(state->src_alpha),
+                               dk_convert_blend_factor(state->dst_alpha));
+        dkBlendStateSetOps(&key.blend, dk_convert_blend_op(state->equation_rgb),
+                           dk_convert_blend_op(state->equation_alpha));
+        memcpy(key.color, state->color, sizeof(key.color));
+    }
+
+    if (DK_SC_SAME(dk, DK_SC_BLEND, blend, &key))
+        return;
 
     /* The blend.dst workaround below patches a raw GPU register directly into
      * the cmdbuf and MUST land in the same cmdbuf as its BindBlendStates. If
@@ -165,18 +224,9 @@ void dk_apply_blend(sgl_backend_t *be, const sgl_blend_state_t *state) {
     dkCmdBufBindColorState(dk->cmdbuf, &colorState);
 
     if (state->enabled) {
-        DkBlendState blendState;
-        dkBlendStateDefaults(&blendState);
+        const DkBlendState *blendState = &key.blend;
 
-        dkBlendStateSetFactors(&blendState, dk_convert_blend_factor(state->src_rgb),
-                               dk_convert_blend_factor(state->dst_rgb),
-                               dk_convert_blend_factor(state->src_alpha),
-                               dk_convert_blend_factor(state->dst_alpha));
-
-        dkBlendStateSetOps(&blendState, dk_convert_blend_op(state->equation_rgb),
-                           dk_convert_blend_op(state->equation_alpha));
-
-        dkCmdBufBindBlendStates(dk->cmdbuf, 0, &blendState, 1);
+        dkCmdBufBindBlendStates(dk->cmdbuf, 0, blendState, 1);
 
         /* Workaround: deko3d 0.5.0 has a copy-paste bug where
          * dkCmdBufBindBlendStates writes dstColorBlendFactor into BOTH
@@ -184,9 +234,11 @@ void dk_apply_blend(sgl_backend_t *be, const sgl_blend_state_t *state) {
          * the correct dstAlphaBlendFactor directly to the GPU register.
          * Fixed in deko3d commit 63744e9 but we link the pre-built lib.
          * Room was already reserved at the top of this function, so no
-         * mid-sequence flush is needed here (see DK_BLEND_SEQ_RESERVE_WORDS). */
+         * mid-sequence flush is needed here (see DK_BLEND_SEQ_RESERVE_WORDS).
+         * The patch is part of the blend sequence: it is recorded with every
+         * BindBlendStates, never skipped on its own. */
         {
-            uint32_t alpha_dst = (uint32_t)blendState.dstAlphaBlendFactor;
+            uint32_t alpha_dst = (uint32_t)blendState->dstAlphaBlendFactor;
             uint32_t gpu_val = (alpha_dst > 31) ? ((alpha_dst & 0x1f) | 0xc000) : alpha_dst;
             /* NV method header: mode=1(incr), count=1, subchannel=0 */
             uint32_t cmd[2] = {0x20010000 | NV_BLEND0_DST_ALPHA_METHOD, gpu_val};
@@ -210,6 +262,8 @@ void dk_apply_blend(sgl_backend_t *be, const sgl_blend_state_t *state) {
                               state->color[3]);
     }
 
+    DK_SC_STORE(dk, DK_SC_BLEND, blend, &key);
+
     SGL_TRACE_STATE("apply_blend enabled=%d", state->enabled);
 }
 
@@ -224,52 +278,66 @@ void dk_apply_blend(sgl_backend_t *be, const sgl_blend_state_t *state) {
 void dk_apply_depth_stencil(sgl_backend_t *be, const sgl_depth_stencil_state_t *state) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
-    DkDepthStencilState dsState;
-    memset(&dsState, 0, sizeof(dsState));
-    dkDepthStencilStateDefaults(&dsState);
+    dk_depth_stencil_key_t key;
+    memset(&key, 0, sizeof(key));
+    DkDepthStencilState *dsState = &key.ds;
+    dkDepthStencilStateDefaults(dsState);
 
     /* Depth state */
-    dsState.depthTestEnable = state->depth_test_enabled;
-    dsState.depthWriteEnable = state->depth_write_enabled;
-    dsState.depthCompareOp = dk_convert_compare_op(state->depth_func);
+    dsState->depthTestEnable = state->depth_test_enabled;
+    dsState->depthWriteEnable = state->depth_write_enabled;
+    dsState->depthCompareOp = dk_convert_compare_op(state->depth_func);
 
     /* Stencil state */
-    dsState.stencilTestEnable = state->stencil_test_enabled;
+    dsState->stencilTestEnable = state->stencil_test_enabled;
 
     /* Front face stencil operations */
-    dsState.stencilFrontFailOp = dk_convert_stencil_op(state->stencil_front.fail_op);
-    dsState.stencilFrontDepthFailOp = dk_convert_stencil_op(state->stencil_front.zfail_op);
-    dsState.stencilFrontPassOp = dk_convert_stencil_op(state->stencil_front.zpass_op);
-    dsState.stencilFrontCompareOp = dk_convert_compare_op(state->stencil_front.func);
+    dsState->stencilFrontFailOp = dk_convert_stencil_op(state->stencil_front.fail_op);
+    dsState->stencilFrontDepthFailOp = dk_convert_stencil_op(state->stencil_front.zfail_op);
+    dsState->stencilFrontPassOp = dk_convert_stencil_op(state->stencil_front.zpass_op);
+    dsState->stencilFrontCompareOp = dk_convert_compare_op(state->stencil_front.func);
 
     /* Back face stencil operations */
-    dsState.stencilBackFailOp = dk_convert_stencil_op(state->stencil_back.fail_op);
-    dsState.stencilBackDepthFailOp = dk_convert_stencil_op(state->stencil_back.zfail_op);
-    dsState.stencilBackPassOp = dk_convert_stencil_op(state->stencil_back.zpass_op);
-    dsState.stencilBackCompareOp = dk_convert_compare_op(state->stencil_back.func);
+    dsState->stencilBackFailOp = dk_convert_stencil_op(state->stencil_back.fail_op);
+    dsState->stencilBackDepthFailOp = dk_convert_stencil_op(state->stencil_back.zfail_op);
+    dsState->stencilBackPassOp = dk_convert_stencil_op(state->stencil_back.zpass_op);
+    dsState->stencilBackCompareOp = dk_convert_compare_op(state->stencil_back.func);
 
     /* GLES2 spec: "If the currently bound framebuffer is framebuffer complete
      * without a depth buffer, the depth test always passes."
      * Stencil-only FBOs use Z24S8 backing (deko3d requires combined format),
      * so force depth off to prevent the Z24 portion from interfering. */
     if (dk->current_fbo != 0 && dk->current_fbo_depth == 0) {
-        dsState.depthTestEnable = false;
-        dsState.depthWriteEnable = false;
+        dsState->depthTestEnable = false;
+        dsState->depthWriteEnable = false;
     }
 
+    /* Dynamic stencil state (write mask, ref, func mask), both faces */
+    key.front[0] = (uint8_t)state->stencil_front.write_mask;
+    key.front[1] = (uint8_t)state->stencil_front.ref;
+    key.front[2] = (uint8_t)state->stencil_front.func_mask;
+    key.back[0] = (uint8_t)state->stencil_back.write_mask;
+    key.back[1] = (uint8_t)state->stencil_back.ref;
+    key.back[2] = (uint8_t)state->stencil_back.func_mask;
+
+    /* One key for the whole group: the state and the two SetStencil are
+     * always recorded together (never one without the others). */
+    if (DK_SC_SAME(dk, DK_SC_DEPTH_STENCIL, depth_stencil, &key))
+        return;
+
     /* Bind combined depth-stencil state */
-    dkCmdBufBindDepthStencilState(dk->cmdbuf, &dsState);
+    dkCmdBufBindDepthStencilState(dk->cmdbuf, dsState);
 
     /* Always set stencil dynamic state (write mask, ref, func mask).
      * NVIDIA hardware uses the stencil write mask for BOTH draw-time stencil
      * test writes AND clear operations. If we skip this when stencil test is
      * disabled, stale values from a previous draw persist on the GPU, causing
      * incorrect stencil clears and wrong results when stencil is re-enabled. */
-    dkCmdBufSetStencil(dk->cmdbuf, DkFace_Front, (uint8_t)state->stencil_front.write_mask,
-                       (uint8_t)state->stencil_front.ref, (uint8_t)state->stencil_front.func_mask);
+    dkCmdBufSetStencil(dk->cmdbuf, DkFace_Front, key.front[0], key.front[1], key.front[2]);
 
-    dkCmdBufSetStencil(dk->cmdbuf, DkFace_Back, (uint8_t)state->stencil_back.write_mask,
-                       (uint8_t)state->stencil_back.ref, (uint8_t)state->stencil_back.func_mask);
+    dkCmdBufSetStencil(dk->cmdbuf, DkFace_Back, key.back[0], key.back[1], key.back[2]);
+
+    DK_SC_STORE(dk, DK_SC_DEPTH_STENCIL, depth_stencil, &key);
 
     SGL_TRACE_STATE("apply_depth_stencil depth_test=%d stencil_test=%d", state->depth_test_enabled,
                     state->stencil_test_enabled);
@@ -282,44 +350,58 @@ void dk_apply_depth_stencil(sgl_backend_t *be, const sgl_depth_stencil_state_t *
 void dk_apply_raster(sgl_backend_t *be, const sgl_raster_state_t *state) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
 
-    DkRasterizerState rasterState;
-    dkRasterizerStateDefaults(&rasterState);
+    dk_raster_key_t key;
+    memset(&key, 0, sizeof(key));
+    DkRasterizerState *rasterState = &key.raster;
+    dkRasterizerStateDefaults(rasterState);
 
     if (state->cull_enabled) {
         switch (state->cull_mode) {
             case GL_FRONT:
-                rasterState.cullMode = DkFace_Front;
+                rasterState->cullMode = DkFace_Front;
                 break;
             case GL_BACK:
-                rasterState.cullMode = DkFace_Back;
+                rasterState->cullMode = DkFace_Back;
                 break;
             case GL_FRONT_AND_BACK:
-                rasterState.cullMode = DkFace_FrontAndBack;
+                rasterState->cullMode = DkFace_FrontAndBack;
                 break;
             default:
-                rasterState.cullMode = DkFace_Back;
+                rasterState->cullMode = DkFace_Back;
                 break;
         }
     } else {
-        rasterState.cullMode = DkFace_None;
+        rasterState->cullMode = DkFace_None;
     }
 
     /* Note: DkDeviceFlags_OriginLowerLeft only affects image storage, NOT clip space Y.
      * YAxisPointsUp is the DEFAULT in deko3d, same as OpenGL.
      * So no winding order inversion is needed. */
-    rasterState.frontFace = (state->front_face == GL_CW) ? DkFrontFace_CW : DkFrontFace_CCW;
+    rasterState->frontFace = (state->front_face == GL_CW) ? DkFrontFace_CW : DkFrontFace_CCW;
 
     /* Polygon offset (depth bias) for shadow passes and decals.
      * depthBiasEnableMask bit 2 = fill mode (GL_POLYGON_OFFSET_FILL) */
-    rasterState.depthBiasEnableMask = state->polygon_offset_fill_enabled ? 4 : 0;
+    rasterState->depthBiasEnableMask = state->polygon_offset_fill_enabled ? 4 : 0;
 
-    dkCmdBufBindRasterizerState(dk->cmdbuf, &rasterState);
+    /* Bias values are only recorded while polygon offset is enabled: zero in
+     * the key otherwise, so glPolygonOffset while disabled records nothing. */
+    if (state->polygon_offset_fill_enabled) {
+        key.bias_units = state->polygon_offset_units;
+        key.bias_factor = state->polygon_offset_factor;
+    }
+
+    if (DK_SC_SAME(dk, DK_SC_RASTER, raster, &key))
+        return;
+
+    dkCmdBufBindRasterizerState(dk->cmdbuf, rasterState);
 
     /* Set depth bias values via separate command */
     if (state->polygon_offset_fill_enabled) {
         dkCmdBufSetDepthBias(dk->cmdbuf, state->polygon_offset_units, 0.0f,
                              state->polygon_offset_factor);
     }
+
+    DK_SC_STORE(dk, DK_SC_RASTER, raster, &key);
 
     SGL_TRACE_STATE("apply_raster cull=%d mode=0x%X front=0x%X polyOffset=%d", state->cull_enabled,
                     state->cull_mode, state->front_face, state->polygon_offset_fill_enabled);
@@ -331,9 +413,6 @@ void dk_apply_raster(sgl_backend_t *be, const sgl_raster_state_t *state) {
 
 void dk_apply_color_mask(sgl_backend_t *be, const sgl_color_state_t *state) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
-
-    DkColorWriteState cwState;
-    dkColorWriteStateDefaults(&cwState);
 
     uint32_t mask = 0;
     if (state->mask[0])
@@ -371,8 +450,17 @@ void dk_apply_color_mask(sgl_backend_t *be, const sgl_color_state_t *state) {
         }
     }
 
+    /* The key is the final mask (after the RGB-target rule), so a switch to
+     * or from an RGB FBO re-records it. */
+    if (DK_SC_SAME(dk, DK_SC_COLOR_MASK, color_mask, &mask))
+        return;
+
+    DkColorWriteState cwState;
+    dkColorWriteStateDefaults(&cwState);
     dkColorWriteStateSetMask(&cwState, 0, mask);
     dkCmdBufBindColorWriteState(dk->cmdbuf, &cwState);
+
+    DK_SC_STORE(dk, DK_SC_COLOR_MASK, color_mask, &mask);
 
     SGL_TRACE_STATE("apply_color_mask [%d%d%d%d]", state->mask[0], state->mask[1], state->mask[2],
                     state->mask[3]);
@@ -389,6 +477,10 @@ void dk_set_depth_bias(sgl_backend_t *be, GLfloat factor, GLfloat units) {
      * GL: factor = slope scale, units = constant offset
      * So: constantFactor = units, slopeFactor = factor */
     dkCmdBufSetDepthBias(dk->cmdbuf, units, 0.0f, factor);
+
+    /* The bias registers no longer hold what the raster entry recorded:
+     * the next dk_apply_raster records the group again. */
+    dk_state_cache_invalidate_mask(dk, DK_SC_RASTER);
 
     SGL_TRACE_STATE("set_depth_bias factor=%f units=%f", factor, units);
 }

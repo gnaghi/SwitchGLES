@@ -480,6 +480,82 @@ Autres :
       (`dsb st` des descripteurs inchangé), longue partie sans débordement de client-array
 - [ ] GFXBench à l'écran : rendu identique à Nouveau (`--freeze 10000 gl_egypt`, `gl_trex`)
 
+## Piste C1 — état fixe enregistré seulement quand il change (cache par groupe dans le backend)
+
+Changement (`dk_state.c`, `dk_backend.h`, `dk_internal.h`, `dk_clear.c`, `dk_command.c`, `dk_framebuffer.c`,
+`egl_impl.c`) :
+- `sgl_prepare_draw` appelait à chaque draw les six applies du backend (viewport, depth-stencil + 2 `SetStencil`,
+  blend + patch brut + `SetBlendConst`, raster + `SetDepthBias`, masque de couleur, scissor), qui enregistraient
+  tout sans condition (« no dirty flags » du CLAUDE.md). `sgl_prepare_draw` ne change pas : il construit toujours
+  les six structures et appelle les six applies ; c'est le backend qui décide.
+- Nouveau `dk->state_cache` (`dk_state_cache_t`) : par groupe, les **valeurs deko3d dérivées** qui ont été
+  enregistrées en dernier dans le cmdbuf courant, et un bit `valid` par groupe. Chaque apply calcule d'abord ses
+  valeurs dérivées (scissor borné à la taille de la cible, profondeur forcée à off sur un FBO sans profondeur,
+  alpha masqué sur une cible RGB, facteurs/constante de blend nuls quand le blend est désactivé, biais nul quand
+  le polygon offset est désactivé), les compare (`memcmp`) à l'entrée du groupe et **n'enregistre rien si elles
+  sont identiques**. L'entrée est écrite **après** l'enregistrement : si un `dk_submit_and_reset` (seuil de
+  réserve du blend) ou le callback de dépassement se déclenche pendant l'enregistrement, le `dk_cmdbuf_clear`
+  qu'ils font vide le cache, puis le groupe en cours est marqué enregistré dans le nouveau cmdbuf, où ses
+  commandes ont effectivement atterri.
+- Comparer les valeurs dérivées plutôt que l'état GL : un changement de cible qui change le bornage du scissor,
+  le forçage de la profondeur ou le masque alpha réenregistre le groupe même si l'état GL n'a pas bougé.
+- Séquences **inchangées** à l'intérieur de chaque groupe : le patch brut `blend.dst` (registre 0x786) est
+  enregistré avec chaque `BindBlendStates`, jamais seul ni sauté seul ; la réserve de place qui le précède ne
+  s'exécute que quand le groupe est réenregistré ; depth et stencil (état + les deux `SetStencil`) forment **une**
+  clé et sont toujours enregistrés ensemble ; aucune barrière dans `dk_apply_depth_stencil`.
+- Le contrôle de budget pré-draw (client-array / uniform → `dk_submit_and_reset`) reste en tête de
+  `dk_apply_viewport`, **avant** la consultation du cache : il s'exécute à chaque draw, viewport inchangé ou non.
+- Points d'invalidation (`dk_state_cache_invalidate`, dans `dk_backend.h` pour être visible d'`egl_impl.c`) :
+  - **tous** les clears de cmdbuf via `dk_cmdbuf_clear()` (`dk_wait_fence`, `dk_submit_and_reset`, callback de
+    dépassement et son chemin réentrant, `dk_ensure_recordable`, chemins synchrones de `dk_texture*.c`,
+    `dk_texture_copy.c`, `dk_read_pixels`) ;
+  - `dk_begin_frame` (changement de cmdbuf de slot) ;
+  - changements de cible : `dk_bind_framebuffer` (glBindFramebuffer, glFramebufferTexture2D/Renderbuffer sur le
+    FBO lié, suppression d'attachement), `dk_rebind_render_target` et `dk_rebind_default_render_target`
+    (resets, uploads, `glRenderbufferStorage`/`glTexImage2D` sur une cible attachée, `glReadPixels`), et le
+    `dkCmdBufBindRenderTarget` direct de `sgl_ensure_frame_ready`. Vérifié dans deko3d (`gpu_3d_base.cpp`) :
+    `dkCmdBufBindRenderTargets` écrit les registres de cible, Zcull, `ScreenScissor` et `MultisampleMode`,
+    aucun des six groupes ; l'invalidation complète est une précaution ;
+  - `dk_clear` : **scissor** (il enregistre son propre `dkCmdBufSetScissors` : rectangle du scissor GL ou cible
+    entière) et **depth-stencil** quand il efface profondeur ou stencil (il lie son propre
+    `DkDepthStencilState` + `SetStencil`, et `dkCmdBufClearDepthStencil` réécrit lui-même `StencilFrontMask`,
+    lu dans `gpu_3d_base.cpp`). Un clear couleur seul ne touche qu'à `ClearBuffers` (macro `ClearColor`) : les
+    autres groupes restent valides ;
+  - `eglMakeCurrent` (changement de contexte) ; `eglTerminate` détruit le backend, le cache avec.
+- Ce qui n'écrit **pas** les registres des six groupes, vérifié dans deko3d : blits (moteur 2D), copies
+  (moteur copy), barrières, `BindShaders`/`BindTextures`/UBO/attributs, draws, `decompressSurface` du present
+  (mode Passthrough puis Replay : restauré depuis la shadow RAM). Le `glPolygonOffset` immédiat
+  (`dk_set_depth_bias`, supprimé en C2) invalide le groupe raster.
+- Pas de dirty flags côté GL : un seul mécanisme, dans le backend, qui connaît tous les points de reset ; les
+  structures construites par `sgl_prepare_draw` sont petites (quelques dizaines d'octets par groupe).
+
+Performance :
+- [ ] `driver` GFXBench (2 500 draws, état changé tous les 10 / 100 draws) : `[PERF]` `state` (temps CPU) en
+      forte baisse ; cmdbuf par draw ≈ attributs + UBO + draw ; FPS en A/B (C3 contre C3 + C1)
+- [ ] Egypt / T-Rex : FPS en A/B ; `[PERF]` `state` en baisse
+- [ ] Compter (trace `SGL_TRACE_STATE`, ou compteur `SGL_PERF`) les groupes réenregistrés par frame : ≈ nombre
+      de changements d'état GL + 6 par changement de cible / reset
+
+Rendu (c'est la vérification critique : un registre écrit hors des applies et non invalidé = état faux au draw) :
+- [ ] `--freeze 10000 gl_egypt` et `gl_trex` identiques à Nouveau (scissor après clear, blend, cull, polygon
+      offset des ombres, FBO : depth forcé / alpha masqué)
+- [ ] Spearmint : plusieurs cartes, HUD (blend, scissor), portails / miroirs (stencil, cull inversé)
+
+Conformité dEQP-GLES2 (VK-GL-CTS, jamais `validation_test`) :
+- [ ] `functional.fragment_ops.*` (blend : 196 tests du patch `blend.dst` ; depth, stencil, scissor,
+      depth_stencil : clés combinées, scissor après clear)
+- [ ] `functional.color_clear.*`, `functional.depth_stencil_clear.*` (clear puis draw : scissor et
+      depth-stencil réenregistrés après le clear ; clear couleur seul : les autres groupes restent valides)
+- [ ] `functional.rasterization.*` (cull, front face), `functional.polygon_offset.*` (biais enregistré avec le
+      groupe raster, seulement quand activé)
+- [ ] `functional.clipping.*`, `functional.depth_range.*` (viewport + near/far dans la clé)
+- [ ] `functional.state_query.*` (les getters lisent l'état GL, inchangé)
+- [ ] `functional.fbo.*` (changement de cible : scissor borné, depth forcé sur stencil-only, alpha masqué sur
+      RGB ; `fbo.render.resize`, `recreate_*`, `no_rebind` : rebind après réallocation)
+- [ ] `functional.read_pixels.*`, `functional.flush_finish.*` (clears de cmdbuf en cours de frame : tout
+      réenregistré au draw suivant), `functional.lifetime.*`
+- [ ] Régression complète en A/B
+
 ## Piste B5 — non retenue
 
 Les barrières `None + L2Cache | Descriptors | Zcull` après soumission (`dk_begin_frame`, `dk_submit_and_reset`,
