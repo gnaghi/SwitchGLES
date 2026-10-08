@@ -142,11 +142,15 @@ void dk_clear(sgl_backend_t *be, GLbitfield mask, const float *color, float dept
             }
         }
 
+        /* No barrier after the clear: dkCmdBufClearColor records a 3D-engine
+         * ClearBuffers macro, ordered by the hardware with the draws that
+         * follow into the same render target. Every consumer of the cleared
+         * image that is not a draw already waits for it: dk_bind_framebuffer
+         * (RT switch, Full), dk_bind_texture (first sampling of a texture that
+         * was a render target, Full + Image), dk_read_pixels, the blit, copy
+         * and mipmap paths (Full + Image before reading), and the swapchain
+         * present (deko3d signals the present fence with a cache flush). */
         dkCmdBufClearColorFloat(dk->cmdbuf, 0, dkMask, color[0], color[1], color[2], color[3]);
-
-        /* Add barrier after color clear to ensure it's committed before any RT switch.
-         * GPU->GPU only: no L2 invalidation needed (see dk_barrier). */
-        dk_barrier(dk->cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image);
     }
 
     if (mask & (GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)) {
@@ -205,18 +209,26 @@ void dk_clear(sgl_backend_t *be, GLbitfield mask, const float *color, float dept
                 dkCmdBufClearDepthStencil(dk->cmdbuf, clearDepth, depth, stencilMask,
                                           (uint8_t)stencil);
 
-                /* Barrier after depth/stencil clear:
-                 * 1. DkBarrier_Full — drain pipeline, ensures clear completes before draws
-                 * 2. DkBarrier_Tiles — flush Tiled Cache (depth/stencil compression cache).
-                 *    WITHOUT this, stencil operations that write computed values (Replace,
-                 *    Zero, Invert, IncrWrap, DecrWrap) read stale compressed data from the
-                 *    tiled cache, producing incorrect stencil test results.
-                 * 3. Zcull — reset fast depth metadata to prevent stale culling.
-                 * Both barriers are needed: Full for pipeline ordering, Tiles for the
-                 * hardware compression cache that Full does NOT flush. */
-                dk_barrier(dk->cmdbuf, DkBarrier_Full,
-                           DkInvalidateFlags_Image | DkInvalidateFlags_Zcull);
-                dk_barrier(dk->cmdbuf, DkBarrier_Tiles, 0);
+                /* No pipeline drain after the clear: like the color clear above,
+                 * ClearBuffers is ordered by the 3D engine with the depth and
+                 * stencil tests of the draws that follow into the same target.
+                 * Zcull is invalidated so the hierarchical depth metadata never
+                 * carries values from before the clear. */
+                dk_barrier(dk->cmdbuf, DkBarrier_None, DkInvalidateFlags_Zcull);
+
+                /* Tiled-cache barrier, stencil clears only. It was added in March
+                 * 2026 as a hypothesis for the stencil-op failures (Replace, Zero,
+                 * Invert, IncrWrap, DecrWrap); docs/conformance_assessment.md and
+                 * docs/stencil_analysis.md record that it brought no improvement,
+                 * and neither SwitchGLES nor deko3d's engine setup ever enables the
+                 * tiled cache (dkCmdBufTiledCacheOp is never called). It is kept
+                 * for stencil clears only, so the command stream of every stencil
+                 * test stays the one validated by the March 23 full regression,
+                 * and dropped for depth-only clears, which passed before it was
+                 * introduced (DepthMinusOneToOne, March 11). */
+                if (stencilMask != 0x00) {
+                    dk_barrier(dk->cmdbuf, DkBarrier_Tiles, 0);
+                }
 
                 /* Rebind render target after depth clear if FBO is active */
                 if (dk->current_fbo != 0 && dk->current_fbo_color > 0 &&

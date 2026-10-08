@@ -140,6 +140,40 @@ Vérifications :
 - [ ] dEQP texture.specification (copyteximage, subimage), texture.mipmap (generate), fbo.render, state_query.texture
 - [ ] Spearmint : pas de scintillement de texture, cinématiques correctes (sous-image vidéo)
 
+## Piste B3 — plus de barrière Full après les clears
+
+Changement (`dk_clear.c`) :
+- Clear couleur : la barrière Full + Image qui suivait `dkCmdBufClearColorFloat` est supprimée. Un clear est une
+  macro `ClearBuffers` du moteur 3D, ordonnée par le matériel avec les draws qui suivent dans la même cible. Les
+  autres consommateurs attendent déjà : changement de cible (`dk_bind_framebuffer`, Full), premier échantillonnage
+  d'une cible rendue (`dk_bind_texture`, Full + Image), `glReadPixels`, blit, copies, mipmaps (Full + Image avant
+  lecture), présentation (fence deko3d avec `FlushCache`).
+- Clear depth/stencil : la barrière Full + Image devient `None + Zcull` (même commande `InvalidateZcullNoWfi`,
+  plus de vidage du pipeline).
+- `DkBarrier_Tiles` n'est plus émise que si le stencil est effacé (`stencilMask != 0`). Elle avait été ajoutée en
+  mars comme hypothèse pour les stencil ops ; `docs/conformance_assessment.md` et `deqp_conformance_mar22.md`
+  notent qu'elle n'a rien corrigé, et le tiled cache n'est jamais activé (`dkCmdBufTiledCacheOp` jamais appelé).
+  Les clears depth seuls reviennent au flux validé avant son ajout (tests depth/clipping du 11 mars).
+
+Performance :
+- [ ] `[PERF]` Egypt : `bar_full` baisse d'environ 4 à 5 par frame (un par `glClear`, couleur et profondeur)
+- [ ] FPS Egypt et T-Rex à l'écran et hors écran en A/B (B2 contre B2 + B3)
+
+Rendu :
+- [ ] `--freeze 10000 gl_egypt` et `gl_trex` identiques à Nouveau (ombres : clear puis rendu dans un FBO puis
+      échantillonnage ; flou en ping-pong)
+- [ ] Spearmint : pas de traînées entre frames (clear du framebuffer par défaut suivi des draws)
+
+Conformité dEQP-GLES2 :
+- [ ] `functional.color_clear.*`, `functional.depth_stencil_clear.*` (toutes les combinaisons masques/scissor)
+- [ ] `functional.fbo.render.*` (color_clear, shared_colorbuffer_clear, depth, stencil, stencil_clear,
+      recreate_*, resize, no_rebind), `functional.fbo.api.*`
+- [ ] `functional.fragment_ops.depth*`, `functional.fragment_ops.stencil*`, `functional.fragment_ops.interaction.*`
+      (les 32 stencil ops connus doivent rester les seuls échecs : même flux pour les clears stencil)
+- [ ] `functional.read_pixels.*`, `functional.texture.specification.copyteximage*` (lecture juste après un clear)
+- [ ] Si tout passe, essai supplémentaire : retirer aussi `DkBarrier_Tiles` pour les clears stencil et relancer
+      `fragment_ops.stencil*` + `fbo.render.stencil*` (la barrière n'a aucun effet documenté)
+
 ## Passe rapide de non-régression (A2 + A3 + B1 + B2), préparée le 7 octobre
 
 Liste : `VK-GL-CTS/framework/platform/switch/lists/optim_oct07.txt` (1 479 tests, extraits de `regress_oct06.txt`) :
