@@ -3297,6 +3297,86 @@ static void testTranspilerES100(void) {
     glDeleteShader(fs2);
     glDeleteProgram(prog2);
 
+    /* ---- Test 2b: FS declares varyings the VS does not write ----
+     * Each stage is compiled on its own, and Mesa lays out varyings from that
+     * stage's declarations only: here v_alpha/v_color land in other slots in
+     * the FS than in the VS unless the link matches them by name (GFXBench
+     * T-Rex mblur_final.fs vs pp.vs). Expect solid GREEN. */
+    printf("\n[ES100] Test 2b: FS with extra unused varyings...\n");
+    fflush(stdout);
+
+    const char *extra_vs =
+        "#version 100\n"
+        "attribute vec2 a_position;\n"
+        "varying vec3 v_color;\n"
+        "varying float v_alpha;\n"
+        "void main() {\n"
+        "    v_color = vec3(0.0, 1.0, 0.0);\n"
+        "    v_alpha = 1.0;\n"
+        "    gl_Position = vec4(a_position, 0.0, 1.0);\n"
+        "}\n";
+
+    const char *extra_fs =
+        "#version 100\n"
+        "precision mediump float;\n"
+        "varying vec4 a_unused;\n"
+        "varying vec2 m_unused[2];\n"
+        "varying float v_alpha;\n"
+        "varying vec3 v_color;\n"
+        "varying vec4 z_unused;\n"
+        "void main() {\n"
+        "    gl_FragColor = vec4(v_color.r, v_color.g * v_alpha, v_color.b, 1.0);\n"
+        "}\n";
+
+    GLuint vs2b = glCreateShader(GL_VERTEX_SHADER);
+    GLuint fs2b = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(vs2b, 1, &extra_vs, NULL);
+    glShaderSource(fs2b, 1, &extra_fs, NULL);
+    glCompileShader(vs2b);
+    glCompileShader(fs2b);
+
+    GLuint prog2b = glCreateProgram();
+    glAttachShader(prog2b, vs2b);
+    glAttachShader(prog2b, fs2b);
+    glBindAttribLocation(prog2b, 0, "a_position");
+    glLinkProgram(prog2b);
+
+    GLint link2b = GL_FALSE;
+    glGetProgramiv(prog2b, GL_LINK_STATUS, &link2b);
+    recordResult("ES100: extra FS varyings link", link2b == GL_TRUE, NULL);
+
+    if (link2b == GL_TRUE) {
+        glUseProgram(prog2b);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        static const float bigTri[] = {
+            -1.0f, -1.0f,
+             3.0f, -1.0f,
+            -1.0f,  3.0f
+        };
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, bigTri);
+        glEnableVertexAttribArray(0);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+
+        GLubyte pixel2b[4] = {0};
+        glReadPixels(640, 360, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel2b);
+        printf("[ES100] Extra-varying center pixel: R=%d G=%d B=%d A=%d\n",
+               pixel2b[0], pixel2b[1], pixel2b[2], pixel2b[3]);
+        fflush(stdout);
+
+        bool greenOk = (pixel2b[0] < 10) && (pixel2b[1] > 245) && (pixel2b[2] < 10);
+        recordResult("ES100: extra FS varyings matched by name", greenOk, NULL);
+
+        glDisableVertexAttribArray(0);
+    } else {
+        recordResult("ES100: extra FS varyings matched by name", false, "link failed");
+    }
+
+    glDeleteShader(vs2b);
+    glDeleteShader(fs2b);
+    glDeleteProgram(prog2b);
+
     /* ---- Test 3: ES 1.00 with texture2D() ---- */
     printf("\n[ES100] Test 3: texture2D() sampling...\n");
     fflush(stdout);

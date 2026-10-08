@@ -195,6 +195,20 @@ GL_APICALL void GL_APIENTRY glDetachShader(GLuint program, GLuint shader) {
 }
 
 #ifdef SGL_ENABLE_RUNTIME_COMPILER
+/* True if a varying read by the FS is written by the VS at another slot. */
+static bool sgl_varyings_mismatch(const sgl_mesa_metadata_t *vs, const sgl_mesa_metadata_t *fs) {
+    for (int i = 0; i < fs->num_varyings; i++) {
+        for (int j = 0; j < vs->num_varyings; j++) {
+            if (strcmp(fs->varyings[i].name, vs->varyings[j].name) == 0) {
+                if (fs->varyings[i].location != vs->varyings[j].location)
+                    return true;
+                break;
+            }
+        }
+    }
+    return false;
+}
+
 /* Populate program metadata from Mesa-compiled shader reflection:
  * uniforms, samplers, sampler arrays, attribs, packed UBOs and dual-stage
  * mirrors. Extracted verbatim from glLinkProgram's Mesa link path. */
@@ -1288,6 +1302,20 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
             }
             uam_free_compiler(compiler);
         }
+    }
+
+    /* Match varyings by name across stages. Each stage is compiled as its own
+     * separable Mesa program, which lays out varyings from that stage's
+     * declarations alone (sorted by name, unpacked). An FS that declares a
+     * different set of varyings than its VS can therefore read a shared name
+     * from another slot (GFXBench T-Rex: mblur_final.fs declares 12 varyings,
+     * pp.vs writes 1). When a shared name disagrees, recompile the FS with
+     * every VS varying pinned to its VS slot. The backend snapshots shaders
+     * per program at link, so other programs using this FS are unaffected. */
+    if (vs_mesa && fs_mesa && sgl_varyings_mismatch(vs_sh->mesa_meta, fs_sh->mesa_meta)) {
+        SGL_TRACE_SHADER("program %u: FS varying slots differ from VS, recompiling FS", program);
+        if (!sgl_compile_es100_mesa(ctx, prog->fragment_shader, fs_sh, vs_sh->mesa_meta))
+            SGL_TRACE_SHADER("program %u: FS varying recompile FAILED", program);
     }
 
     /* If any shader is Mesa-compiled, populate program metadata from Mesa metadata. */

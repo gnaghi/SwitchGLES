@@ -23,6 +23,12 @@ GLenum uam_base_type_to_gl(uint8_t base_type, uint8_t vec_elems, uint8_t mat_col
  * VS-with-attrib-bindings recompile in glLinkProgram). */
 bool sgl_compile_glsl460(sgl_context_t *ctx, GLuint shader_id, sgl_shader_t *sh,
                          const char *glsl_source);
+
+/* Compile an ES 1.00 source directly through Mesa (used by compile, and by the
+ * FS recompile in glLinkProgram that pins varyings to the VS slots: pass the
+ * VS metadata as varying_slots, or NULL for a plain compile). */
+bool sgl_compile_es100_mesa(sgl_context_t *ctx, GLuint shader_id, sgl_shader_t *sh,
+                            const sgl_mesa_metadata_t *varying_slots);
 #endif
 
 #endif /* SGL_GL_SHADER_INTERNAL_H */

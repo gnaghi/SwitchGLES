@@ -87,6 +87,7 @@ typedef struct sgl_buffer {
 #define SGL_MESA_MAX_UNIFORMS 128
 #define SGL_MESA_MAX_SAMPLERS 16
 #define SGL_MESA_MAX_INPUTS 32
+#define SGL_MESA_MAX_VARYINGS 32
 
 typedef struct sgl_mesa_uniform {
     char name[SGL_ATTRIB_NAME_MAX];
@@ -108,6 +109,13 @@ typedef struct sgl_mesa_input {
     GLenum gl_type; /* GL_FLOAT, GL_FLOAT_VEC4, GL_FLOAT_MAT4, etc. */
 } sgl_mesa_input_t;
 
+/* User varying: VS output or FS input */
+typedef struct sgl_mesa_varying {
+    char name[SGL_ATTRIB_NAME_MAX];
+    int location;  /* Generic varying slot (0-based) */
+    int num_slots; /* Consecutive slots used (arrays/matrices > 1) */
+} sgl_mesa_varying_t;
+
 typedef struct sgl_mesa_metadata {
     int num_uniforms;
     sgl_mesa_uniform_t uniforms[SGL_MESA_MAX_UNIFORMS];
@@ -116,7 +124,9 @@ typedef struct sgl_mesa_metadata {
     sgl_mesa_sampler_t samplers[SGL_MESA_MAX_SAMPLERS];
     int num_inputs;
     sgl_mesa_input_t inputs[SGL_MESA_MAX_INPUTS];
-    uint8_t *initial_data;      /* Heap-allocated copy of Mesa constbuf initial data, or NULL */
+    int num_varyings;
+    sgl_mesa_varying_t varyings[SGL_MESA_MAX_VARYINGS];
+    uint8_t *initial_data;     /* Heap-allocated copy of Mesa constbuf initial data, or NULL */
     uint32_t initial_data_size; /* Size in bytes of initial_data */
     int depth_range_offset;     /* Byte offset of gl_DepthRange in constbuf, -1 = not used */
 } sgl_mesa_metadata_t;

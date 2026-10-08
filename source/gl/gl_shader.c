@@ -350,8 +350,13 @@ GLenum uam_base_type_to_gl(uint8_t base_type, uint8_t vec_elems, uint8_t mat_col
  * (bypassing the transpiler). Captures uniform/sampler metadata on success.
  * Returns true on success; sets sh->mesa_meta with metadata.
  * Returns false on failure (caller should fall back to transpiler).
+ *
+ * varying_slots: NULL for a plain compile. At link time, the other stage's
+ * metadata: its varyings are pinned to the same slots in this shader (see
+ * glLinkProgram). A failed recompile leaves the shader's info log untouched.
  */
-static bool sgl_compile_es100_mesa(sgl_context_t *ctx, GLuint shader_id, sgl_shader_t *sh) {
+bool sgl_compile_es100_mesa(sgl_context_t *ctx, GLuint shader_id, sgl_shader_t *sh,
+                            const sgl_mesa_metadata_t *varying_slots) {
     DkStage stage;
     if (sh->type == GL_VERTEX_SHADER) {
         stage = DkStage_Vertex;
@@ -365,13 +370,19 @@ static bool sgl_compile_es100_mesa(sgl_context_t *ctx, GLuint shader_id, sgl_sha
     if (!compiler)
         return false;
 
+    if (varying_slots) {
+        for (int i = 0; i < varying_slots->num_varyings; i++)
+            uam_set_varying_location(compiler, varying_slots->varyings[i].name,
+                                     varying_slots->varyings[i].location);
+    }
+
     bool compiled = uam_compile_dksh(compiler, sh->source);
     if (!compiled) {
         /* Capture Mesa's error log before freeing the compiler.
          * If Mesa reported actual errors, store them in the shader so the
          * caller knows NOT to try the transpiler fallback. */
         const char *mesa_log = uam_get_error_log(compiler);
-        if (mesa_log && mesa_log[0]) {
+        if (mesa_log && mesa_log[0] && !varying_slots) {
             sh->info_log = strdup(mesa_log);
             SGL_TRACE_SHADER("shader %u: Mesa direct ES 1.00 rejected: %s", shader_id, mesa_log);
         } else {
@@ -431,6 +442,21 @@ static bool sgl_compile_es100_mesa(sgl_context_t *ctx, GLuint shader_id, sgl_sha
             meta->inputs[i].location = iinfo.location;
             meta->inputs[i].gl_type =
                 uam_base_type_to_gl(iinfo.base_type, iinfo.vector_elements, iinfo.matrix_columns);
+        }
+    }
+
+    /* Capture user varying slots (VS outputs / FS inputs) for cross-stage matching */
+    int num_varyings = uam_get_num_varyings(compiler);
+    if (num_varyings > SGL_MESA_MAX_VARYINGS)
+        num_varyings = SGL_MESA_MAX_VARYINGS;
+    meta->num_varyings = num_varyings;
+    for (int i = 0; i < num_varyings; i++) {
+        uam_varying_info_t vinfo;
+        if (uam_get_varying_info(compiler, i, &vinfo)) {
+            strncpy(meta->varyings[i].name, vinfo.name, SGL_ATTRIB_NAME_MAX - 1);
+            meta->varyings[i].name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
+            meta->varyings[i].location = vinfo.location;
+            meta->varyings[i].num_slots = vinfo.num_slots;
         }
     }
 
@@ -593,7 +619,7 @@ GL_APICALL void GL_APIENTRY glCompileShader(GLuint shader) {
         }
 
         /* Try Mesa direct compilation (handles full GLSL ES 1.00 spec) */
-        if (sgl_compile_es100_mesa(ctx, shader, sh)) {
+        if (sgl_compile_es100_mesa(ctx, shader, sh, NULL)) {
             sh->compiled = true;
             sh->needs_transpile = false;
             SGL_TRACE_SHADER("glCompileShader(%u) - ES 1.00 Mesa direct OK", shader);
