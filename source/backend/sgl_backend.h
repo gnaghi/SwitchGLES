@@ -131,6 +131,9 @@ struct sgl_backend_ops {
     void (*write_uniform)(sgl_backend_t *be, uint32_t offset, const void *data, uint32_t size);
 
     /* ======== Vertex Attribute Operations ======== */
+    /* attribs always has SGL_MAX_ATTRIBS entries (the context's full table);
+     * num_attribs is the number of leading slots to declare for the draw: the
+     * slots the current program's VS can read. */
     void (*bind_vertex_attribs)(sgl_backend_t *be, const sgl_vertex_attrib_t *attribs,
                                 int num_attribs, GLint first, GLsizei count);
 

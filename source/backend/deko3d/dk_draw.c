@@ -53,10 +53,16 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
     /* Determine numAttribs: MUST cover ALL attribute locations the shader might
      * read from, not just enabled ones. In GLES 2.0, disabled attributes return
      * the default glVertexAttrib value (0,0,0,1). deko3d GPU faults if the shader
-     * reads from an undeclared attribute slot. Always declare all num_attribs slots
-     * so any shader input finds a valid attribute state. */
+     * reads from an undeclared attribute slot. The GL layer passes num_attribs =
+     * the slots the current program's VS can read (every slot when unknown), so
+     * any shader input finds a valid attribute state; the slots above are left
+     * to deko3d, which marks them IsFixed (constant, no fetch) in the same
+     * 32-entry VertexAttribState command it always records. */
     int hasAnyEnabled = 0;
-    for (int i = 0; i < num_attribs && i < SGL_MAX_ATTRIBS; i++) {
+    /* The skip decision is taken on the whole table (SGL_MAX_ATTRIBS entries),
+     * independently of num_attribs, so that it is exactly the one taken when
+     * every slot was declared. */
+    for (int i = 0; i < SGL_MAX_ATTRIBS; i++) {
         if (attribs[i].enabled || attribs[i].current_value[0] != 0.0f ||
             attribs[i].current_value[1] != 0.0f || attribs[i].current_value[2] != 0.0f ||
             attribs[i].current_value[3] != 1.0f) {
@@ -71,6 +77,8 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
     }
 
     numAttribs = (num_attribs < SGL_MAX_ATTRIBS) ? num_attribs : SGL_MAX_ATTRIBS;
+    if (numAttribs < 1)
+        numAttribs = 1;
 
     /* Initialize arrays to zero */
     memset(attribStates, 0, sizeof(attribStates));

@@ -376,6 +376,49 @@ Autres :
       commande de liaison change)
 - [ ] GFXBench à l'écran : rendu identique à Nouveau (`--freeze 10000 gl_egypt`, `gl_trex`)
 
+## Piste B8 — attributs de sommets déclarés jusqu'à la plus haute location lue par le programme
+
+Changement :
+- `sgl_program_t.num_attrib_slots` (`sgl_gl_types.h`), calculé au link (`sgl_program_update_attrib_slots`,
+  `gl_program.c`) par les deux chemins de réflexion : plus haute `linked_location` active + 1, colonnes de
+  matrices comprises (`mat4` = 4 locations), borné à [1, 32]. Sans réflexion (shaders précompilés sans `.refl`,
+  `glLinkProgram` remet la valeur à `SGL_MAX_ATTRIBS` avant le link) : 32 comme avant.
+- `glDrawArrays` / `glDrawElements` (`gl_draw.c`, `sgl_draw_attrib_slots`) passent ce nombre à
+  `bind_vertex_attribs` au lieu de 32, et ne préparent (`buffer_offset`) / n'examinent (scan d'indices) que ces
+  slots. Contrat (`sgl_backend.h`) : le tableau garde ses 32 entrées, `num_attribs` = slots à déclarer.
+- `dk_bind_vertex_attribs` (`dk_draw.c`) : la décision « rien d'activé et tout par défaut → ne rien lier » est
+  prise sur les 32 entrées, comme avant, pour que ce comportement ne change pas ; `numAttribs` ≥ 1.
+- Ce que fait deko3d (`gpu_3d_vbo.cpp`) : `dkCmdBufBindVtxAttribState` écrit **toujours** les 32 registres
+  `VertexAttribState` et marque les slots au-delà de `numAttribs` `IsFixed` (constante, pas de fetch) — c'est
+  le bit `isFixed` de `DkVtxAttribState`, que deko3d n'expose pas autrement (pas d'API pour la valeur
+  `VTX_ATTR_DEFINE` du constant, d'où le buffer de constantes conservé pour les slots lus). La taille de la
+  commande d'attributs ne change donc pas ; les gains sont ailleurs : moins de slots de buffers
+  (`BindVtxBufferState` / `BindVtxBuffers`, 4 à 9 mots par slot), plus de fetch pour un tableau activé que le
+  shader ne lit pas, et moins de constantes écrites (préparé pour C3).
+- Risque examiné : un slot lu par le VS et non déclaré faute GPU (commentaire historique de `dk_draw.c`). Les
+  locations viennent de la réflexion du VS **lié** (Mesa élimine les entrées mortes ; transpileur : liste des
+  `attribute`), donc tout slot lu est ≤ `num_attrib_slots - 1`.
+
+Performance :
+- [ ] Egypt / T-Rex : `[PERF]` `attribs` (temps CPU par draw) en baisse ; FPS en A/B
+- [ ] Pas de faute GPU (`dkQueueIsInErrorState`) sur une longue session Egypt / T-Rex / spearmint
+
+Conformité dEQP-GLES2 (VK-GL-CTS, jamais `validation_test`) :
+- [ ] `functional.attribute_location.*` (`bind`, `bind_aliasing`, `bind_max_attributes`, `bind_relink`,
+      `bind_hole`, matrices : colonnes comptées, locations élevées)
+- [ ] `functional.vertex_arrays.*` (single_attribute, multiple_attributes : tableaux activés au-delà des
+      attributs lus, strides, GL_FIXED, client arrays, `first` > 0)
+- [ ] `functional.draw.*` (draw_arrays / draw_elements, tous types d'indices, EBO et indices client)
+- [ ] `functional.state_query.*` (`glGetVertexAttrib*` : valeurs génériques inchangées),
+      `functional.shaders.*` dont `shaders.linkage.*` (attributs matriciels, attributs inactifs : `glVertexAttrib4f`
+      sur une location non lue), `functional.lifetime.*` (relink : `num_attrib_slots` recalculé)
+- [ ] Shaders précompilés avec et sans `.refl` (`examples/01..05`, `validation_test` 226 tests) : chemin 32 slots
+- [ ] Régression complète en A/B
+
+Autres :
+- [ ] Spearmint : rendu identique (attributs désactivés lus comme la valeur générique courante)
+- [ ] GFXBench à l'écran : rendu identique à Nouveau (`--freeze 10000 gl_egypt`, `gl_trex`)
+
 ## Piste B5 — non retenue
 
 Les barrières `None + L2Cache | Descriptors | Zcull` après soumission (`dk_begin_frame`, `dk_submit_and_reset`,

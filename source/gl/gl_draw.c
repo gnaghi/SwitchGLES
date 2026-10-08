@@ -40,6 +40,19 @@ static bool sgl_is_texture_complete(const sgl_texture_t *tex) {
     return true;
 }
 
+/* Number of vertex attribute slots to declare for the current program: the
+ * slots its VS can read (sgl_program_t.num_attrib_slots, from link-time
+ * reflection), every slot when that is unknown. Attribute state recorded
+ * for a slot the shader never reads is wasted work (and a vertex fetch per
+ * vertex for an enabled array); a slot the shader reads must be declared. */
+static int sgl_draw_attrib_slots(sgl_context_t *ctx) {
+    sgl_program_t *prog = GET_PROGRAM(ctx->current_program);
+    int n = prog ? prog->num_attrib_slots : 0;
+    if (n <= 0 || n > SGL_MAX_ATTRIBS)
+        n = SGL_MAX_ATTRIBS;
+    return n;
+}
+
 /* Prepare state before draw - delegates to backend */
 static void sgl_prepare_draw(sgl_context_t *ctx) {
     if (!ctx->backend || !ctx->backend->ops)
@@ -365,11 +378,13 @@ GL_APICALL void GL_APIENTRY glDrawArrays(GLenum mode, GLint first, GLsizei count
     SGL_PERF_BEGIN(perf_draw);
     sgl_prepare_draw(ctx);
 
-    /* Prepare vertex attributes with buffer offsets */
+    /* Prepare vertex attributes with buffer offsets, for the slots the
+     * program's VS can read (num_attrib_slots) */
+    int num_slots = sgl_draw_attrib_slots(ctx);
     sgl_vertex_attrib_t prepared_attribs[SGL_MAX_ATTRIBS];
     memcpy(prepared_attribs, ctx->vertex_attribs, sizeof(prepared_attribs));
 
-    for (int i = 0; i < SGL_MAX_ATTRIBS; i++) {
+    for (int i = 0; i < num_slots; i++) {
         sgl_vertex_attrib_t *attr = &prepared_attribs[i];
         if (attr->enabled && attr->buffer > 0) {
             sgl_buffer_t *buf = GET_BUFFER(attr->buffer);
@@ -384,8 +399,8 @@ GL_APICALL void GL_APIENTRY glDrawArrays(GLenum mode, GLint first, GLsizei count
     /* Bind vertex attributes via backend */
     SGL_PERF_BEGIN(perf_attr);
     if (ctx->backend->ops->bind_vertex_attribs) {
-        ctx->backend->ops->bind_vertex_attribs(ctx->backend, prepared_attribs, SGL_MAX_ATTRIBS,
-                                               first, count);
+        ctx->backend->ops->bind_vertex_attribs(ctx->backend, prepared_attribs, num_slots, first,
+                                               count);
     }
     SGL_PERF_END(SGL_PERF_ATTRIBS, perf_attr);
 
@@ -468,11 +483,13 @@ GL_APICALL void GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum ty
     SGL_PERF_BEGIN(perf_draw);
     sgl_prepare_draw(ctx);
 
-    /* Prepare vertex attributes with buffer offsets */
+    /* Prepare vertex attributes with buffer offsets, for the slots the
+     * program's VS can read (num_attrib_slots) */
+    int num_slots = sgl_draw_attrib_slots(ctx);
     sgl_vertex_attrib_t prepared_attribs[SGL_MAX_ATTRIBS];
     memcpy(prepared_attribs, ctx->vertex_attribs, sizeof(prepared_attribs));
 
-    for (int i = 0; i < SGL_MAX_ATTRIBS; i++) {
+    for (int i = 0; i < num_slots; i++) {
         sgl_vertex_attrib_t *attr = &prepared_attribs[i];
         if (attr->enabled && attr->buffer > 0) {
             sgl_buffer_t *buf = GET_BUFFER(attr->buffer);
@@ -499,7 +516,7 @@ GL_APICALL void GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum ty
      * extent. Skip the max-index scan otherwise: reading every index back from
      * uncached GPU memory cost 10-70 ms per frame in GFXBench T-Rex/Egypt. */
     bool need_vertex_count = false;
-    for (int i = 0; i < SGL_MAX_ATTRIBS && !need_vertex_count; i++) {
+    for (int i = 0; i < num_slots && !need_vertex_count; i++) {
         const sgl_vertex_attrib_t *attr = &prepared_attribs[i];
         if (!attr->enabled)
             continue;
@@ -583,7 +600,7 @@ GL_APICALL void GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum ty
     /* Bind vertex attributes via backend */
     SGL_PERF_BEGIN(perf_attr);
     if (ctx->backend->ops->bind_vertex_attribs) {
-        ctx->backend->ops->bind_vertex_attribs(ctx->backend, prepared_attribs, SGL_MAX_ATTRIBS, 0,
+        ctx->backend->ops->bind_vertex_attribs(ctx->backend, prepared_attribs, num_slots, 0,
                                                vertex_count);
     }
     SGL_PERF_END(SGL_PERF_ATTRIBS, perf_attr);

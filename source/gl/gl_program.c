@@ -209,6 +209,43 @@ static bool sgl_varyings_mismatch(const sgl_mesa_metadata_t *vs, const sgl_mesa_
     return false;
 }
 
+/* Vertex attribute locations consumed by an attribute of the given type:
+ * a matrix takes one location per column (GLES2 §2.10.4). */
+static int sgl_attrib_type_locations(GLenum gl_type) {
+    switch (gl_type) {
+        case GL_FLOAT_MAT2:
+            return 2;
+        case GL_FLOAT_MAT3:
+            return 3;
+        case GL_FLOAT_MAT4:
+            return 4;
+        default:
+            return 1;
+    }
+}
+
+/* num_attrib_slots = highest location the linked VS reads + 1, over every
+ * active (in_shader) attribute of the reflected set. The draw declares the
+ * attribute state for exactly these slots (dk_bind_vertex_attribs): a slot
+ * the shader never reads needs no buffer, no constant and no fetch, while a
+ * slot it does read must be declared or the GPU faults. Clamped to
+ * [1, SGL_MAX_ATTRIBS]; a program without attributes still declares slot 0
+ * so that the previous "declare something" behaviour is kept. */
+static void sgl_program_update_attrib_slots(sgl_program_t *prog) {
+    int slots = 1;
+    for (int j = 0; j < prog->num_attrib_bindings; j++) {
+        const sgl_attrib_binding_t *ab = &prog->attrib_bindings[j];
+        if (!ab->in_shader || ab->linked_location < 0)
+            continue;
+        int end = ab->linked_location + sgl_attrib_type_locations(ab->gl_type);
+        if (end > slots)
+            slots = end;
+    }
+    if (slots > SGL_MAX_ATTRIBS)
+        slots = SGL_MAX_ATTRIBS;
+    prog->num_attrib_slots = slots;
+}
+
 /* Populate program metadata from Mesa-compiled shader reflection:
  * uniforms, samplers, sampler arrays, attribs, packed UBOs and dual-stage
  * mirrors. Extracted verbatim from glLinkProgram's Mesa link path. */
@@ -404,6 +441,7 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog, sgl_shade
             }
             prog->num_active_attribs = active_count;
         }
+        sgl_program_update_attrib_slots(prog);
     }
 
     /* Pre-configure packed UBOs and load initial constbuf data from Mesa */
@@ -1161,6 +1199,7 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program, sgl_p
         }
         prog->num_active_attribs = active_count;
     }
+    sgl_program_update_attrib_slots(prog);
 
     glslt_result_free(&vs_result);
     glslt_result_free(&fs_result);
@@ -1201,9 +1240,11 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
         prog->num_attrib_bindings = dst;
     }
 
-    /* Reset active attrib count for relink — will be set by Mesa or transpiler path below */
+    /* Reset active attrib count for relink — will be set by Mesa or transpiler path below.
+     * Until a reflection path narrows it, the draw declares every slot. */
     prog->num_active_attribs = 0;
     prog->attribs_reflected = false;
+    prog->num_attrib_slots = SGL_MAX_ATTRIBS;
 
 #ifdef SGL_ENABLE_RUNTIME_COMPILER
     sgl_shader_t *vs_sh = prog->vertex_shader ? GET_SHADER(prog->vertex_shader) : NULL;

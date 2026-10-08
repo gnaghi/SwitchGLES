@@ -263,6 +263,9 @@ typedef struct sgl_program {
                                GL_ACTIVE_ATTRIBUTES) */
     bool attribs_reflected; /* VS attribute set known at link (runtime compile or .refl):
                                glGetAttribLocation of an inactive name must return -1 */
+    int num_attrib_slots;   /* Vertex attribute slots the linked VS can read: highest active
+                               location + 1 (matrix columns included), SGL_MAX_ATTRIBS when the
+                               attribute set is not reflected. The draw declares that many. */
     /* Active uniform tracking (populated by glGetUniformLocation) */
     sgl_active_uniform_info_t active_uniforms[SGL_MAX_UNIFORMS * 2]; /* VS + FS */
     int num_active_uniforms;
