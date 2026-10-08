@@ -346,15 +346,6 @@ void dk_apply_raster(sgl_backend_t *be, const sgl_raster_state_t *state);
  */
 void dk_apply_color_mask(sgl_backend_t *be, const sgl_color_state_t *state);
 
-/**
- * Set depth bias (polygon offset) values.
- *
- * @param be    Backend pointer
- * @param factor    Slope-dependent depth bias factor
- * @param units Constant depth bias units
- */
-void dk_set_depth_bias(sgl_backend_t *be, GLfloat factor, GLfloat units);
-
 /* ============================================================================
  * Clear Operations (dk_clear.c)
  * ============================================================================ */

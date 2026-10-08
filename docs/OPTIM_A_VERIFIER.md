@@ -556,6 +556,59 @@ Conformité dEQP-GLES2 (VK-GL-CTS, jamais `validation_test`) :
       réenregistré au draw suivant), `functional.lifetime.*`
 - [ ] Régression complète en A/B
 
+## Piste C2 — setters GL sans émission immédiate (état appliqué au draw)
+
+Changement (`gl_state.c`, `gl_clear.c`, `gl_query.c`, `dk_state.c`, `dk_internal.h`, `dk_backend.c`) :
+- `glBlendColor` appelait `apply_blend` **sans condition** (2 500 séquences de blend de plus par frame sur
+  `driver`, en plus de celle du draw) ; `glEnable`/`glDisable` (depth, stencil, blend, cull), `glDepthFunc`,
+  `glDepthMask`, `glBlendFunc[Separate]`, `glBlendEquation[Separate]`, `glCullFace`, `glFrontFace`,
+  `glColorMask`, `glStencil*` émettaient leur groupe au changement, `glViewport`, `glScissor`, `glDepthRangef`
+  émettaient viewport/scissor, `glPolygonOffset` et `glEnable/Disable(GL_POLYGON_OFFSET_FILL)` émettaient
+  `SetDepthBias` (`set_depth_bias`). Tout cela faisait double emploi avec `sgl_prepare_draw`.
+- Maintenant, tous ces setters ne font que mettre à jour l'état du contexte (validation des enums inchangée).
+  Le « dirty bit » est celui de C1 : au draw suivant, le backend compare les valeurs dérivées à celles du
+  cmdbuf et n'enregistre que ce qui a changé. Pas de second mécanisme de dirty côté GL (il aurait fallu lui
+  faire connaître tous les points de reset du backend).
+- `set_depth_bias` retiré du backend (`dk_set_depth_bias`, op à `NULL` comme `set_line_width`) : le biais est
+  enregistré par `dk_apply_raster` avec `BindRasterizerState`, seulement quand `GL_POLYGON_OFFSET_FILL` est
+  activé (comme avant dans l'apply ; l'émission immédiate de zéros au `glDisable` n'avait pas d'effet, le bit
+  `PolygonOffsetFillEnable` suffisant).
+- Vérifié que rien ne dépendait de l'émission immédiate :
+  - `glClear` (`dk_clear.c`) construit lui-même son scissor (rectangle GL ou cible entière), son masque de
+    couleur (avec la règle RGB), son `DkDepthStencilState` et ses masques de stencil **à partir du contexte**,
+    et `ClearBuffers` porte son propre masque RGBA ; le blend, le cull et le viewport n'affectent pas un
+    clear. Le réapply de depth-stencil après un clear de stencil (`gl_clear.c`) est conservé (correctif
+    validé) ; il passe par le cache, invalidé par `dk_clear`, donc il émet comme avant ;
+  - `glReadPixels`, blits, copies, mipmaps, uploads : moteurs copy/2D, aucun état fixe lu ;
+  - `sgl_ensure_frame_ready` (`egl_impl.c`) pose viewport/scissor et applique raster, depth-stencil, blend et
+    masque depuis le contexte au début de chaque frame, inchangé ;
+  - `glViewport`/`glScissor` avant la première frame : plus d'enregistrement dans un cmdbuf pas encore prêt ;
+    l'ancien `apply_viewport` immédiat déclenchait aussi le contrôle de budget (`dk_submit_and_reset`) hors
+    draw, ce qui n'est plus le cas.
+- Les fonctions `sgl_state_*_set_*` gardent leur valeur de retour « changé » (inutilisée ici) pour les
+  autres appelants.
+
+Performance :
+- [ ] `driver` GFXBench : une seule séquence de blend par draw au lieu de deux (`glBlendColor` à chaque draw) ;
+      `[PERF]` `state` ; FPS en A/B (C1 contre C1 + C2)
+- [ ] Egypt / T-Rex : aucun `SetDepthBias` ni viewport hors draw ; FPS en A/B
+
+Conformité dEQP-GLES2 (VK-GL-CTS, jamais `validation_test`) :
+- [ ] `functional.fragment_ops.blend.*` (`glBlendColor` + `glBlendFunc` entre deux draws : constante enregistrée
+      au draw avec le groupe), `fragment_ops.depth*`, `fragment_ops.stencil*`, `fragment_ops.scissor.*`
+      (`glScissor`/`glEnable(SCISSOR)` puis clear puis draw)
+- [ ] `functional.color_clear.*`, `functional.depth_stencil_clear.*` (`glColorMask`, `glDepthMask`,
+      `glStencilMask` juste avant `glClear` : lus dans le contexte par `dk_clear`)
+- [ ] `functional.polygon_offset.*` (`glPolygonOffset` puis `glEnable` dans les deux ordres : biais enregistré
+      au draw), `functional.rasterization.*` (`glCullFace`/`glFrontFace` entre deux draws)
+- [ ] `functional.clipping.*`, `functional.depth_range.*` (`glViewport`/`glDepthRangef` entre deux draws)
+- [ ] `functional.state_query.*` (`glIsEnabled`, `glGet*` : état du contexte, inchangé)
+- [ ] `functional.fbo.*`, `functional.read_pixels.*` (`glReadPixels` juste après un setter : rien à enregistrer)
+- [ ] Régression complète en A/B
+
+Autres :
+- [ ] Spearmint et GFXBench à l'écran : rendu identique (`--freeze 10000 gl_egypt`, `gl_trex`)
+
 ## Piste B5 — non retenue
 
 Les barrières `None + L2Cache | Descriptors | Zcull` après soumission (`dk_begin_frame`, `dk_submit_and_reset`,

@@ -761,13 +761,10 @@ GL_APICALL void GL_APIENTRY glPolygonOffset(GLfloat factor, GLfloat units) {
     if (!ctx)
         return;
 
+    /* Recorded with the rasterizer group at the next draw (dk_apply_raster),
+     * only while GL_POLYGON_OFFSET_FILL is enabled. */
     ctx->raster_state.polygon_offset_factor = factor;
     ctx->raster_state.polygon_offset_units = units;
-
-    /* Apply to backend */
-    if (ctx->backend && ctx->backend->ops->set_depth_bias) {
-        ctx->backend->ops->set_depth_bias(ctx->backend, factor, units);
-    }
 
     SGL_TRACE_STATE("glPolygonOffset(%.2f, %.2f)", factor, units);
 }

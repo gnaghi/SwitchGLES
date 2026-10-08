@@ -1,54 +1,17 @@
 /*
  * SwitchGLES - OpenGL ES 2.0 / EGL implementation for Nintendo Switch
  * GL Layer - Enable/Disable, Blend, Depth, Stencil, Cull, ColorMask
+ *
+ * The setters below only update the context state. Nothing is recorded into
+ * the command buffer here: sgl_prepare_draw hands every fixed-function group
+ * to the backend before each draw, and the backend records a group only when
+ * its derived values changed (dk_state.c, dk->state_cache). glClear builds
+ * the state it needs (color mask, scissor, depth/stencil write masks) from
+ * the context itself (dk_clear.c), so it never depended on these setters
+ * recording anything.
  */
 
 #include "gl_common.h"
-
-/* Apply blend state to backend */
-static void apply_blend(sgl_context_t *ctx) {
-    if (ctx->backend && ctx->backend->ops->apply_blend) {
-        sgl_blend_state_t bs;
-        sgl_build_blend(ctx, &bs);
-        ctx->backend->ops->apply_blend(ctx->backend, &bs);
-    }
-}
-
-/* Apply combined depth-stencil state to backend (preferred - avoids overwrite issues) */
-static void apply_depth_stencil(sgl_context_t *ctx) {
-    if (ctx->backend && ctx->backend->ops->apply_depth_stencil) {
-        sgl_depth_stencil_state_t dss;
-        sgl_build_depth_stencil(ctx, &dss);
-        ctx->backend->ops->apply_depth_stencil(ctx->backend, &dss);
-    }
-}
-
-/* Legacy separate apply functions - now just call the combined version */
-static void apply_depth(sgl_context_t *ctx) {
-    apply_depth_stencil(ctx);
-}
-
-static void apply_stencil(sgl_context_t *ctx) {
-    apply_depth_stencil(ctx);
-}
-
-/* Apply raster state to backend */
-static void apply_raster(sgl_context_t *ctx) {
-    if (ctx->backend && ctx->backend->ops->apply_raster) {
-        sgl_raster_state_t rs;
-        sgl_build_raster(ctx, &rs);
-        ctx->backend->ops->apply_raster(ctx->backend, &rs);
-    }
-}
-
-/* Apply color mask to backend */
-static void apply_color_mask(sgl_context_t *ctx) {
-    if (ctx->backend && ctx->backend->ops->apply_color_mask) {
-        sgl_color_state_t cs;
-        sgl_build_color(ctx, &cs);
-        ctx->backend->ops->apply_color_mask(ctx->backend, &cs);
-    }
-}
 
 /* Enable/Disable */
 
@@ -59,36 +22,24 @@ GL_APICALL void GL_APIENTRY glEnable(GLenum cap) {
 
     switch (cap) {
         case GL_DEPTH_TEST:
-            if (sgl_state_depth_set_test_enabled(&ctx->depth_state, true)) {
-                apply_depth(ctx);
-            }
+            sgl_state_depth_set_test_enabled(&ctx->depth_state, true);
             break;
         case GL_STENCIL_TEST:
-            if (sgl_state_stencil_set_test_enabled(&ctx->depth_state, true)) {
-                apply_stencil(ctx);
-            }
+            sgl_state_stencil_set_test_enabled(&ctx->depth_state, true);
             break;
         case GL_BLEND:
-            if (sgl_state_blend_set_enabled(&ctx->blend_state, true)) {
-                apply_blend(ctx);
-            }
+            sgl_state_blend_set_enabled(&ctx->blend_state, true);
             break;
         case GL_CULL_FACE:
-            if (sgl_state_raster_set_cull_enabled(&ctx->raster_state, true)) {
-                apply_raster(ctx);
-            }
+            sgl_state_raster_set_cull_enabled(&ctx->raster_state, true);
             break;
         case GL_SCISSOR_TEST:
             sgl_state_scissor_set_enabled(&ctx->viewport_state, true);
             break;
         case GL_POLYGON_OFFSET_FILL:
+            /* The bias values are recorded with the rasterizer group at the
+             * next draw (dk_apply_raster), only while the offset is enabled. */
             ctx->raster_state.polygon_offset_fill_enabled = true;
-            /* Apply current offset values */
-            if (ctx->backend && ctx->backend->ops->set_depth_bias) {
-                ctx->backend->ops->set_depth_bias(ctx->backend,
-                                                  ctx->raster_state.polygon_offset_factor,
-                                                  ctx->raster_state.polygon_offset_units);
-            }
             break;
         case GL_DITHER:
             ctx->dither_enabled = true;
@@ -114,34 +65,22 @@ GL_APICALL void GL_APIENTRY glDisable(GLenum cap) {
 
     switch (cap) {
         case GL_DEPTH_TEST:
-            if (sgl_state_depth_set_test_enabled(&ctx->depth_state, false)) {
-                apply_depth(ctx);
-            }
+            sgl_state_depth_set_test_enabled(&ctx->depth_state, false);
             break;
         case GL_STENCIL_TEST:
-            if (sgl_state_stencil_set_test_enabled(&ctx->depth_state, false)) {
-                apply_stencil(ctx);
-            }
+            sgl_state_stencil_set_test_enabled(&ctx->depth_state, false);
             break;
         case GL_BLEND:
-            if (sgl_state_blend_set_enabled(&ctx->blend_state, false)) {
-                apply_blend(ctx);
-            }
+            sgl_state_blend_set_enabled(&ctx->blend_state, false);
             break;
         case GL_CULL_FACE:
-            if (sgl_state_raster_set_cull_enabled(&ctx->raster_state, false)) {
-                apply_raster(ctx);
-            }
+            sgl_state_raster_set_cull_enabled(&ctx->raster_state, false);
             break;
         case GL_SCISSOR_TEST:
             sgl_state_scissor_set_enabled(&ctx->viewport_state, false);
             break;
         case GL_POLYGON_OFFSET_FILL:
             ctx->raster_state.polygon_offset_fill_enabled = false;
-            /* Disable depth bias */
-            if (ctx->backend && ctx->backend->ops->set_depth_bias) {
-                ctx->backend->ops->set_depth_bias(ctx->backend, 0.0f, 0.0f);
-            }
             break;
         case GL_DITHER:
             ctx->dither_enabled = false;
@@ -229,9 +168,7 @@ GL_APICALL void GL_APIENTRY glDepthFunc(GLenum func) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
     }
-    if (sgl_state_depth_set_func(&ctx->depth_state, func)) {
-        apply_depth(ctx);
-    }
+    sgl_state_depth_set_func(&ctx->depth_state, func);
     SGL_TRACE_STATE("glDepthFunc(0x%X)", func);
 }
 
@@ -239,9 +176,7 @@ GL_APICALL void GL_APIENTRY glDepthMask(GLboolean flag) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
-    if (sgl_state_depth_set_write_enabled(&ctx->depth_state, flag != 0)) {
-        apply_depth(ctx);
-    }
+    sgl_state_depth_set_write_enabled(&ctx->depth_state, flag != 0);
     SGL_TRACE_STATE("glDepthMask(%d)", flag);
 }
 
@@ -255,9 +190,7 @@ GL_APICALL void GL_APIENTRY glBlendFunc(GLenum sfactor, GLenum dfactor) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
     }
-    if (sgl_state_blend_set_func(&ctx->blend_state, sfactor, dfactor, sfactor, dfactor)) {
-        apply_blend(ctx);
-    }
+    sgl_state_blend_set_func(&ctx->blend_state, sfactor, dfactor, sfactor, dfactor);
     SGL_TRACE_STATE("glBlendFunc(0x%X, 0x%X)", sfactor, dfactor);
 }
 
@@ -271,9 +204,7 @@ GL_APICALL void GL_APIENTRY glBlendFuncSeparate(GLenum srcRGB, GLenum dstRGB, GL
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
     }
-    if (sgl_state_blend_set_func(&ctx->blend_state, srcRGB, dstRGB, srcAlpha, dstAlpha)) {
-        apply_blend(ctx);
-    }
+    sgl_state_blend_set_func(&ctx->blend_state, srcRGB, dstRGB, srcAlpha, dstAlpha);
     SGL_TRACE_STATE("glBlendFuncSeparate(0x%X, 0x%X, 0x%X, 0x%X)", srcRGB, dstRGB, srcAlpha,
                     dstAlpha);
 }
@@ -286,9 +217,7 @@ GL_APICALL void GL_APIENTRY glBlendEquation(GLenum mode) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
     }
-    if (sgl_state_blend_set_equation(&ctx->blend_state, mode, mode)) {
-        apply_blend(ctx);
-    }
+    sgl_state_blend_set_equation(&ctx->blend_state, mode, mode);
     SGL_TRACE_STATE("glBlendEquation(0x%X)", mode);
 }
 
@@ -300,9 +229,7 @@ GL_APICALL void GL_APIENTRY glBlendEquationSeparate(GLenum modeRGB, GLenum modeA
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
     }
-    if (sgl_state_blend_set_equation(&ctx->blend_state, modeRGB, modeAlpha)) {
-        apply_blend(ctx);
-    }
+    sgl_state_blend_set_equation(&ctx->blend_state, modeRGB, modeAlpha);
     SGL_TRACE_STATE("glBlendEquationSeparate(0x%X, 0x%X)", modeRGB, modeAlpha);
 }
 
@@ -314,7 +241,6 @@ GL_APICALL void GL_APIENTRY glBlendColor(GLfloat red, GLfloat green, GLfloat blu
     ctx->blend_state.color[1] = green;
     ctx->blend_state.color[2] = blue;
     ctx->blend_state.color[3] = alpha;
-    apply_blend(ctx);
     SGL_TRACE_STATE("glBlendColor(%.2f, %.2f, %.2f, %.2f)", red, green, blue, alpha);
 }
 
@@ -328,9 +254,7 @@ GL_APICALL void GL_APIENTRY glCullFace(GLenum mode) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
     }
-    if (sgl_state_raster_set_cull_mode(&ctx->raster_state, mode)) {
-        apply_raster(ctx);
-    }
+    sgl_state_raster_set_cull_mode(&ctx->raster_state, mode);
     SGL_TRACE_STATE("glCullFace(0x%X)", mode);
 }
 
@@ -342,9 +266,7 @@ GL_APICALL void GL_APIENTRY glFrontFace(GLenum mode) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
     }
-    if (sgl_state_raster_set_front_face(&ctx->raster_state, mode)) {
-        apply_raster(ctx);
-    }
+    sgl_state_raster_set_front_face(&ctx->raster_state, mode);
     SGL_TRACE_STATE("glFrontFace(0x%X)", mode);
 }
 
@@ -355,9 +277,7 @@ GL_APICALL void GL_APIENTRY glColorMask(GLboolean red, GLboolean green, GLboolea
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
         return;
-    if (sgl_state_color_set_mask(&ctx->color_state, red != 0, green != 0, blue != 0, alpha != 0)) {
-        apply_color_mask(ctx);
-    }
+    sgl_state_color_set_mask(&ctx->color_state, red != 0, green != 0, blue != 0, alpha != 0);
     SGL_TRACE_STATE("glColorMask(%d, %d, %d, %d)", red, green, blue, alpha);
 }
 
@@ -372,7 +292,6 @@ GL_APICALL void GL_APIENTRY glStencilFunc(GLenum func, GLint ref, GLuint mask) {
         return;
     }
     sgl_state_stencil_set_func(&ctx->depth_state, GL_FRONT_AND_BACK, func, ref, mask);
-    apply_stencil(ctx);
     SGL_TRACE_STATE("glStencilFunc(0x%X, %d, 0x%X)", func, ref, mask);
 }
 
@@ -390,7 +309,6 @@ GL_APICALL void GL_APIENTRY glStencilFuncSeparate(GLenum face, GLenum func, GLin
         return;
     }
     sgl_state_stencil_set_func(&ctx->depth_state, face, func, ref, mask);
-    apply_stencil(ctx);
     SGL_TRACE_STATE("glStencilFuncSeparate(0x%X, 0x%X, %d, 0x%X)", face, func, ref, mask);
 }
 
@@ -399,7 +317,6 @@ GL_APICALL void GL_APIENTRY glStencilMask(GLuint mask) {
     if (!ctx)
         return;
     sgl_state_stencil_set_write_mask(&ctx->depth_state, GL_FRONT_AND_BACK, mask);
-    apply_stencil(ctx);
     SGL_TRACE_STATE("glStencilMask(0x%X)", mask);
 }
 
@@ -412,7 +329,6 @@ GL_APICALL void GL_APIENTRY glStencilMaskSeparate(GLenum face, GLuint mask) {
         return;
     }
     sgl_state_stencil_set_write_mask(&ctx->depth_state, face, mask);
-    apply_stencil(ctx);
     SGL_TRACE_STATE("glStencilMaskSeparate(0x%X, 0x%X)", face, mask);
 }
 
@@ -426,7 +342,6 @@ GL_APICALL void GL_APIENTRY glStencilOp(GLenum fail, GLenum zfail, GLenum zpass)
         return;
     }
     sgl_state_stencil_set_op(&ctx->depth_state, GL_FRONT_AND_BACK, fail, zfail, zpass);
-    apply_stencil(ctx);
     SGL_TRACE_STATE("glStencilOp(0x%X, 0x%X, 0x%X)", fail, zfail, zpass);
 }
 
@@ -445,6 +360,5 @@ GL_APICALL void GL_APIENTRY glStencilOpSeparate(GLenum face, GLenum sfail, GLenu
         return;
     }
     sgl_state_stencil_set_op(&ctx->depth_state, face, sfail, dpfail, dppass);
-    apply_stencil(ctx);
     SGL_TRACE_STATE("glStencilOpSeparate(0x%X, 0x%X, 0x%X, 0x%X)", face, sfail, dpfail, dppass);
 }

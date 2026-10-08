@@ -72,14 +72,10 @@ GL_APICALL void GL_APIENTRY glViewport(GLint x, GLint y, GLsizei width, GLsizei 
         return;
     }
 
-    if (sgl_state_viewport_set(&ctx->viewport_state, x, y, width, height)) {
-        /* Apply via backend */
-        if (ctx->backend->ops->apply_viewport) {
-            sgl_viewport_state_t vs = {
-                x, y, width, height, ctx->viewport_state.depth_near, ctx->viewport_state.depth_far};
-            ctx->backend->ops->apply_viewport(ctx->backend, &vs);
-        }
-    }
+    /* State only: recorded at the next draw by sgl_prepare_draw (the backend
+     * records the viewport when it differs from the one in the cmdbuf). A
+     * clear does not use the viewport, and the frame start sets it itself. */
+    sgl_state_viewport_set(&ctx->viewport_state, x, y, width, height);
 
     SGL_TRACE_STATE("glViewport(%d, %d, %d, %d)", x, y, width, height);
 }
@@ -95,13 +91,10 @@ GL_APICALL void GL_APIENTRY glScissor(GLint x, GLint y, GLsizei width, GLsizei h
         return;
     }
 
-    if (sgl_state_scissor_set(&ctx->viewport_state, x, y, width, height)) {
-        /* Apply via backend */
-        if (ctx->backend->ops->apply_scissor) {
-            sgl_scissor_state_t ss = {x, y, width, height, true};
-            ctx->backend->ops->apply_scissor(ctx->backend, &ss);
-        }
-    }
+    /* State only: the draw path records the scissor (or the viewport when the
+     * test is disabled) and glClear computes its own rectangle from the
+     * context (dk_clear.c). */
+    sgl_state_scissor_set(&ctx->viewport_state, x, y, width, height);
 
     SGL_TRACE_STATE("glScissor(%d, %d, %d, %d)", x, y, width, height);
 }
@@ -112,18 +105,8 @@ GL_APICALL void GL_APIENTRY glDepthRangef(GLfloat nearVal, GLfloat farVal) {
         return;
     CHECK_BACKEND();
 
-    if (sgl_state_viewport_set_depth_range(&ctx->viewport_state, nearVal, farVal)) {
-        /* Apply via backend */
-        if (ctx->backend->ops->apply_viewport) {
-            sgl_viewport_state_t vs = {ctx->viewport_state.viewport_x,
-                                       ctx->viewport_state.viewport_y,
-                                       ctx->viewport_state.viewport_width,
-                                       ctx->viewport_state.viewport_height,
-                                       nearVal,
-                                       farVal};
-            ctx->backend->ops->apply_viewport(ctx->backend, &vs);
-        }
-    }
+    /* State only: part of the viewport group, recorded at the next draw. */
+    sgl_state_viewport_set_depth_range(&ctx->viewport_state, nearVal, farVal);
 
     SGL_TRACE_STATE("glDepthRangef(%.2f, %.2f)", nearVal, farVal);
 }

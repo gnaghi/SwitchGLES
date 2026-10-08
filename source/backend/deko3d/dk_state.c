@@ -395,7 +395,11 @@ void dk_apply_raster(sgl_backend_t *be, const sgl_raster_state_t *state) {
 
     dkCmdBufBindRasterizerState(dk->cmdbuf, rasterState);
 
-    /* Set depth bias values via separate command */
+    /* Set depth bias values via separate command (the only place they are
+     * recorded: glPolygonOffset just stores them).
+     * dkCmdBufSetDepthBias(constantFactor, clamp, slopeFactor)
+     * GL: factor = slope scale, units = constant offset
+     * So: constantFactor = units, slopeFactor = factor */
     if (state->polygon_offset_fill_enabled) {
         dkCmdBufSetDepthBias(dk->cmdbuf, state->polygon_offset_units, 0.0f,
                              state->polygon_offset_factor);
@@ -464,23 +468,4 @@ void dk_apply_color_mask(sgl_backend_t *be, const sgl_color_state_t *state) {
 
     SGL_TRACE_STATE("apply_color_mask [%d%d%d%d]", state->mask[0], state->mask[1], state->mask[2],
                     state->mask[3]);
-}
-
-/* ============================================================================
- * Depth Bias (Polygon Offset)
- * ============================================================================ */
-
-void dk_set_depth_bias(sgl_backend_t *be, GLfloat factor, GLfloat units) {
-    dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
-
-    /* dkCmdBufSetDepthBias(constantFactor, clamp, slopeFactor)
-     * GL: factor = slope scale, units = constant offset
-     * So: constantFactor = units, slopeFactor = factor */
-    dkCmdBufSetDepthBias(dk->cmdbuf, units, 0.0f, factor);
-
-    /* The bias registers no longer hold what the raster entry recorded:
-     * the next dk_apply_raster records the group again. */
-    dk_state_cache_invalidate_mask(dk, DK_SC_RASTER);
-
-    SGL_TRACE_STATE("set_depth_bias factor=%f units=%f", factor, units);
 }
