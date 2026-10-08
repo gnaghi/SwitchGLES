@@ -106,12 +106,14 @@ struct sgl_backend_ops {
     bool (*link_program)(sgl_backend_t *be, sgl_handle_t program, sgl_handle_t vertex_shader,
                          sgl_handle_t fragment_shader);
     void (*use_program)(sgl_backend_t *be, sgl_handle_t handle);
-    /* Binds shaders AND uniform buffers with pushConstants - call before draw */
+    /* Binds shaders AND uniform buffers with pushConstants - call before draw.
+     * Packed UBOs are pushed only when dirty (or after a uniform-space reset);
+     * the backend clears `dirty` and records gpu_offset/gpu_generation. */
     void (*bind_program)(sgl_backend_t *be, sgl_handle_t program, sgl_handle_t vertex_shader,
                          sgl_handle_t fragment_shader, const sgl_uniform_binding_t *vertex_uniforms,
                          const sgl_uniform_binding_t *fragment_uniforms, int max_uniforms,
-                         const sgl_packed_ubo_t *packed_vertex,
-                         const sgl_packed_ubo_t *packed_fragment, int max_packed_ubos);
+                         sgl_packed_ubo_t *packed_vertex, sgl_packed_ubo_t *packed_fragment,
+                         int max_packed_ubos);
 
     /* ======== Uniform Operations ======== */
     /* Write uniform data to CPU buffer (backend handles offset allocation) */

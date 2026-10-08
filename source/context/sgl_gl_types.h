@@ -69,8 +69,16 @@
 typedef struct sgl_packed_ubo {
     uint8_t data[SGL_MAX_PACKED_UBO_SIZE]; /* CPU shadow buffer */
     uint32_t size;                         /* Total used size (set at registration time) */
-    bool dirty;                            /* Any uniform written since last bind? */
-    bool valid;                            /* Has been configured? */
+    bool dirty; /* data[] changed since the backend last pushed it (set by every
+                   writer: glUniform*, mirrors, gl_DepthRange, configure/link) */
+    bool valid; /* Has been configured? */
+    /* Backend bookkeeping: where the last push of this block landed in the
+     * uniform region and the uniform-space generation it belongs to. The
+     * backend owns both; the GL layer only zeroes them when it (re)configures
+     * the block. A clean block whose generation still matches the backend's is
+     * bound again at gpu_offset without a new push. */
+    uint32_t gpu_offset;
+    uint32_t gpu_generation;
 } sgl_packed_ubo_t;
 
 /* Buffer object */

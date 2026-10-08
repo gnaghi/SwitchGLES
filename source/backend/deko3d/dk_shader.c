@@ -179,6 +179,11 @@ bool dk_link_program(sgl_backend_t *be, sgl_handle_t program, sgl_handle_t verte
     /* Track whether this program was already linked (for re-link counting) */
     bool was_linked = dk->program_shader_valid[program][0] && dk->program_shader_valid[program][1];
 
+    /* (Re)link: the GL layer also marks the program's packed UBOs dirty, but a
+     * new generation makes the "bind at the old address" shortcut impossible
+     * for this handle (and every other) regardless of what the GL layer did. */
+    dk_bump_uniform_generation(dk);
+
     /* Initialize program shader slots as invalid */
     dk->program_shader_valid[program][0] = false;
     dk->program_shader_valid[program][1] = false;
@@ -229,7 +234,7 @@ bool dk_link_program(sgl_backend_t *be, sgl_handle_t program, sgl_handle_t verte
 void dk_bind_program(sgl_backend_t *be, sgl_handle_t program, sgl_handle_t vertex_shader,
                      sgl_handle_t fragment_shader, const sgl_uniform_binding_t *vertex_uniforms,
                      const sgl_uniform_binding_t *fragment_uniforms, int max_uniforms,
-                     const sgl_packed_ubo_t *packed_vertex, const sgl_packed_ubo_t *packed_fragment,
+                     sgl_packed_ubo_t *packed_vertex, sgl_packed_ubo_t *packed_fragment,
                      int max_packed_ubos) {
     (void)vertex_shader; /* Not used - we use per-program shader copies */
     (void)fragment_shader;
@@ -301,26 +306,58 @@ void dk_bind_program(sgl_backend_t *be, sgl_handle_t program, sgl_handle_t verte
 
     /* ---- Bind packed UBOs ----
      * dkCmdBufPushConstants copies the data into the command buffer, so it is
-     * pushed straight from the program's CPU shadow copy. Each draw gets its own
-     * UBO space (see dk_apply_viewport). */
-    for (int st = 0; st < 2; st++) {
-        const sgl_packed_ubo_t *packed_set = st ? packed_fragment : packed_vertex;
-        DkStage dk_stage = st ? DkStage_Fragment : DkStage_Vertex;
-        if (!packed_set)
-            continue;
-        for (int i = 0; i < max_packed_ubos; i++) {
-            const sgl_packed_ubo_t *packed = &packed_set[i];
-            if (!packed->valid || packed->size == 0)
+     * pushed straight from the program's CPU shadow copy.
+     *
+     * A push is recorded only when the shadow copy changed (packed->dirty) or
+     * when the address of the previous push is no longer trustworthy
+     * (gpu_generation != dk->uniform_generation: uniform allocator restarted,
+     * cmdbuf cleared, program relinked or handle reused). A fresh push always
+     * goes to a NEW address from the frame slot's bump allocator: the GPU writes
+     * the UBO when it reaches the push command while the fragments of earlier
+     * draws may still be reading the old address (GFXBench Egypt, see
+     * dk_apply_viewport). Rebinding an unchanged block at its old address
+     * involves no write at all, so it is safe for every draw of the frame,
+     * whatever programs were bound in between. */
+    uint32_t pass_generation;
+    do {
+        /* The cmdbuf overflow callback may fire inside any command below: it
+         * submits, waits idle and restarts the uniform allocator, so an address
+         * pushed earlier in this pass could be handed out again to a later
+         * block of this very draw. When that happens, run the pass again: the
+         * blocks pushed before the restart carry the old generation and are
+         * pushed afresh, the others are only rebound. */
+        pass_generation = dk->uniform_generation;
+
+        for (int st = 0; st < 2; st++) {
+            sgl_packed_ubo_t *packed_set = st ? packed_fragment : packed_vertex;
+            DkStage dk_stage = st ? DkStage_Fragment : DkStage_Vertex;
+            if (!packed_set)
                 continue;
+            for (int i = 0; i < max_packed_ubos; i++) {
+                sgl_packed_ubo_t *packed = &packed_set[i];
+                if (!packed->valid || packed->size == 0)
+                    continue;
 
-            uint32_t aligned = SGL_ALIGN_UP(packed->size, SGL_UNIFORM_ALIGNMENT);
-            uint32_t offset = dk_alloc_uniform(be, aligned);
+                uint32_t aligned = SGL_ALIGN_UP(packed->size, SGL_UNIFORM_ALIGNMENT);
 
-            DkGpuAddr gpu_addr = uniform_gpu_base + offset;
-            dkCmdBufBindUniformBuffer(dk->cmdbuf, dk_stage, i, gpu_addr, aligned);
-            dkCmdBufPushConstants(dk->cmdbuf, gpu_addr, aligned, 0, packed->size, packed->data);
+                if (packed->dirty || packed->gpu_generation != dk->uniform_generation) {
+                    /* Generation sampled BEFORE the allocation: if the push
+                     * itself triggers the overflow callback, the copy sits at
+                     * an address of the restarted range and must be redone. */
+                    uint32_t gen = dk->uniform_generation;
+                    uint32_t offset = dk_alloc_uniform(be, aligned);
+                    dkCmdBufPushConstants(dk->cmdbuf, uniform_gpu_base + offset, aligned, 0,
+                                          packed->size, packed->data);
+                    packed->gpu_offset = offset;
+                    packed->gpu_generation = gen;
+                    packed->dirty = false;
+                }
+
+                dkCmdBufBindUniformBuffer(dk->cmdbuf, dk_stage, i,
+                                          uniform_gpu_base + packed->gpu_offset, aligned);
+            }
         }
-    }
+    } while (dk->uniform_generation != pass_generation);
 
     SGL_TRACE_SHADER("bind_program with uniforms");
 }
@@ -379,6 +416,11 @@ void dk_delete_program(sgl_backend_t *be, sgl_handle_t handle) {
 
     dk->program_shader_valid[handle][0] = false;
     dk->program_shader_valid[handle][1] = false;
+
+    /* The handle may be reused by a new program whose packed UBOs start at
+     * gpu_generation 0; bumping here also covers a GL layer that recycled the
+     * struct without zeroing it. */
+    dk_bump_uniform_generation(dk);
 
     /* Check if code memory can be reset */
     if (dk->active_shader_count == 0 && dk->active_program_count == 0 && dk->code_offset > 0) {

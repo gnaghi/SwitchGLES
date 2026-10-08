@@ -127,32 +127,25 @@ static void sgl_prepare_draw(sgl_context_t *ctx) {
                 far_val = 1.0f;
             float diff_val = far_val - near_val;
             float dr_vals[3] = {near_val, far_val, diff_val};
-            /* Write to primary locations (VS or transpiler) */
-            for (int d = 0; d < 3; d++) {
-                GLint loc = prog->depth_range_loc[d];
-                if (!loc)
-                    continue;
-                int stage = (loc >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
-                int offset = loc & SGL_LOC_OFFSET_MASK;
-                sgl_packed_ubo_t *packed =
-                    (stage == 0) ? &prog->packed_vertex[0] : &prog->packed_fragment[0];
-                if (packed->valid && offset + 4 <= packed->size) {
-                    memcpy(packed->data + offset, &dr_vals[d], sizeof(float));
-                    packed->dirty = true;
-                }
-            }
-            /* Write to FS mirror locations (when both VS+FS use gl_DepthRange) */
-            for (int d = 0; d < 3; d++) {
-                GLint loc = prog->depth_range_loc_fs[d];
-                if (!loc)
-                    continue;
-                int stage = (loc >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
-                int offset = loc & SGL_LOC_OFFSET_MASK;
-                sgl_packed_ubo_t *packed =
-                    (stage == 0) ? &prog->packed_vertex[0] : &prog->packed_fragment[0];
-                if (packed->valid && offset + 4 <= packed->size) {
-                    memcpy(packed->data + offset, &dr_vals[d], sizeof(float));
-                    packed->dirty = true;
+            /* Write to primary locations (VS or transpiler), then to the FS
+             * mirror locations (when both VS+FS use gl_DepthRange). The block
+             * is only marked dirty when a value actually changes, so an
+             * unchanged depth range does not force a push at every draw. */
+            for (int m = 0; m < 2; m++) {
+                const GLint *locs = m ? prog->depth_range_loc_fs : prog->depth_range_loc;
+                for (int d = 0; d < 3; d++) {
+                    GLint loc = locs[d];
+                    if (!loc)
+                        continue;
+                    int stage = (loc >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
+                    int offset = loc & SGL_LOC_OFFSET_MASK;
+                    sgl_packed_ubo_t *packed =
+                        (stage == 0) ? &prog->packed_vertex[0] : &prog->packed_fragment[0];
+                    if (packed->valid && (uint32_t)offset + 4 <= packed->size &&
+                        memcmp(packed->data + offset, &dr_vals[d], sizeof(float)) != 0) {
+                        memcpy(packed->data + offset, &dr_vals[d], sizeof(float));
+                        packed->dirty = true;
+                    }
                 }
             }
         }

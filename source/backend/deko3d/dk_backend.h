@@ -65,6 +65,11 @@ typedef struct dk_backend_data {
     uint32_t uniform_base;
     uint32_t uniform_offset;   /* Bump allocator, never reused within a frame */
     uint32_t uniform_slot_end; /* End of the current frame slot's sub-region */
+    /* Uniform-space generation: bumped (never 0) every time the bump allocator
+     * restarts or the cmdbuf is cleared, i.e. whenever an address handed out
+     * earlier may be reused or a recorded push may not reach the GPU. A packed
+     * UBO is rebound without a push only if its gpu_generation matches. */
+    uint32_t uniform_generation;
 
     /* Client array region (per-frame, per-slot to avoid GPU race conditions) */
     uint32_t client_array_base;

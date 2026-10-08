@@ -34,6 +34,8 @@ void dk_cmdbuf_overflow_cb(void *userData, DkCmdBuf cmdbuf, size_t minReqSize) {
         SGL_TRACE_BACKEND("cbAddMem: re-entrant overflow — emergency clear");
         dkCmdBufClear(cmdbuf);
         dkCmdBufAddMemory(cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
+        /* Recorded pushes were just dropped: no address may be rebound as-is. */
+        dk_bump_uniform_generation(dk);
         return;
     }
     dk->in_overflow_callback = true;
@@ -166,6 +168,14 @@ void dk_reset_uniform_slot(dk_backend_data_t *dk, int slot) {
     uint32_t per_slot = dk_uniform_slot_size();
     dk->uniform_offset = (uint32_t)slot * per_slot;
     dk->uniform_slot_end = dk->uniform_offset + per_slot;
+    /* Every address handed out before this point may be reused: no packed UBO
+     * may be rebound at its old address without a fresh push. */
+    dk_bump_uniform_generation(dk);
+}
+
+void dk_bump_uniform_generation(dk_backend_data_t *dk) {
+    if (++dk->uniform_generation == 0)
+        dk->uniform_generation = 1; /* 0 is "never pushed" on the GL side */
 }
 
 void dk_flush_sync(dk_backend_data_t *dk) {
@@ -268,6 +278,11 @@ void dk_ensure_recordable(dk_backend_data_t *dk) {
 
     dk_rebind_render_target(dk);
 
+    /* The submitted pushes did reach memory (WaitIdle above) and the allocator
+     * was not restarted, so the old addresses are still valid; forcing a fresh
+     * push after this cmdbuf clear is the conservative choice. */
+    dk_bump_uniform_generation(dk);
+
     dk->cmdbuf_submitted = false;
 }
 
@@ -281,6 +296,11 @@ void dk_begin_frame(sgl_backend_t *be, int slot) {
     dk->current_slot = slot;
     dk->cmdbuf = dk->cmdbufs[slot];
     dk->current_cmdbuf = slot;
+
+    /* New cmdbuf: every packed UBO is pushed again on its first bind of the
+     * frame (dk_wait_fence already bumped when it restarted the slot; this
+     * keeps the "uniforms are set every frame" invariant explicit). */
+    dk_bump_uniform_generation(dk);
 
     /* Reset diagnostic counters for new frame */
     dk->diag_orphan_flushes = 0;

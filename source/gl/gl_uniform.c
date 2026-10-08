@@ -276,8 +276,11 @@ static void configure_packed_ubo(sgl_program_t *prog, GLint location) {
         if (ubo_size > 0 && ubo_size <= SGL_MAX_PACKED_UBO_SIZE) {
             packed->size = ubo_size;
             packed->valid = true;
-            packed->dirty = false;
             memset(packed->data, 0, ubo_size);
+            /* Fresh contents: the backend must push them at the next bind */
+            packed->dirty = true;
+            packed->gpu_offset = 0;
+            packed->gpu_generation = 0;
         }
     }
 }

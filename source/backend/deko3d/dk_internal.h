@@ -190,6 +190,13 @@ void dk_flush_sync(dk_backend_data_t *dk);
  */
 void dk_reset_uniform_slot(dk_backend_data_t *dk, int slot);
 
+/**
+ * Invalidate every "already pushed" packed UBO address (see
+ * dk_backend_data_t::uniform_generation). Called by dk_reset_uniform_slot and
+ * by every path that clears the cmdbuf outside it.
+ */
+void dk_bump_uniform_generation(dk_backend_data_t *dk);
+
 /* Size of one frame slot's uniform / client-array sub-region. */
 static inline uint32_t dk_uniform_slot_size(void) {
     return (SGL_UNIFORM_BUF_SIZE / SGL_FB_NUM) & ~(SGL_UNIFORM_ALIGNMENT - 1);
@@ -540,7 +547,7 @@ bool dk_link_program(sgl_backend_t *be, sgl_handle_t program, sgl_handle_t verte
 void dk_bind_program(sgl_backend_t *be, sgl_handle_t program, sgl_handle_t vertex_shader,
                      sgl_handle_t fragment_shader, const sgl_uniform_binding_t *vertex_uniforms,
                      const sgl_uniform_binding_t *fragment_uniforms, int max_uniforms,
-                     const sgl_packed_ubo_t *packed_vertex, const sgl_packed_ubo_t *packed_fragment,
+                     sgl_packed_ubo_t *packed_vertex, sgl_packed_ubo_t *packed_fragment,
                      int max_packed_ubos);
 
 /* ============================================================================

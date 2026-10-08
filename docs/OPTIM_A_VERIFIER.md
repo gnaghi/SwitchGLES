@@ -222,6 +222,67 @@ state_query (texture, fbo, rbo). Copiée dans `lists/current.txt` (ancienne vers
    Attendu : 0 régression, 0 test sans résultat ; `flush_finish.flush` CompatibilityWarning → Pass.
 3. GFXBench (rendu + FPS) : `gfxbench_switchgles_onscreen.nro -- --freeze 10000 gl_egypt`, puis `-- gl_egypt`.
 
+## Piste B6 — UBO packés poussés seulement quand ils changent
+
+Changement (`dk_shader.c`, `dk_command.c`, `dk_backend.h`, `sgl_gl_types.h`, `sgl_backend.h`, `gl_uniform.c`,
+`gl_program.c`, `gl_draw.c`) :
+- `dk_bind_program` ne fait plus `dk_alloc_uniform` + `dkCmdBufPushConstants` de chaque UBO packé (VS et FS,
+  bindings 0 et 1) à chaque draw. Un bloc n'est poussé que s'il est `dirty` (écrit par `glUniform*`, un miroir
+  VS/FS, `gl_DepthRange`, la configuration ou le link) **ou** si sa `gpu_generation` ne correspond plus à celle du
+  backend. Sinon il est **relié à son ancienne adresse** (`gpu_offset`), sans aucune écriture : la règle « jamais
+  réutiliser une adresse d'UBO dans une frame » (`gfxbench_egypt_far_room_bug.md`, `eaaee0f`) porte sur une
+  nouvelle *écriture* à une adresse déjà lue ; relier des données inchangées ne pose pas ce problème. Tout push va
+  toujours à une adresse neuve de l'allocateur de la frame.
+- `dkCmdBufBindUniformBuffer` reste émis à chaque draw (l'état de binding est perdu aux clears de cmdbuf ; pas de
+  suivi de l'état GPU, c'est la piste B7).
+- Compteur `uniform_generation` dans le backend (jamais 0), incrémenté à **chaque** point où une adresse
+  antérieure peut être réutilisée ou un push enregistré perdu : `dk_reset_uniform_slot` (init, `dk_wait_fence` =
+  début de frame, `dk_submit_and_reset` = seuils 4000 draws / allocateurs / `glFinish` / `glFlush` E1, callback
+  de dépassement du cmdbuf), chemin ré-entrant du callback (commandes perdues), `dk_ensure_recordable` (cmdbuf
+  vidé après swap), `dk_begin_frame` (redondant avec `dk_wait_fence`, gardé par principe), `dk_link_program`
+  (relink) et `dk_delete_program` (réutilisation de handle). Les chemins synchrones de texture/FBO
+  (`dk_flush_sync` puis `dkCmdBufClear`) ne remettent pas l'allocateur à zéro et soumettent avant de vider : les
+  adresses restent valides, pas de bump nécessaire.
+- Côté GL : `configure_packed_ubo` et la pré-configuration au link posent `dirty = true`, `gpu_generation = 0`
+  (un nouveau programme, `memset` à l'allocation, part aussi à 0) ; la fin de `glLinkProgram` remet `dirty` sur
+  tous les blocs valides (relink). Les données initiales Mesa (constantes littérales du constbuf 0) sont
+  copiées dans `packed->data` au link, donc poussées au premier bind comme avant.
+- `gl_DepthRange` : les 3 floats ne sont écrits (et le bloc marqué dirty) que si la valeur change ; avant, tout
+  programme utilisant `gl_DepthRange` était poussé à chaque draw.
+- Garde contre le callback de dépassement **pendant** le bind : la génération est lue avant l'allocation et la
+  passe sur les blocs est refaite si elle a changé (un bloc poussé avant le reset serait sinon relié à une
+  adresse que l'allocateur redémarré peut redonner au bloc suivant du même draw). Ce cas existait déjà avant.
+- Non fait, volontairement : les uniforms « legacy » (`sglRegisterUniform`, `vertex_uniforms[]`) sont toujours
+  repoussés à chaque draw (même adresse, mêmes données : sans danger, rarement utilisés) ; le `glUniform*` sur
+  un programme non courant n'existe pas en GLES 2.0, donc pas de cas « bloc modifié hors binding ».
+
+Performance :
+- [ ] Egypt / T-Rex à l'écran et hors écran en A/B (B4 contre B4 + B6) : moins de données inline dans le cmdbuf
+      (bones 1,5 Ko par draw skinné, 5 mat4), front-end GPU allégé ; l'offset uniform max par frame doit baisser
+- [ ] `driver` (2 500 draws, 9 uniforms par draw, tous changés) : aucun gain attendu, aucune régression
+- [ ] Vérifier qu'un programme alterné (A, B, A, B…) sans changement d'uniforms ne repousse plus rien : le cache
+      est par programme (`gpu_offset` dans le bloc), pas par slot de binding
+
+Rendu (c'est la vérification critique : adresse d'UBO reliée sans nouvelle écriture) :
+- [ ] `--freeze 10000 gl_egypt` identique à Nouveau : plafond, pièce du fond, chevalier (le bug `eaaee0f` se
+      manifestait exactement là, à un changement de programme)
+- [ ] `gl_trex` : pas de nouvelle dégradation
+- [ ] Spearmint : plusieurs cartes, HUD, cinématiques ; aucun objet avec les constantes d'un autre
+- [ ] glmark2 (liste du 4 octobre)
+
+Conformité dEQP-GLES2 (VK-GL-CTS, jamais `validation_test`) :
+- [ ] `functional.uniform_api.*` (value.initial, value.assigned.by_pointer et by_value, render.*, bool, array,
+      struct, sampler : readback `glGetUniform*` inchangé, les données passent toujours par `packed->data`)
+- [ ] `functional.shaders.*` (le gros du lot : chaque test dessine plusieurs fois avec des uniforms différents
+      → chemin dirty), en particulier `shaders.uniform_*`, `shaders.indexing.*`, `shaders.loops.*`
+      (uniforms d'index), `shaders.builtin_variable.*` (gl_DepthRange : dirty seulement sur changement)
+- [ ] `functional.depth_range.*`, `functional.clipping.*` (gl_DepthRange + viewport)
+- [ ] `functional.flush_finish.*`, `functional.lifetime.*` (relink, suppression/réutilisation de programme :
+      `dk_link_program`/`dk_delete_program` bumpent la génération), `functional.state_query.shader.*`
+- [ ] `functional.fbo.*`, `functional.texture.*` (chemins synchrones `dk_flush_sync` + clear entre deux draws
+      d'un même programme : l'adresse reliée doit rester valide)
+- [ ] Régression complète en A/B contre la base d'octobre
+
 ## Piste B5 — non retenue
 
 Les barrières `None + L2Cache | Descriptors | Zcull` après soumission (`dk_begin_frame`, `dk_submit_and_reset`,

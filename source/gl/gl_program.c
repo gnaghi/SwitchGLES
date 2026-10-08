@@ -412,8 +412,12 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog, sgl_shade
                 if (!packed->valid) {
                     packed->size = ubo_size;
                     packed->valid = true;
-                    packed->dirty = false;
                     memset(packed->data, 0, ubo_size);
+                    /* Fresh contents (initial data below included): pushed at
+                     * the first bind, never bound at a stale address. */
+                    packed->dirty = true;
+                    packed->gpu_offset = 0;
+                    packed->gpu_generation = 0;
                     /* Load initial constbuf data (Mesa-embedded literals/constants).
                      * Only for binding 0 (the driver constbuf). */
                     if (binding == 0) {
@@ -877,8 +881,11 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program, sgl_p
                 if (!packed->valid) {
                     packed->size = ubo_size;
                     packed->valid = true;
-                    packed->dirty = false;
                     memset(packed->data, 0, ubo_size);
+                    /* Fresh contents: pushed at the first bind */
+                    packed->dirty = true;
+                    packed->gpu_offset = 0;
+                    packed->gpu_generation = 0;
                 }
             }
         }
@@ -1340,6 +1347,17 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
     }
 
     prog->linked = link_ok;
+
+    /* (Re)link: whatever the backend pushed for this program before belongs to
+     * the previous shaders. Every configured packed UBO is pushed again at the
+     * next bind (the backend also bumps its uniform generation in link_program). */
+    for (int b = 0; b < SGL_MAX_PACKED_UBOS; b++) {
+        if (prog->packed_vertex[b].valid)
+            prog->packed_vertex[b].dirty = true;
+        if (prog->packed_fragment[b].valid)
+            prog->packed_fragment[b].dirty = true;
+    }
+
     SGL_TRACE_SHADER("glLinkProgram(%u) - %s", program, link_ok ? "OK" : "FAILED");
 }
 
