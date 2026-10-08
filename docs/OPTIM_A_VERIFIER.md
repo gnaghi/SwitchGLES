@@ -221,3 +221,11 @@ state_query (texture, fbo, rbo). Copiée dans `lists/current.txt` (ancienne vers
    `python3 compare_results.py nxlink_output_optim_oct07.txt nxlink_output_glmark2_regress.txt ../../../../switchGLES/Alltestresults.txt`
    Attendu : 0 régression, 0 test sans résultat ; `flush_finish.flush` CompatibilityWarning → Pass.
 3. GFXBench (rendu + FPS) : `gfxbench_switchgles_onscreen.nro -- --freeze 10000 gl_egypt`, puis `-- gl_egypt`.
+
+## Piste B5 — non retenue
+
+Les barrières `None + L2Cache | Descriptors | Zcull` après soumission (`dk_begin_frame`, `dk_submit_and_reset`,
+callback de dépassement) semblent redondantes avec `Queue::postSubmitFlush` de deko3d, mais le correctif du
+scintillement des textures de spearmint (27 février) a montré qu'il fallait **en pratique** `Descriptors` dans ces
+barrières, avec `dsb st` après les écritures de descripteurs. Gain d'une barrière par frame : pas de prise de risque
+sans console. Gardées telles quelles.
