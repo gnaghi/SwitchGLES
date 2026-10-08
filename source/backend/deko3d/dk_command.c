@@ -32,7 +32,7 @@ void dk_cmdbuf_overflow_cb(void *userData, DkCmdBuf cmdbuf, size_t minReqSize) {
      * will be lost, but it prevents an infinite loop / stack overflow). */
     if (dk->in_overflow_callback) {
         SGL_TRACE_BACKEND("cbAddMem: re-entrant overflow — emergency clear");
-        dkCmdBufClear(cmdbuf);
+        dk_cmdbuf_clear(dk, cmdbuf);
         dkCmdBufAddMemory(cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
         /* Recorded pushes were just dropped: no address may be rebound as-is. */
         dk_bump_uniform_generation(dk);
@@ -49,7 +49,7 @@ void dk_cmdbuf_overflow_cb(void *userData, DkCmdBuf cmdbuf, size_t minReqSize) {
     dkQueueWaitIdle(dk->queue);
 
     /* Recycle the same memory block */
-    dkCmdBufClear(cmdbuf);
+    dk_cmdbuf_clear(dk, cmdbuf);
     dkCmdBufAddMemory(cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
 
     /* Reset client array and uniform allocators */
@@ -219,7 +219,7 @@ void dk_submit_and_reset(dk_backend_data_t *dk) {
     dk_drain_deferred_free(dk, -1);
 
     /* Reset command buffer for continued use */
-    dkCmdBufClear(dk->cmdbuf);
+    dk_cmdbuf_clear(dk, dk->cmdbuf);
     dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
 
     /* Reset client array and uniform allocators — safe because WaitIdle
@@ -269,7 +269,7 @@ void dk_ensure_recordable(dk_backend_data_t *dk) {
         dkQueueWaitIdle(dk->queue);
     }
 
-    dkCmdBufClear(dk->cmdbuf);
+    dk_cmdbuf_clear(dk, dk->cmdbuf);
     dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
 
     dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);
@@ -412,7 +412,7 @@ void dk_wait_fence(sgl_backend_t *be, int slot) {
     SGL_PERF_END(SGL_PERF_FRAME_START, perf);
 
     /* Reset command buffer for new frame */
-    dkCmdBufClear(dk->cmdbufs[slot]);
+    dk_cmdbuf_clear(dk, dk->cmdbufs[slot]);
     dkCmdBufAddMemory(dk->cmdbufs[slot], dk->cmdbuf_memblock[slot], 0, SGL_CMD_MEM_SIZE);
 
     /* Reset descriptors_bound flag since command buffer was cleared */

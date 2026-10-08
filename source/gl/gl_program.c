@@ -285,6 +285,8 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog, sgl_shade
                         prog->samplers[j].vs_shader_binding = meta->samplers[i].binding;
                     else
                         prog->samplers[j].shader_binding = meta->samplers[i].binding;
+                    prog->samplers[j].stage_mask |=
+                        (stage_idx == 0) ? SGL_SAMPLER_STAGE_VS : SGL_SAMPLER_STAGE_FS;
                     already = true;
                     break;
                 }
@@ -304,6 +306,8 @@ static void sgl_link_program_mesa(GLuint program, sgl_program_t *prog, sgl_shade
                 prog->samplers[slot].vs_shader_binding = meta->samplers[i].binding;
             else
                 prog->samplers[slot].vs_shader_binding = -1;
+            prog->samplers[slot].stage_mask =
+                (stage_idx == 0) ? SGL_SAMPLER_STAGE_VS : SGL_SAMPLER_STAGE_FS;
             prog->samplers[slot].tex_unit = 0;     /* GLES2 spec default */
             prog->samplers[slot].array_index = -1; /* set below if array */
             prog->samplers[slot].array_total = 0;
@@ -967,6 +971,7 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program, sgl_p
             prog->samplers[slot].shader_binding = fs_result.samplers[i].binding;
             prog->samplers[slot].vs_shader_binding =
                 -1;                            /* Will be set if VS also has this sampler */
+            prog->samplers[slot].stage_mask = SGL_SAMPLER_STAGE_FS;
             prog->samplers[slot].tex_unit = 0; /* GLES2 spec: initial sampler value = 0 */
             prog->samplers[slot].array_index = fs_result.samplers[i].array_index;
             prog->samplers[slot].array_total = fs_result.samplers[i].array_total;
@@ -988,6 +993,7 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program, sgl_p
                     strcmp(prog->samplers[j].name, vs_result.samplers[i].name) == 0) {
                     /* Store VS binding for per-stage texture binding at draw time */
                     prog->samplers[j].vs_shader_binding = vs_result.samplers[i].binding;
+                    prog->samplers[j].stage_mask |= SGL_SAMPLER_STAGE_VS;
                     already = true;
                     break;
                 }
@@ -1004,6 +1010,7 @@ static void sgl_link_program_transpile(sgl_context_t *ctx, GLuint program, sgl_p
             prog->samplers[slot].gles_name[SGL_ATTRIB_NAME_MAX - 1] = '\0';
             prog->samplers[slot].shader_binding = vs_result.samplers[i].binding;
             prog->samplers[slot].vs_shader_binding = vs_result.samplers[i].binding;
+            prog->samplers[slot].stage_mask = SGL_SAMPLER_STAGE_VS;
             prog->samplers[slot].tex_unit = 0; /* GLES2 spec: initial sampler value = 0 */
             prog->samplers[slot].array_index = vs_result.samplers[i].array_index;
             prog->samplers[slot].array_total = vs_result.samplers[i].array_total;

@@ -71,6 +71,7 @@ const sgl_backend_ops_t dk_backend_ops = {
     .texture_sub_image_2d = dk_texture_sub_image_2d,
     .texture_parameter = dk_texture_parameter,
     .bind_texture = dk_bind_texture,
+    .bind_textures = dk_bind_textures,
     .generate_mipmap = dk_generate_mipmap,
     .copy_tex_image_2d = dk_copy_tex_image_2d,
     .copy_tex_sub_image_2d = dk_copy_tex_sub_image_2d,

@@ -169,10 +169,17 @@ static void sgl_prepare_draw(sgl_context_t *ctx) {
         sgl_program_t *prog = (ctx->current_program > 0) ? GET_PROGRAM(ctx->current_program) : NULL;
 
         if (prog && prog->num_samplers > 0) {
-            /* Sampler-driven binding: for each sampler, bind its tex_unit's texture
-             * to the sampler's shader_binding slot per stage.
-             * When sampler exists in both VS and FS (vs_shader_binding >= 0),
-             * bind to each stage at its own binding slot independently. */
+            /* Sampler-driven binding: for each sampler, the texture of its
+             * tex_unit goes to the sampler's binding slot of each stage that
+             * declares the sampler (stage_mask from link-time reflection).
+             * The slots are collected per stage and bound in contiguous runs
+             * with one command each (bind_textures), instead of one command
+             * per texture and per stage. A stage without samplers is not
+             * touched: deko3d binds textures per stage, and a VS that samples
+             * nothing never reads its slots. */
+            sgl_handle_t stage_handles[2][SGL_MAX_TEXTURE_UNITS];
+            uint32_t stage_mask_bound[2] = {0, 0};
+
             for (int s = 0; s < prog->num_samplers; s++) {
                 if (!prog->samplers[s].used)
                     continue;
@@ -186,78 +193,80 @@ static void sgl_prepare_draw(sgl_context_t *ctx) {
                     tex_id = ctx->bound_cubemap_textures[tu];
                 else
                     tex_id = ctx->bound_textures[tu];
+
+                sgl_handle_t handle;
                 if (tex_id == 0) {
                     /* No texture bound: bind black fallback per GLES2 §3.7.10. */
-                    sgl_handle_t fallback = is_cubemap_sampler ? 1 : 0;
-                    int fs_binding = prog->samplers[s].shader_binding;
-                    int vs_binding = prog->samplers[s].vs_shader_binding;
-                    if (fs_binding < 0 || fs_binding >= 16)
-                        fs_binding = 0;
-                    if (vs_binding >= 16)
-                        vs_binding = -1;
-                    if (vs_binding >= 0) {
-                        ctx->backend->ops->bind_texture(ctx->backend, (GLuint)fs_binding, fallback,
-                                                        1);
-                        ctx->backend->ops->bind_texture(ctx->backend, (GLuint)vs_binding, fallback,
-                                                        0);
+                    handle = is_cubemap_sampler ? 1 : 0;
+                } else {
+                    sgl_texture_t *tex = GET_TEXTURE(tex_id);
+                    if (!tex || !tex->used)
+                        continue;
+                    if (!sgl_is_texture_complete(tex)) {
+                        /* GLES2 §3.7.10: incomplete textures sample as black fallback */
+                        handle = is_cubemap_sampler ? 1 : 0;
                     } else {
-                        ctx->backend->ops->bind_texture(ctx->backend, (GLuint)fs_binding, fallback,
-                                                        -1);
+                        /* Pass texture params to backend for sampler creation */
+                        GLenum target = tex->target ? tex->target : GL_TEXTURE_2D;
+                        if (ctx->backend->ops->texture_parameter) {
+                            ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target,
+                                                                 GL_TEXTURE_MIN_FILTER,
+                                                                 tex->min_filter);
+                            ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target,
+                                                                 GL_TEXTURE_MAG_FILTER,
+                                                                 tex->mag_filter);
+                            ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target,
+                                                                 GL_TEXTURE_WRAP_S, tex->wrap_s);
+                            ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target,
+                                                                 GL_TEXTURE_WRAP_T, tex->wrap_t);
+                        }
+                        handle = tex_id;
                     }
-                    continue;
                 }
-                sgl_texture_t *tex = GET_TEXTURE(tex_id);
-                if (!tex || !tex->used)
-                    continue;
-                /* GLES2 §3.7.10: incomplete textures sample as black fallback */
-                if (!sgl_is_texture_complete(tex)) {
-                    sgl_handle_t fallback = is_cubemap_sampler ? 1 : 0;
-                    int fs_binding = prog->samplers[s].shader_binding;
-                    int vs_binding = prog->samplers[s].vs_shader_binding;
-                    if (fs_binding < 0 || fs_binding >= 16)
-                        fs_binding = 0;
-                    if (vs_binding >= 16)
-                        vs_binding = -1;
-                    if (vs_binding >= 0) {
-                        ctx->backend->ops->bind_texture(ctx->backend, (GLuint)fs_binding, fallback,
-                                                        1);
-                        ctx->backend->ops->bind_texture(ctx->backend, (GLuint)vs_binding, fallback,
-                                                        0);
-                    } else {
-                        ctx->backend->ops->bind_texture(ctx->backend, (GLuint)fs_binding, fallback,
-                                                        -1);
-                    }
-                    continue;
-                }
-                /* Pass texture params to backend for sampler creation */
-                GLenum target = tex->target ? tex->target : GL_TEXTURE_2D;
-                if (ctx->backend->ops->texture_parameter) {
-                    ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target,
-                                                         GL_TEXTURE_MIN_FILTER, tex->min_filter);
-                    ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target,
-                                                         GL_TEXTURE_MAG_FILTER, tex->mag_filter);
-                    ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target,
-                                                         GL_TEXTURE_WRAP_S, tex->wrap_s);
-                    ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target,
-                                                         GL_TEXTURE_WRAP_T, tex->wrap_t);
-                }
+
                 int fs_binding = prog->samplers[s].shader_binding;
                 int vs_binding = prog->samplers[s].vs_shader_binding;
                 /* Guard: validate binding indices to prevent GPU crash from
                  * invalid descriptor access (max 16 per stage on Tegra X1) */
-                if (fs_binding < 0 || fs_binding >= 16)
+                if (fs_binding < 0 || fs_binding >= (int)SGL_MAX_TEXTURE_UNITS)
                     fs_binding = 0;
-                if (vs_binding >= 16)
+                if (vs_binding >= (int)SGL_MAX_TEXTURE_UNITS)
                     vs_binding = -1;
-                if (vs_binding >= 0) {
-                    /* Sampler in both stages: bind to each stage at its own binding */
-                    ctx->backend->ops->bind_texture(ctx->backend, (GLuint)fs_binding, tex_id,
-                                                    1); /* FS */
-                    ctx->backend->ops->bind_texture(ctx->backend, (GLuint)vs_binding, tex_id,
-                                                    0); /* VS */
-                } else {
-                    /* Sampler in one stage only: bind to both stages at shader_binding */
-                    ctx->backend->ops->bind_texture(ctx->backend, (GLuint)fs_binding, tex_id, -1);
+                /* vs_shader_binding is only set when the VS declares the
+                 * sampler; a VS-only sampler stores its binding in both
+                 * fields. Without reflection (stage_mask 0) bind both
+                 * stages, as before. */
+                unsigned stages = prog->samplers[s].stage_mask;
+                if (stages == 0)
+                    stages = SGL_SAMPLER_STAGE_VS | SGL_SAMPLER_STAGE_FS;
+                if (stages & SGL_SAMPLER_STAGE_FS) {
+                    stage_handles[1][fs_binding] = handle;
+                    stage_mask_bound[1] |= 1u << fs_binding;
+                }
+                if (stages & SGL_SAMPLER_STAGE_VS) {
+                    int b = (vs_binding >= 0) ? vs_binding : fs_binding;
+                    stage_handles[0][b] = handle;
+                    stage_mask_bound[0] |= 1u << b;
+                }
+            }
+
+            for (int st = 0; st < 2; st++) {
+                uint32_t mask = stage_mask_bound[st];
+                while (mask) {
+                    int first = __builtin_ctz(mask);
+                    int last = first;
+                    while (last + 1 < (int)SGL_MAX_TEXTURE_UNITS && (mask & (1u << (last + 1))))
+                        last++;
+                    if (ctx->backend->ops->bind_textures) {
+                        ctx->backend->ops->bind_textures(ctx->backend, st, (GLuint)first,
+                                                         &stage_handles[st][first],
+                                                         last - first + 1);
+                    } else {
+                        for (int b = first; b <= last; b++)
+                            ctx->backend->ops->bind_texture(ctx->backend, (GLuint)b,
+                                                            stage_handles[st][b], st);
+                    }
+                    mask &= ~(((1u << (last - first + 1)) - 1u) << first);
                 }
             }
         } else {

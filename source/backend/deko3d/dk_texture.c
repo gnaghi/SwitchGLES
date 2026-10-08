@@ -609,7 +609,7 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle, G
         dk_flush_sync(dk);
 
         /* Reset command buffer */
-        dkCmdBufClear(dk->cmdbuf);
+        dk_cmdbuf_clear(dk, dk->cmdbuf);
         dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
 
         /* Re-bind descriptor sets after cmdbuf clear (matches legacy pattern) */
@@ -795,7 +795,7 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, 
 
                         dk_flush_sync(dk);
 
-                        dkCmdBufClear(dk->cmdbuf);
+                        dk_cmdbuf_clear(dk, dk->cmdbuf);
                         dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0,
                                           SGL_CMD_MEM_SIZE);
                         dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr,
@@ -871,7 +871,7 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, 
 
                     dk_flush_sync(dk);
 
-                    dkCmdBufClear(dk->cmdbuf);
+                    dk_cmdbuf_clear(dk, dk->cmdbuf);
                     dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0,
                                       SGL_CMD_MEM_SIZE);
                     dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr,
@@ -1027,7 +1027,7 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, 
 
                 dk_flush_sync(dk);
 
-                dkCmdBufClear(dk->cmdbuf);
+                dk_cmdbuf_clear(dk, dk->cmdbuf);
                 dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0,
                                   SGL_CMD_MEM_SIZE);
 
@@ -1197,7 +1197,7 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, 
             dk_flush_sync(dk);
 
             /* Reset command buffer for continued use */
-            dkCmdBufClear(dk->cmdbuf);
+            dk_cmdbuf_clear(dk, dk->cmdbuf);
             dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0,
                               SGL_CMD_MEM_SIZE);
 
@@ -1303,7 +1303,7 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum targ
     dk_flush_sync(dk);
 
     /* Reset command buffer for continued use */
-    dkCmdBufClear(dk->cmdbuf);
+    dk_cmdbuf_clear(dk, dk->cmdbuf);
     dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
 
     /* Re-bind descriptor sets after cmdbuf clear (matches legacy pattern) */
@@ -1429,7 +1429,7 @@ void dk_create_black_texture(dk_backend_data_t *dk) {
 
     dk_flush_sync(dk);
 
-    dkCmdBufClear(dk->cmdbuf);
+    dk_cmdbuf_clear(dk, dk->cmdbuf);
     dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
 
     /* Create image and sampler descriptors */
@@ -1497,7 +1497,7 @@ void dk_create_black_texture(dk_backend_data_t *dk) {
 
         dk_flush_sync(dk);
 
-        dkCmdBufClear(dk->cmdbuf);
+        dk_cmdbuf_clear(dk, dk->cmdbuf);
         dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0, SGL_CMD_MEM_SIZE);
 
         DkImageView civ_full;
@@ -1577,11 +1577,14 @@ static bool dk_texture_is_complete(dk_backend_data_t *dk, sgl_handle_t handle) {
 #define SGL_BLACK_TEXTURE_HANDLE 0 /* Slot 0: reserved 1x1 black 2D (0,0,0,255) fallback */
 #define SGL_BLACK_CUBEMAP_HANDLE 1 /* Slot 1: reserved 1x1 black cubemap fallback */
 
-void dk_bind_texture(sgl_backend_t *be, GLuint unit, sgl_handle_t handle, int stage) {
-    dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
-
+/* Per-texture work shared by dk_bind_texture and dk_bind_textures: completeness
+ * fallback, pending barriers, descriptor-set fallback. Returns false when the
+ * handle cannot be bound at all (the caller then leaves the slot untouched, as
+ * dk_bind_texture always did); otherwise *out is the DkResHandle to bind. */
+static bool dk_resolve_texture_binding(dk_backend_data_t *dk, sgl_handle_t handle,
+                                       DkResHandle *out) {
     if (handle >= SGL_MAX_TEXTURES) {
-        return;
+        return false;
     }
 
     /* Per GLES2 §3.7.10: incomplete textures sample as (0,0,0,1).
@@ -1594,7 +1597,7 @@ void dk_bind_texture(sgl_backend_t *be, GLuint unit, sgl_handle_t handle, int st
         else
             handle = SGL_BLACK_TEXTURE_HANDLE;
         if (!dk->texture_initialized[handle])
-            return;
+            return false;
     }
 
     /* Insert barrier if this texture was used as a render target (FBO),
@@ -1630,7 +1633,17 @@ void dk_bind_texture(sgl_backend_t *be, GLuint unit, sgl_handle_t handle, int st
      * DMA-vs-TIC/TSC cache coherency issues that caused texture flickering.
      * Each texture has its own descriptor slot (per-handle), so switching textures
      * on the same unit just changes which slot the GPU reads — no overwrites. */
-    DkResHandle texHandle = dkMakeTextureHandle(handle, handle);
+    *out = dkMakeTextureHandle(handle, handle);
+    return true;
+}
+
+void dk_bind_texture(sgl_backend_t *be, GLuint unit, sgl_handle_t handle, int stage) {
+    dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
+    DkResHandle texHandle;
+
+    if (!dk_resolve_texture_binding(dk, handle, &texHandle))
+        return;
+
     /* Bind to specified stage(s) — stage: -1=both, 0=vertex, 1=fragment */
     if (stage <= 0) /* vertex or both */
         dkCmdBufBindTexture(dk->cmdbuf, DkStage_Vertex, unit, texHandle);
@@ -1638,6 +1651,35 @@ void dk_bind_texture(sgl_backend_t *be, GLuint unit, sgl_handle_t handle, int st
         dkCmdBufBindTexture(dk->cmdbuf, DkStage_Fragment, unit, texHandle);
 
     SGL_TRACE_TEXTURE("bind_texture unit=%u handle=%u", unit, handle);
+}
+
+void dk_bind_textures(sgl_backend_t *be, int stage, GLuint first, const sgl_handle_t *handles,
+                      int count) {
+    dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
+    DkStage dk_stage = stage ? DkStage_Fragment : DkStage_Vertex;
+    DkResHandle resolved[SGL_MAX_TEXTURE_UNITS];
+    int run_start = 0;
+
+    if (count > (int)SGL_MAX_TEXTURE_UNITS)
+        count = (int)SGL_MAX_TEXTURE_UNITS;
+
+    /* Each dkCmdBufBindTextures loads one contiguous run of handles into the
+     * stage's driver constbuf (3 words + 1 per handle, one MME macro) instead
+     * of one load per texture. The barriers a texture may need are recorded
+     * by dk_resolve_texture_binding before the run that contains it, as with
+     * the per-texture binds. A handle that cannot be bound ends the current
+     * run and its slot is left untouched. */
+    for (int i = 0; i <= count; i++) {
+        bool ok = (i < count) && dk_resolve_texture_binding(dk, handles[i], &resolved[i]);
+        if (!ok) {
+            if (i > run_start)
+                dkCmdBufBindTextures(dk->cmdbuf, dk_stage, first + (GLuint)run_start,
+                                     &resolved[run_start], (uint32_t)(i - run_start));
+            run_start = i + 1;
+        }
+    }
+
+    SGL_TRACE_TEXTURE("bind_textures stage=%d first=%u count=%d", stage, first, count);
 }
 
 /* ============================================================================

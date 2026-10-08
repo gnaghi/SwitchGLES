@@ -94,6 +94,11 @@ typedef struct dk_backend_data {
     DkGpuAddr sampler_descriptor_addr;
     bool descriptors_bound;
     bool program_bound;    /* true after valid program bound (both VS+FS), skip draw if false */
+    /* Program whose dkCmdBufBindShaders is recorded in the current cmdbuf and
+     * still valid (0 = none): dk_bind_program skips the bind for it. Cleared by
+     * dk_cmdbuf_clear (recorded commands dropped), dk_link_program (new shader
+     * copies) and dk_delete_program (handle may be reused). */
+    sgl_handle_t bound_program;
     bool cmdbuf_submitted; /* true after dk_end_frame finishes the cmdbuf */
 
     /* Swapchain (from surface) */

@@ -328,6 +328,54 @@ mémorisé :
 - [ ] `functional.state_query.shader.*` (`glGetUniform*`), `functional.lifetime.*` (relink → rebuild)
 - [ ] Régression complète en A/B
 
+## Piste B7 — textures liées par étage et par lot, shaders reliés seulement au changement de programme
+
+Changement :
+- `sgl_program_sampler_t.stage_mask` (`sgl_gl_types.h`, rempli dans `gl_program.c` par les deux chemins de
+  réflexion, Mesa/`.refl` et transpileur) : étages qui déclarent chaque sampler. Avant, un sampler présent dans un
+  seul étage était lié **aux deux** (`stage == -1`), soit deux chargements du constbuf pilote par texture et par
+  draw ; un sampler VS seul et un sampler VS+FS étaient indistinguables (`shader_binding == vs_shader_binding`).
+- `sgl_prepare_draw` (`gl_draw.c`) collecte les handles par étage et par slot, puis appelle la nouvelle op
+  `bind_textures(stage, first, handles[], count)` une fois par plage contiguë de slots (`dkCmdBufBindTextures` :
+  3 mots + 1 par handle, un seul macro MME, au lieu de 4 mots et un macro par texture et par étage). Le repli
+  noir (texture absente ou incomplète), les paramètres de sampler, les barrières `texture_used_as_rt` /
+  `cubemap_needs_barrier` / `sampler_dirty` (B2) restent traités texture par texture, **avant** la plage qui la
+  contient (`dk_resolve_texture_binding`, `dk_texture.c`). Sans réflexion (`stage_mask == 0`, shaders
+  précompilés sans `.refl`) : liaison aux deux étages comme avant ; le chemin « par unité » est inchangé.
+- `dk_bind_program` (`dk_shader.c`) n'enregistre `dkCmdBufBindShaders` que si `dk->bound_program != program`.
+  Le macro `BindProgram` de deko3d a déjà un chemin rapide quand l'ID de programme est inchangé, mais les
+  ≈ 25 mots et l'exécution du macro étaient payés à chaque draw. Points d'invalidation (`bound_program = 0`) :
+  **tous** les `dkCmdBufClear` passent désormais par `dk_cmdbuf_clear()` (`dk_internal.h` ; 25 sites :
+  `dk_wait_fence`, `dk_submit_and_reset`, callback de dépassement y compris son chemin réentrant,
+  `dk_ensure_recordable`, chemins synchrones de `dk_texture*.c`, `dk_texture_copy.c`, `dk_framebuffer.c`),
+  `dk_link_program` (nouvelles copies de shaders) et `dk_delete_program` (handle réutilisable). Rien d'autre
+  dans le backend ne touche les programmes liés : les UBO utilisent les constbufs d'index 2+, les textures
+  chargent le constbuf pilote, les clears et les blits (moteur 2D) ne lient aucun programme, et deko3d ne
+  réinitialise le moteur 3D qu'à la création de la queue (`setup3DEngine`).
+- Non fait : pas de cache sur les liaisons de textures elles-mêmes (chaque draw les réenregistre, comme avant).
+
+Performance :
+- [ ] Egypt / T-Rex : taille de cmdbuf par draw en baisse (≈ 25 mots de BindShaders + 4 mots par texture) ;
+      FPS en A/B
+- [ ] `[PERF]` `textures` et `program` (temps CPU par draw) en baisse
+
+Conformité dEQP-GLES2 (VK-GL-CTS, jamais `validation_test`) :
+- [ ] `functional.shaders.texture_functions.vertex.*` et `*.vertex_fragment*` (samplers VS seuls et VS+FS :
+      liaison VS conservée, bindings par étage), `functional.texture.vertex.*`
+- [ ] `functional.texture.*` (unités multiples, cubemap + 2D sur la même unité, tableaux de samplers, mélange
+      de types, textures incomplètes → repli noir, `glTexParameter` entre deux draws : `sampler_dirty`)
+- [ ] `functional.uniform_api.*sampler*` (remap `glUniform1i` → `tex_unit`)
+- [ ] `functional.fbo.*` (rendu vers texture puis échantillonnage : barrière avant la plage), `functional.lifetime.*`
+      (relink / suppression de programme : `bound_program` remis à 0), `functional.flush_finish.*` (callback de
+      dépassement, `dk_submit_and_reset`)
+- [ ] `functional.shaders.*` (changements de programme fréquents : rebind à chaque changement)
+- [ ] Régression complète en A/B
+
+Autres :
+- [ ] Spearmint : scintillement des textures (descripteurs : `dsb st` + `Descriptors` inchangés ; seule la
+      commande de liaison change)
+- [ ] GFXBench à l'écran : rendu identique à Nouveau (`--freeze 10000 gl_egypt`, `gl_trex`)
+
 ## Piste B5 — non retenue
 
 Les barrières `None + L2Cache | Descriptors | Zcull` après soumission (`dk_begin_frame`, `dk_submit_and_reset`,

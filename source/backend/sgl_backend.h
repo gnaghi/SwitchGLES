@@ -74,6 +74,11 @@ struct sgl_backend_ops {
                               GLint param);
     void (*bind_texture)(sgl_backend_t *be, GLuint unit, sgl_handle_t handle,
                          int stage); /* stage: -1=both, 0=vertex, 1=fragment */
+    /* Bind `count` textures to the consecutive binding slots first..first+count-1
+     * of ONE stage (0=vertex, 1=fragment) in a single command. Same per-texture
+     * handling as bind_texture (completeness fallback, barriers). */
+    void (*bind_textures)(sgl_backend_t *be, int stage, GLuint first, const sgl_handle_t *handles,
+                          int count);
     void (*generate_mipmap)(sgl_backend_t *be, sgl_handle_t handle);
     void (*copy_tex_image_2d)(sgl_backend_t *be, sgl_handle_t handle, GLenum target, GLint level,
                               GLenum internalformat, GLint x, GLint y, GLsizei width,

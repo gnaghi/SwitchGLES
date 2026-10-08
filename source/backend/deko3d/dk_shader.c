@@ -187,6 +187,9 @@ bool dk_link_program(sgl_backend_t *be, sgl_handle_t program, sgl_handle_t verte
     /* Initialize program shader slots as invalid */
     dk->program_shader_valid[program][0] = false;
     dk->program_shader_valid[program][1] = false;
+    /* The recorded BindShaders (if any) refers to the previous shader copies. */
+    if (dk->bound_program == program)
+        dk->bound_program = 0;
 
     /* Copy vertex shader to program storage */
     if (vertex_shader > 0 && vertex_shader < SGL_MAX_SHADERS && dk->shader_loaded[vertex_shader]) {
@@ -262,9 +265,21 @@ void dk_bind_program(sgl_backend_t *be, sgl_handle_t program, sgl_handle_t verte
         /* Both VS and FS required — skip draw if program is invalid.
          * This prevents GPU crash from executing partial shader state. */
         dk->program_bound = false;
+        dk->bound_program = 0;
         return;
     }
-    dkCmdBufBindShaders(dk->cmdbuf, DkStageFlag_GraphicsMask, shaders, numShaders);
+    /* Record the shader bind only when the program changed. The 3D engine
+     * keeps the bound programs until another BindShaders, and nothing else
+     * recorded by this backend touches them (UBO binds use constbuf indices
+     * 2+, texture binds load the driver constbuf, clears and blits bind no
+     * program). bound_program is reset whenever the recorded bind may be
+     * missing from the cmdbuf the GPU will execute: dk_cmdbuf_clear (every
+     * clear, including the overflow callback and the sync texture/FBO paths),
+     * relink and deletion of the handle. */
+    if (dk->bound_program != program) {
+        dkCmdBufBindShaders(dk->cmdbuf, DkStageFlag_GraphicsMask, shaders, numShaders);
+        dk->bound_program = program;
+    }
     dk->program_bound = true;
 
     DkGpuAddr uniform_gpu_base = dkMemBlockGetGpuAddr(dk->data_memblock) + dk->uniform_base;
@@ -416,6 +431,8 @@ void dk_delete_program(sgl_backend_t *be, sgl_handle_t handle) {
 
     dk->program_shader_valid[handle][0] = false;
     dk->program_shader_valid[handle][1] = false;
+    if (dk->bound_program == handle)
+        dk->bound_program = 0;
 
     /* The handle may be reused by a new program whose packed UBOs start at
      * gpu_generation 0; bumping here also covers a GL layer that recycled the

@@ -148,6 +148,18 @@ static inline void dk_barrier(DkCmdBuf cmdbuf, DkBarrier mode, uint32_t flags) {
 }
 
 /**
+ * The only way the backend clears a command buffer. Whatever was recorded
+ * and not yet submitted is dropped, so every "skip if already recorded"
+ * shortcut must be forgotten here: the shaders bound by dk_bind_program
+ * (bound_program) are recorded again at the next draw. (The packed-UBO
+ * shortcut is handled separately through dk_bump_uniform_generation.)
+ */
+static inline void dk_cmdbuf_clear(dk_backend_data_t *dk, DkCmdBuf cmdbuf) {
+    dkCmdBufClear(cmdbuf);
+    dk->bound_program = 0;
+}
+
+/**
  * Flush pending GPU commands without waiting.
  *
  * @param be    Backend pointer
@@ -636,6 +648,20 @@ void dk_texture_parameter(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
  * @param handle    Texture handle
  */
 void dk_bind_texture(sgl_backend_t *be, GLuint unit, sgl_handle_t handle, int stage);
+
+/**
+ * Bind several textures to consecutive binding slots of one stage with a
+ * single dkCmdBufBindTextures (one driver-constbuf load instead of one per
+ * texture and per stage).
+ *
+ * @param be        Backend pointer
+ * @param stage     0 = vertex, 1 = fragment
+ * @param first     First binding slot
+ * @param handles   Texture handles for slots first..first+count-1
+ * @param count     Number of handles (<= 16)
+ */
+void dk_bind_textures(sgl_backend_t *be, int stage, GLuint first, const sgl_handle_t *handles,
+                      int count);
 
 /**
  * Generate mipmaps for a texture.

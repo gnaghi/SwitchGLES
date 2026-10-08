@@ -148,7 +148,7 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLen
 
                 dk_flush_sync(dk);
 
-                dkCmdBufClear(dk->cmdbuf);
+                dk_cmdbuf_clear(dk, dk->cmdbuf);
                 dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0,
                                   SGL_CMD_MEM_SIZE);
                 dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr,
@@ -246,7 +246,7 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLen
                 /* Flush GPU for mip upload (same pattern as non-compressed mips) */
                 dk_flush_sync(dk);
 
-                dkCmdBufClear(dk->cmdbuf);
+                dk_cmdbuf_clear(dk, dk->cmdbuf);
                 dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0,
                                   SGL_CMD_MEM_SIZE);
                 dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr,
@@ -337,7 +337,7 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLen
              * overwrite the staging data before the GPU copies level 0. */
             dk_flush_sync(dk);
 
-            dkCmdBufClear(dk->cmdbuf);
+            dk_cmdbuf_clear(dk, dk->cmdbuf);
             dkCmdBufAddMemory(dk->cmdbuf, dk->cmdbuf_memblock[dk->current_slot], 0,
                               SGL_CMD_MEM_SIZE);
             dkCmdBufBindImageDescriptorSet(dk->cmdbuf, dk->image_descriptor_addr, SGL_MAX_TEXTURES);

@@ -216,8 +216,12 @@ typedef struct sgl_program_sampler {
     int array_index;       /* index within sampler array (-1 if not array) */
     int array_total;       /* total elements in sampler array (0 if not array) */
     GLenum gl_type;        /* GL_SAMPLER_2D or GL_SAMPLER_CUBE */
+    uint8_t stage_mask;    /* SGL_SAMPLER_STAGE_VS | SGL_SAMPLER_STAGE_FS: stages that declare
+                              the sampler; the draw binds the texture to those stages only */
     bool used;
 } sgl_program_sampler_t;
+#define SGL_SAMPLER_STAGE_VS 1u
+#define SGL_SAMPLER_STAGE_FS 2u
 
 /* glUniform* fast path: what the per-call lookups of gl_uniform.c resolve a
  * location to (active uniform, packed type, array stride, dual-stage mirror,
