@@ -751,6 +751,47 @@ Conformité dEQP-GLES2 (VK-GL-CTS, jamais `validation_test`) :
       `dkImageInitialize`, donc visible dès la création)
 - [ ] Régression complète en A/B
 
+## Piste L — `glLineWidth` (lignes larges matérielles)
+
+Changement (`dk_state.c`, `dk_backend.h`, `sgl_backend_types.h`, `sgl_state_build.h`, `gl_query.c`, `sgl_backend.h`,
+`dk_backend.c`, `CLAUDE.md`, `README.md`, `docs/conformance_assessment.md`) :
+- Le `CLAUDE.md` affirmait « Switch GPU lacks hardware line width support (would need geometry shader) » ;
+  `set_line_width` était `NULL` dans le backend et `GL_ALIASED_LINE_WIDTH_RANGE` renvoyait [1, 1]. Or deko3d expose
+  `dkCmdBufSetLineWidth` (`gpu_3d_state.cpp:169`), qui écrit les registres `LineWidthSmooth` (0x4EC) et
+  `LineWidthAliased` (0x4ED) ; son commentaire, repris de nouveau (`nvc0_rasterizer_state_create`), indique que
+  Maxwell 2e génération (GM20B = Tegra X1) lit `LineWidthSmooth`. L'init 3D de deko3d (`gpu_3d_base.cpp:90`) met
+  `LineWidthSeparate = 1` et ne fixe jamais la largeur : jusqu'ici on vivait sur la valeur de reset du GPU.
+- Maintenant : `glLineWidth` reste un setter pur (C2) ; `sgl_build_raster` transmet `line_width` ;
+  `dk_apply_raster` la borne à [`SGL_MIN_LINE_WIDTH`, `SGL_MAX_LINE_WIDTH`] = [1, 10] (la valeur bornée fait partie
+  de la clé du groupe raster) et enregistre `dkCmdBufSetLineWidth` **avec chaque** `BindRasterizerState` (même
+  régime que le biais : réenregistré après tout clear de cmdbuf / changement de cible, voir C1). Les points ne
+  changent pas (`gl_PointSize` du shader).
+- `GL_ALIASED_LINE_WIDTH_RANGE` = [1, 10] (entiers et flottants). La borne 10 est celle de nouveau pour la famille
+  nvc0 (`PIPE_CAPF_MAX_LINE_WIDTH` / `_AA` = 10.0 dans `nvc0_screen.c`) — **de mémoire** : le dépôt `mesa_` local
+  ne contient pas le pilote gallium nouveau, et gitlab.freedesktop.org refuse le téléchargement (Anubis). GLES2
+  n'impose que [1, 1] ; toute valeur ≤ borne matérielle réelle est conforme, et le GPU rastérise lui-même.
+- Entrées de `VK-GL-CTS/framework/platform/switch/lists/skip.txt` devenues caduques (17, à réactiver à la main,
+  non modifiées ici) : `functional.clipping.line.{long_wide_line_clip, wide_line_attrib_clip, wide_line_clip,
+  wide_line_clip_viewport_center, wide_line_clip_viewport_corner, wide_line_z_clip, wide_line_z_clip_viewport_center,
+  wide_line_z_clip_viewport_corner}`, `functional.rasterization.interpolation.basic.{line_loop_wide, line_strip_wide,
+  lines_wide}`, `functional.rasterization.interpolation.projected.{line_loop_wide, line_strip_wide, lines_wide}`,
+  `functional.rasterization.primitives.{line_loop_wide, line_strip_wide, lines_wide}`. Les `clipping.point.wide_*`
+  restent hors champ (taille de point).
+
+Rendu :
+- [ ] Lignes de largeur 1 inchangées (Spearmint : `r_showtris`, HUD ; GFXBench ne trace pas de lignes)
+- [ ] Un test maison `glLineWidth(5)` + `GL_LINES` : ligne visiblement large, aliasée, non recadrée
+
+Conformité dEQP-GLES2 (VK-GL-CTS, jamais `validation_test`) :
+- [ ] `functional.implementation_limits.aliased_line_width_range` (≥ [1, 1]), `functional.state_query.floats.*`
+      / `integers.*` sur `GL_LINE_WIDTH` et `GL_ALIASED_LINE_WIDTH_RANGE`
+- [ ] `functional.rasterization.primitives.lines*`, `line_strip*`, `line_loop*` (largeur 1 : aucune régression ;
+      `*_wide` : à sortir de `skip.txt`), `functional.rasterization.interpolation.*lines*`
+- [ ] `functional.clipping.line.*` (dont les 8 `wide_*` à sortir de `skip.txt`)
+- [ ] `functional.draw.*.lines*`, `functional.fragment_ops.*` (le groupe raster est réenregistré avec une commande
+      de plus : pas d'effet attendu)
+- [ ] Si un `*_wide` échoue avec une largeur 10 mais passe à 5 : réduire `SGL_MAX_LINE_WIDTH`
+
 ## Piste B5 — non retenue
 
 Les barrières `None + L2Cache | Descriptors | Zcull` après soumission (`dk_begin_frame`, `dk_submit_and_reset`,

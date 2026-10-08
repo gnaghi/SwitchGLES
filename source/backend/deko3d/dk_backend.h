@@ -59,6 +59,7 @@ typedef struct dk_raster_key {
     DkRasterizerState raster;
     float bias_units;  /* zero when polygon offset is disabled (not recorded) */
     float bias_factor; /* idem */
+    float line_width;  /* clamped to [SGL_MIN_LINE_WIDTH, SGL_MAX_LINE_WIDTH] */
 } dk_raster_key_t;
 
 typedef struct dk_state_cache {

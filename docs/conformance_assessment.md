@@ -107,7 +107,6 @@ When `sampler2D` and `samplerCube` coexist in the same struct/shader, the NV50_I
 
 | Limitation | Reason | Impact |
 |-----------|--------|--------|
-| `glLineWidth` > 1.0 | GPU has no hardware wide lines | Visual only |
 | Multisample | No MSAA implementation | Not required by ES 2.0 |
 | Transform feedback | deko3d limitation | GLES 3.0 feature |
 | >16 vertex attributes with matrix types | NV50_IR generates >16 native inputs | Rare in practice |

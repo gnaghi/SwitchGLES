@@ -79,7 +79,6 @@ SwitchGLES provides a production-quality OpenGL ES 2.0 and EGL 1.4 API for Ninte
 | Limitation | Reason |
 |------------|--------|
 | Stencil Replace/Zero/Invert/Wrap | GPU stencil pipeline (Keep/Incr/Decr work) |
-| glLineWidth > 1.0 | No hardware wide line support |
 | Cubemap mipmap precision | GPU LOD calculation differs from reference |
 | Boolean uniform readback | Mesa optimizes booleans as constants |
 

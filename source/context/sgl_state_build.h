@@ -62,6 +62,7 @@ static inline void sgl_build_raster(const sgl_context_t *ctx, sgl_raster_state_t
     rs->polygon_offset_fill_enabled = ctx->raster_state.polygon_offset_fill_enabled;
     rs->polygon_offset_factor = ctx->raster_state.polygon_offset_factor;
     rs->polygon_offset_units = ctx->raster_state.polygon_offset_units;
+    rs->line_width = ctx->raster_state.line_width;
 }
 
 static inline void sgl_build_color(const sgl_context_t *ctx, sgl_color_state_t *cs) {

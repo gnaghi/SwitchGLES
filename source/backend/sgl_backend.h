@@ -177,7 +177,7 @@ struct sgl_backend_ops {
     void (*finish)(sgl_backend_t *be);
 
     /* ======== Misc Operations ======== */
-    void (*set_line_width)(sgl_backend_t *be, GLfloat width);
+    /* (line width is part of apply_raster: sgl_raster_state_t.line_width) */
     void (*set_depth_bias)(sgl_backend_t *be, GLfloat factor, GLfloat units);
     void (*set_blend_color)(sgl_backend_t *be, GLfloat r, GLfloat g, GLfloat b, GLfloat a);
 };

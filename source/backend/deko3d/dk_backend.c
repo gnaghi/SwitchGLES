@@ -124,8 +124,7 @@ const sgl_backend_ops_t dk_backend_ops = {
     .finish = dk_finish,
 
     /* Misc Operations (dk_state.c) */
-    .set_line_width = NULL,
-    .set_depth_bias = NULL, /* Removed: bias is recorded with apply_raster */
+    .set_depth_bias = NULL, /* Removed: bias and line width are recorded with apply_raster */
     .set_blend_color = NULL,
 };
 

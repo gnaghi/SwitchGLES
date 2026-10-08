@@ -417,8 +417,8 @@ GL_APICALL void GL_APIENTRY glGetIntegerv(GLenum pname, GLint *params) {
             params[1] = 1;
             break;
         case GL_ALIASED_LINE_WIDTH_RANGE:
-            params[0] = 1;
-            params[1] = 1;
+            params[0] = (GLint)SGL_MIN_LINE_WIDTH;
+            params[1] = (GLint)SGL_MAX_LINE_WIDTH;
             break;
 
         /* GL 3.0+ queries (used by Spearmint/ioquake3) */
@@ -604,8 +604,8 @@ GL_APICALL void GL_APIENTRY glGetFloatv(GLenum pname, GLfloat *params) {
             params[1] = 1.0f;
             break;
         case GL_ALIASED_LINE_WIDTH_RANGE:
-            params[0] = 1.0f;
-            params[1] = 1.0f;
+            params[0] = SGL_MIN_LINE_WIDTH;
+            params[1] = SGL_MAX_LINE_WIDTH;
             break;
 
         /* Boolean enable states as float 0.0/1.0 */
@@ -751,6 +751,9 @@ GL_APICALL void GL_APIENTRY glLineWidth(GLfloat width) {
         return;
     }
 
+    /* Pure state update: recorded with the rasterizer group at the next draw
+     * (dk_apply_raster), clamped there to [SGL_MIN_LINE_WIDTH,
+     * SGL_MAX_LINE_WIDTH]; the stored value stays unclamped for glGet. */
     ctx->raster_state.line_width = width;
 }
 

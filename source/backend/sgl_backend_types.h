@@ -89,6 +89,15 @@ typedef struct sgl_depth_stencil_state {
     int stencil_clear_value;
 } sgl_depth_stencil_state_t;
 
+/* Line width range reported by GL_ALIASED_LINE_WIDTH_RANGE and applied at
+ * draw time (the GL value is clamped to it when recorded, glGet returns the
+ * unclamped value per spec). Maxwell rasterizes wide lines natively
+ * (deko3d dkCmdBufSetLineWidth -> LineWidthSmooth/Aliased registers); the
+ * upper bound is the one nouveau exposes for the nvc0 family
+ * (PIPE_CAPF_MAX_LINE_WIDTH = 10). */
+#define SGL_MIN_LINE_WIDTH 1.0f
+#define SGL_MAX_LINE_WIDTH 10.0f
+
 /* Rasterizer state */
 typedef struct sgl_raster_state {
     bool cull_enabled;
@@ -97,6 +106,7 @@ typedef struct sgl_raster_state {
     bool polygon_offset_fill_enabled;
     float polygon_offset_factor;
     float polygon_offset_units;
+    float line_width; /* glLineWidth value, unclamped */
 } sgl_raster_state_t;
 
 /* Color state */

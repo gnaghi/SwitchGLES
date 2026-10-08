@@ -8,7 +8,7 @@
  * - Blend state
  * - Depth test
  * - Stencil test
- * - Rasterizer state (culling, front face)
+ * - Rasterizer state (culling, front face, line width)
  * - Color write mask
  * - Depth bias (polygon offset)
  *
@@ -397,10 +397,27 @@ void dk_apply_raster(sgl_backend_t *be, const sgl_raster_state_t *state) {
         key.bias_factor = state->polygon_offset_factor;
     }
 
+    /* Line width, clamped to the advertised range (GLES2 §3.4: the width is
+     * clamped at rasterization time; glGet returns the unclamped value). The
+     * clamped value is the key, so a glLineWidth outside the range that stays
+     * outside records nothing. */
+    key.line_width = state->line_width;
+    if (key.line_width < SGL_MIN_LINE_WIDTH)
+        key.line_width = SGL_MIN_LINE_WIDTH;
+    else if (key.line_width > SGL_MAX_LINE_WIDTH)
+        key.line_width = SGL_MAX_LINE_WIDTH;
+
     if (DK_SC_SAME(dk, DK_SC_RASTER, raster, &key))
         return;
 
     dkCmdBufBindRasterizerState(dk->cmdbuf, rasterState);
+
+    /* Line width is part of the rasterizer group: recorded with every
+     * BindRasterizerState (deko3d writes LineWidthSmooth and LineWidthAliased,
+     * GM20B reads the former), so a cmdbuf clear or a render-target switch
+     * re-establishes it with the rest of the group. Lines of width 1 were
+     * previously left to the GPU's reset value; now it is always explicit. */
+    dkCmdBufSetLineWidth(dk->cmdbuf, key.line_width);
 
     /* Set depth bias values via separate command (the only place they are
      * recorded: glPolygonOffset just stores them).
@@ -414,8 +431,9 @@ void dk_apply_raster(sgl_backend_t *be, const sgl_raster_state_t *state) {
 
     DK_SC_STORE(dk, DK_SC_RASTER, raster, &key);
 
-    SGL_TRACE_STATE("apply_raster cull=%d mode=0x%X front=0x%X polyOffset=%d", state->cull_enabled,
-                    state->cull_mode, state->front_face, state->polygon_offset_fill_enabled);
+    SGL_TRACE_STATE("apply_raster cull=%d mode=0x%X front=0x%X polyOffset=%d lineWidth=%.2f",
+                    state->cull_enabled, state->cull_mode, state->front_face,
+                    state->polygon_offset_fill_enabled, key.line_width);
 }
 
 /* ============================================================================
