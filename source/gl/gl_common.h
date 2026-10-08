@@ -59,6 +59,12 @@ extern void sgl_ensure_frame_ready(void);
 /* Bind program and uniforms before drawing (calls backend) */
 bool sgl_bind_program_for_draw(sgl_context_t *ctx, GLuint program_id);
 
+/* Location -> info memo used by glUniform* (gl_uniform.c). Rebuild after
+ * (re)link, once program_uniforms/active_uniforms/samplers/mirrors are final;
+ * invalidate whenever one of those tables changes afterwards. */
+void sgl_uniform_cache_rebuild(sgl_program_t *prog);
+void sgl_uniform_cache_invalidate(sgl_program_t *prog);
+
 /* Check if a dimension is a power of two */
 static inline bool sgl_is_pot(GLsizei n) {
     return n > 0 && (n & (n - 1)) == 0;

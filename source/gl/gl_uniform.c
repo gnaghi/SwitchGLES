@@ -14,6 +14,9 @@ static int sgl_uniform_type_components(GLenum type);
 static bool sgl_is_bool_uniform_type(GLenum type);
 static int uniform_type_std140_size(GLenum type);
 static bool is_valid_uniform_location(sgl_program_t *prog, GLint location);
+static const sgl_uniform_cache_entry_t *sgl_uniform_resolve(sgl_program_t *prog, GLint location);
+static inline const sgl_active_uniform_info_t *
+sgl_uniform_active_info(const sgl_program_t *prog, const sgl_uniform_cache_entry_t *e);
 
 /*
  * ============================================================================
@@ -254,6 +257,8 @@ static void sgl_track_active_uniform(sgl_program_t *prog, const GLchar *name, GL
         prog->active_uniforms[slot].type = type;
         prog->active_uniforms[slot].size = size;
         prog->active_uniforms[slot].active = true;
+        /* A memoised "no active uniform at this location" may now be stale */
+        sgl_uniform_cache_invalidate(prog);
     }
 }
 
@@ -456,6 +461,7 @@ GL_APICALL GLint GL_APIENTRY glGetUniformLocation(GLuint program, const GLchar *
                     prog->packed_mirrors[prog->num_packed_mirrors].primary = registered;
                     prog->packed_mirrors[prog->num_packed_mirrors].mirror = mirror;
                     prog->num_packed_mirrors++;
+                    sgl_uniform_cache_invalidate(prog); /* mirror selection changed */
                 }
             }
         }
@@ -912,7 +918,8 @@ GL_APICALL void GL_APIENTRY glGetUniformfv(GLuint program, GLint location, GLflo
 
     /* Per GLES2 spec: GL_INVALID_OPERATION if location doesn't correspond
      * to a valid uniform variable for the specified program. */
-    if (!is_valid_uniform_location(prog, location)) {
+    const sgl_uniform_cache_entry_t *ue = sgl_uniform_resolve(prog, location);
+    if (!ue->valid_location) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
         return;
     }
@@ -939,10 +946,9 @@ GL_APICALL void GL_APIENTRY glGetUniformfv(GLuint program, GLint location, GLflo
         if (packed->valid && (uint32_t)offset + 4 <= packed->size) {
             /* Look up uniform type to copy the full value (not just 4 bytes).
              * Use dual lookup (same as set_*_uniform) for robustness. */
-            GLenum uni_type = find_packed_uniform_type(prog, location);
+            GLenum uni_type = ue->packed_type;
             if (!uni_type) {
-                const sgl_active_uniform_info_t *ainfo =
-                    find_active_uniform_by_location(prog, location);
+                const sgl_active_uniform_info_t *ainfo = sgl_uniform_active_info(prog, ue);
                 if (ainfo)
                     uni_type = ainfo->type;
             }
@@ -1037,7 +1043,8 @@ GL_APICALL void GL_APIENTRY glGetUniformiv(GLuint program, GLint location, GLint
 
     /* Per GLES2 spec: GL_INVALID_OPERATION if location doesn't correspond
      * to a valid uniform variable for the specified program. */
-    if (!is_valid_uniform_location(prog, location)) {
+    const sgl_uniform_cache_entry_t *ue = sgl_uniform_resolve(prog, location);
+    if (!ue->valid_location) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
         return;
     }
@@ -1064,10 +1071,9 @@ GL_APICALL void GL_APIENTRY glGetUniformiv(GLuint program, GLint location, GLint
         if (packed->valid && (uint32_t)offset + 4 <= packed->size) {
             /* Look up uniform type to determine readback size.
              * Use dual lookup (same as set_*_uniform) for robustness. */
-            GLenum uni_type = find_packed_uniform_type(prog, location);
+            GLenum uni_type = ue->packed_type;
             if (!uni_type) {
-                const sgl_active_uniform_info_t *ainfo =
-                    find_active_uniform_by_location(prog, location);
+                const sgl_active_uniform_info_t *ainfo = sgl_uniform_active_info(prog, ue);
                 if (ainfo)
                     uni_type = ainfo->type;
             }
@@ -1152,13 +1158,15 @@ GL_APICALL void GL_APIENTRY glGetUniformiv(GLuint program, GLint location, GLint
 }
 
 /*
- * Helper: write data to a packed UBO mirror location (dual-stage uniforms).
- * Copies the same data written to the primary packed UBO to the other stage.
+ * Dual-stage uniforms: select the packed_mirrors[] entry that a write to
+ * primary_loc is mirrored through. Returns -1 when there is none. Selection
+ * rule kept as it was in the former apply_packed_mirror loop: the first
+ * mirror of the same stage/binding whose primary base is at or below the
+ * written offset (relative offsets let array element writes mirror).
  */
-static void apply_packed_mirror(sgl_program_t *prog, GLint primary_loc, const void *data,
-                                uint32_t size) {
+static int find_packed_mirror(const sgl_program_t *prog, GLint primary_loc) {
     if (!(primary_loc & SGL_LOC_PACKED_FLAG))
-        return;
+        return -1;
     int p_stage = (primary_loc >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
     int p_binding = (primary_loc >> SGL_LOC_BINDING_SHIFT) & SGL_LOC_BINDING_MASK;
     int p_offset = primary_loc & SGL_LOC_OFFSET_MASK;
@@ -1170,26 +1178,43 @@ static void apply_packed_mirror(sgl_program_t *prog, GLint primary_loc, const vo
         int m_p_offset = prim & SGL_LOC_OFFSET_MASK;
         if (m_p_stage != p_stage || m_p_binding != p_binding)
             continue;
-
-        /* Compute relative offset from this mirror's base.
-         * This allows array element writes (offset > base) to mirror correctly. */
-        int rel_offset = p_offset - m_p_offset;
-        if (rel_offset < 0)
+        if (p_offset - m_p_offset < 0)
             continue;
-
-        GLint mirror = prog->packed_mirrors[m].mirror;
-        int mirror_stage = (mirror >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
-        int mirror_binding = (mirror >> SGL_LOC_BINDING_SHIFT) & SGL_LOC_BINDING_MASK;
-        int mirror_offset = (mirror & SGL_LOC_OFFSET_MASK) + rel_offset;
+        /* Same skip as the former loop: a mirror outside the packed range is
+         * passed over in favour of the next candidate */
+        int mirror_binding =
+            (prog->packed_mirrors[m].mirror >> SGL_LOC_BINDING_SHIFT) & SGL_LOC_BINDING_MASK;
         if (mirror_binding >= SGL_MAX_PACKED_UBOS)
             continue;
-        sgl_packed_ubo_t *mp = (mirror_stage == 0) ? &prog->packed_vertex[mirror_binding]
-                                                   : &prog->packed_fragment[mirror_binding];
-        if (mp->valid && (uint32_t)mirror_offset + size <= mp->size) {
-            memcpy(mp->data + mirror_offset, data, size);
-            mp->dirty = true;
-        }
-        break;
+        return m;
+    }
+    return -1;
+}
+
+/*
+ * Helper: write data to a packed UBO mirror location (dual-stage uniforms).
+ * Copies the same data written to the primary packed UBO to the other stage.
+ * mirror_idx comes from find_packed_mirror (memoised per location).
+ */
+static void apply_packed_mirror(sgl_program_t *prog, int mirror_idx, GLint primary_loc,
+                                const void *data, uint32_t size) {
+    if (mirror_idx < 0 || mirror_idx >= prog->num_packed_mirrors)
+        return;
+    int p_offset = primary_loc & SGL_LOC_OFFSET_MASK;
+    int m_p_offset = prog->packed_mirrors[mirror_idx].primary & SGL_LOC_OFFSET_MASK;
+    int rel_offset = p_offset - m_p_offset;
+
+    GLint mirror = prog->packed_mirrors[mirror_idx].mirror;
+    int mirror_stage = (mirror >> SGL_LOC_STAGE_SHIFT) & SGL_LOC_STAGE_MASK;
+    int mirror_binding = (mirror >> SGL_LOC_BINDING_SHIFT) & SGL_LOC_BINDING_MASK;
+    int mirror_offset = (mirror & SGL_LOC_OFFSET_MASK) + rel_offset;
+    if (mirror_binding >= SGL_MAX_PACKED_UBOS)
+        return;
+    sgl_packed_ubo_t *mp = (mirror_stage == 0) ? &prog->packed_vertex[mirror_binding]
+                                               : &prog->packed_fragment[mirror_binding];
+    if (mp->valid && (uint32_t)mirror_offset + size <= mp->size) {
+        memcpy(mp->data + mirror_offset, data, size);
+        mp->dirty = true;
     }
 }
 
@@ -1284,6 +1309,73 @@ static const sgl_active_uniform_info_t *find_active_uniform_by_location(sgl_prog
     return NULL;
 }
 
+/*
+ * ============================================================================
+ * LOCATION -> INFO MEMO
+ *
+ * glUniform* used to run four or five linear scans per call
+ * (find_active_uniform_by_location twice, find_packed_uniform_type,
+ * lookup_element_stride twice, the packed_mirrors loop): GFXBench "driver"
+ * makes 22,500 such calls per frame. The answers only depend on the program's
+ * reflection tables, so they are computed once per location — with exactly
+ * those functions, to keep their semantics — and memoised in a direct-mapped
+ * table. The table is rebuilt at link and invalidated whenever a table it
+ * depends on changes (sgl_track_active_uniform, registered mirrors).
+ * ============================================================================
+ */
+
+static inline unsigned sgl_uniform_cache_slot(GLint location) {
+    /* Multiplicative hash: packed locations of one block differ by small
+     * multiples of 4, legacy ones by 1, stage/binding live in the high bits. */
+    uint32_t u = (uint32_t)location * 2654435761u;
+    return u >> (32 - 7); /* SGL_UNIFORM_CACHE_SIZE == 128 */
+}
+
+void sgl_uniform_cache_invalidate(sgl_program_t *prog) {
+    if (!prog)
+        return;
+    if (++prog->uniform_cache_gen == 0)
+        prog->uniform_cache_gen = 1; /* 0 = table never used (program memset at alloc) */
+}
+
+static const sgl_uniform_cache_entry_t *sgl_uniform_resolve(sgl_program_t *prog, GLint location) {
+    if (prog->uniform_cache_gen == 0)
+        sgl_uniform_cache_invalidate(prog);
+
+    sgl_uniform_cache_entry_t *e = &prog->uniform_cache[sgl_uniform_cache_slot(location)];
+    if (e->gen == prog->uniform_cache_gen && e->location == location)
+        return e;
+
+    /* Miss: run the reference lookups once for this location */
+    const sgl_active_uniform_info_t *ainfo = find_active_uniform_by_location(prog, location);
+    e->location = location;
+    e->gen = prog->uniform_cache_gen;
+    e->active_idx = ainfo ? (int16_t)(ainfo - prog->active_uniforms) : -1;
+    e->packed_type = find_packed_uniform_type(prog, location);
+    e->stride = (uint16_t)lookup_element_stride(prog, location);
+    e->mirror_idx = (int16_t)find_packed_mirror(prog, location);
+    e->valid_location = is_valid_uniform_location(prog, location);
+    return e;
+}
+
+/* Active uniform info for a resolved location (NULL if none) */
+static inline const sgl_active_uniform_info_t *
+sgl_uniform_active_info(const sgl_program_t *prog, const sgl_uniform_cache_entry_t *e) {
+    return e->active_idx >= 0 ? &prog->active_uniforms[e->active_idx] : NULL;
+}
+
+void sgl_uniform_cache_rebuild(sgl_program_t *prog) {
+    if (!prog)
+        return;
+    sgl_uniform_cache_invalidate(prog);
+    /* Pre-resolve every base location known from reflection; array element
+     * locations (base + n*stride) are resolved on first use. */
+    for (int i = 0; i < prog->num_program_uniforms; i++) {
+        if (prog->program_uniforms[i].used)
+            (void)sgl_uniform_resolve(prog, prog->program_uniforms[i].location);
+    }
+}
+
 /* Check if a GL type is a float type (float, vecN, matN) */
 static bool sgl_is_float_uniform_type(GLenum type) {
     switch (type) {
@@ -1366,9 +1458,8 @@ static int sgl_uniform_type_components(GLenum type) {
 
 /* Validate a glUniform*f[v] call. Returns true if valid, false if GL_INVALID_OPERATION should be
  * set. */
-static bool sgl_validate_float_uniform(sgl_program_t *prog, GLint location, int num_components,
+static bool sgl_validate_float_uniform(const sgl_active_uniform_info_t *info, int num_components,
                                        GLsizei count) {
-    const sgl_active_uniform_info_t *info = find_active_uniform_by_location(prog, location);
     if (!info)
         return true; /* No metadata = legacy path, allow */
 
@@ -1388,9 +1479,8 @@ static bool sgl_validate_float_uniform(sgl_program_t *prog, GLint location, int 
 }
 
 /* Validate a glUniform*i[v] call. Returns true if valid. */
-static bool sgl_validate_int_uniform(sgl_program_t *prog, GLint location, int num_components,
+static bool sgl_validate_int_uniform(const sgl_active_uniform_info_t *info, int num_components,
                                      GLsizei count) {
-    const sgl_active_uniform_info_t *info = find_active_uniform_by_location(prog, location);
     if (!info)
         return true; /* No metadata = legacy path, allow */
 
@@ -1413,9 +1503,8 @@ static bool sgl_validate_int_uniform(sgl_program_t *prog, GLint location, int nu
 }
 
 /* Validate a glUniformMatrix*fv call. Returns true if valid. */
-static bool sgl_validate_matrix_uniform(sgl_program_t *prog, GLint location, GLenum expected_type,
-                                        GLsizei count) {
-    const sgl_active_uniform_info_t *info = find_active_uniform_by_location(prog, location);
+static bool sgl_validate_matrix_uniform(const sgl_active_uniform_info_t *info,
+                                        GLenum expected_type, GLsizei count) {
     if (!info)
         return true; /* No metadata = legacy path, allow */
 
@@ -1515,9 +1604,13 @@ static void set_scalar_uniform_impl(GLint location, int num_components, GLsizei 
         return;
     }
 
+    /* Everything the former per-call linear scans produced, memoised per location */
+    const sgl_uniform_cache_entry_t *ue = sgl_uniform_resolve(prog, location);
+    const sgl_active_uniform_info_t *ainfo = sgl_uniform_active_info(prog, ue);
+
     /* Validate type/count against declared uniform metadata (if available) */
-    bool valid_uniform = is_int ? sgl_validate_int_uniform(prog, location, num_components, count)
-                                : sgl_validate_float_uniform(prog, location, num_components, count);
+    bool valid_uniform = is_int ? sgl_validate_int_uniform(ainfo, num_components, count)
+                                : sgl_validate_float_uniform(ainfo, num_components, count);
     if (!valid_uniform) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
         return;
@@ -1542,13 +1635,9 @@ static void set_scalar_uniform_impl(GLint location, int num_components, GLsizei 
          * Mesa sets UniformBooleanTrue = ~0U (0xFFFFFFFF), so compiled shaders
          * expect true = 0xFFFFFFFF, false = 0x00000000 in the constant buffer.
          * Use two lookup methods for robustness. */
-        const sgl_active_uniform_info_t *ainfo = find_active_uniform_by_location(prog, location);
         bool is_bool = ainfo && sgl_is_bool_uniform_type(ainfo->type);
-        if (!is_bool) {
-            GLenum ptype = find_packed_uniform_type(prog, location);
-            if (sgl_is_bool_uniform_type(ptype))
-                is_bool = true;
-        }
+        if (!is_bool && sgl_is_bool_uniform_type(ue->packed_type))
+            is_bool = true;
 
         if (count == 1) {
             /* Single value: write exact bytes (no array padding) */
@@ -1566,7 +1655,7 @@ static void set_scalar_uniform_impl(GLint location, int num_components, GLsizei 
             }
         } else {
             /* Array: stride depends on compilation path (Mesa constbuf vs std140 UBO) */
-            int stride = lookup_element_stride(prog, location);
+            int stride = ue->stride;
             if (stride <= 0)
                 return;
             /* Bound the write to the shadow buffer. Compute in 64-bit so a
@@ -1596,9 +1685,10 @@ static void set_scalar_uniform_impl(GLint location, int num_components, GLsizei 
         }
         packed->dirty = true;
         {
-            int stride = lookup_element_stride(prog, location);
-            uint32_t writtenSize = (count == 1) ? num_components * 4u : (uint32_t)count * stride;
-            apply_packed_mirror(prog, location, packed->data + offset, writtenSize);
+            uint32_t writtenSize =
+                (count == 1) ? num_components * 4u : (uint32_t)count * ue->stride;
+            apply_packed_mirror(prog, ue->mirror_idx, location, packed->data + offset,
+                                writtenSize);
         }
         return;
     }
@@ -1882,8 +1972,9 @@ static void set_matrix_uniform_impl(GLint location, int cols, GLsizei count, GLb
     }
 
     /* Validate type/count against declared uniform metadata */
+    const sgl_uniform_cache_entry_t *ue = sgl_uniform_resolve(prog, location);
     GLenum mat_type = (cols == 2) ? GL_FLOAT_MAT2 : (cols == 3) ? GL_FLOAT_MAT3 : GL_FLOAT_MAT4;
-    if (!sgl_validate_matrix_uniform(prog, location, mat_type, count)) {
+    if (!sgl_validate_matrix_uniform(sgl_uniform_active_info(prog, ue), mat_type, count)) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
         return;
     }
@@ -1915,7 +2006,7 @@ static void set_matrix_uniform_impl(GLint location, int cols, GLsizei count, GLb
             }
         }
         packed->dirty = true;
-        apply_packed_mirror(prog, location, packed->data + offset, dataSize);
+        apply_packed_mirror(prog, ue->mirror_idx, location, packed->data + offset, dataSize);
         SGL_TRACE_UNIFORM("glUniformMatrix%dfv(packed loc=0x%X, count=%d)", cols, location, count);
         return;
     }

@@ -219,6 +219,23 @@ typedef struct sgl_program_sampler {
     bool used;
 } sgl_program_sampler_t;
 
+/* glUniform* fast path: what the per-call lookups of gl_uniform.c resolve a
+ * location to (active uniform, packed type, array stride, dual-stage mirror,
+ * validity). Direct-mapped by a hash of the location; an entry is live only
+ * while its gen equals the program's uniform_cache_gen, so bumping that
+ * generation invalidates the whole table in O(1). A miss simply re-runs the
+ * linear lookups, so a collision costs what every call used to cost. */
+#define SGL_UNIFORM_CACHE_SIZE 128
+typedef struct sgl_uniform_cache_entry {
+    GLint location;
+    uint32_t gen;
+    GLenum packed_type;  /* type of the packed uniform covering location, 0 if none */
+    int16_t active_idx;  /* index into active_uniforms[], -1 if none */
+    int16_t mirror_idx;  /* index into packed_mirrors[] to apply, -1 if none */
+    uint16_t stride;     /* array element stride in bytes */
+    bool valid_location; /* glGetUniform*: location belongs to this program */
+} sgl_uniform_cache_entry_t;
+
 /* Program object */
 typedef struct sgl_program {
     bool used;
@@ -266,6 +283,11 @@ typedef struct sgl_program {
     GLint depth_range_loc[3];    /* [0]=near, [1]=far, [2]=diff */
     GLint depth_range_loc_fs[3]; /* Mirror for FS when both VS+FS use gl_DepthRange */
     bool has_depth_range;
+    /* Location -> info memo for glUniform* and glGetUniform* (see gl_uniform.c).
+     * Rebuilt at link; invalidated whenever active_uniforms or packed_mirrors
+     * change (uniform_cache_gen bumped, never 0 once in use). */
+    sgl_uniform_cache_entry_t uniform_cache[SGL_UNIFORM_CACHE_SIZE];
+    uint32_t uniform_cache_gen;
 } sgl_program_t;
 
 /* Texture object */

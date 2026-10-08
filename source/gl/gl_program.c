@@ -1358,6 +1358,10 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
             prog->packed_fragment[b].dirty = true;
     }
 
+    /* The reflection tables glUniform* resolves locations against are final:
+     * drop the previous link's memo and pre-resolve every known location. */
+    sgl_uniform_cache_rebuild(prog);
+
     SGL_TRACE_SHADER("glLinkProgram(%u) - %s", program, link_ok ? "OK" : "FAILED");
 }
 

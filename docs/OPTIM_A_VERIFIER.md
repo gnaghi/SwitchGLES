@@ -283,6 +283,51 @@ Conformité dEQP-GLES2 (VK-GL-CTS, jamais `validation_test`) :
       d'un même programme : l'adresse reliée doit rester valide)
 - [ ] Régression complète en A/B contre la base d'octobre
 
+## Piste C4 — mémo location → informations pour `glUniform*`
+
+Changement (`gl_uniform.c`, `gl_program.c`, `gl_common.h`, `sgl_gl_types.h`) :
+- Chaque `glUniform*` faisait 4 à 5 parcours linéaires des tables de réflexion du programme :
+  `find_active_uniform_by_location` (validation du type, puis à nouveau pour le test bool),
+  `find_packed_uniform_type`, `lookup_element_stride` (deux fois pour les tableaux) et la boucle des miroirs
+  VS/FS de `apply_packed_mirror`. GFXBench `driver` en fait 22 500 par frame.
+- Nouveau : table `uniform_cache[128]` par programme, à accès direct par hachage de la location, dont chaque entrée
+  mémorise **le résultat de ces mêmes fonctions** pour une location (index dans `active_uniforms`, type packé,
+  stride, index du miroir, validité pour `glGetUniform*`). Pas de nouvelle logique de résolution : un défaut de
+  cache relance exactement les anciens parcours, une collision coûte ce que coûtait chaque appel avant.
+- Construction au link (`sgl_uniform_cache_rebuild` en fin de `glLinkProgram` : toutes les locations de base
+  de `program_uniforms` sont pré-résolues ; les éléments de tableau `base + n*stride` le sont au premier
+  usage). Invalidation en O(1) par génération (`uniform_cache_gen`, jamais 0) : relink, ajout d'un uniform actif
+  par `sgl_track_active_uniform` (chemin `sglRegisterUniform` de `glGetUniformLocation`), ajout d'un miroir
+  enregistré. Un programme neuf (`memset` à l'allocation) part à génération 0 : aucune entrée ne peut
+  correspondre avant la première résolution.
+- `apply_packed_mirror` est scindée : `find_packed_mirror` (choix du miroir, **même règle qu'avant** : premier
+  miroir du même étage/binding dont la base est ≤ l'offset écrit, et dont le binding miroir est dans la
+  plage) et l'écriture elle-même. Observation non corrigée, pour ne pas changer de comportement sans console :
+  cette règle choisit le premier miroir « en dessous », pas forcément celui qui couvre la location. Avec deux
+  uniforms VS+FS dans un même bloc, un `glUniform` sur le second passe par le miroir du premier (offset
+  relatif). Les tests dEQP `uniform_api.*.both` passent aujourd'hui, donc Mesa dispose vraisemblablement les
+  deux étages à l'identique ; à instrumenter si un cas « both » régresse un jour.
+- `glGetUniformfv/iv` utilisent le même mémo (validité, type) : réponses identiques.
+- Les validations (`sgl_validate_*_uniform`) reçoivent l'entrée active déjà résolue au lieu de la chercher.
+- Coût mémoire : 128 × 20 o ≈ 2,5 Ko par programme (≈ +4 % de `sgl_program_t`).
+
+Performance :
+- [ ] `driver` GFXBench (9 `glUniform*` par draw, 2 500 draws) : `[PERF]` `uniform` (temps par appel) doit
+      baisser nettement ; FPS `driver` en A/B (B6 contre B6 + C4)
+- [ ] Egypt / T-Rex : gain faible attendu (peu d'appels par draw), aucune régression
+
+Conformité dEQP-GLES2 (VK-GL-CTS, jamais `validation_test`) — ce sont les tests qui exercent chaque résultat
+mémorisé :
+- [ ] `functional.uniform_api.info.*`, `uniform_api.value.initial.*`, `uniform_api.value.assigned.*`
+      (by_pointer / by_value, render / get_uniform, basic / array / struct / nested_struct / bool / sampler,
+      variantes `vertex`, `fragment`, `both` : miroirs), `uniform_api.random.*`
+- [ ] Tests négatifs : `functional.negative_api.shader.uniform*` (mauvais type, mauvais nombre de composantes,
+      count > 1 sur un non-tableau, location invalide → `GL_INVALID_OPERATION` ; location `-2`, `-3`)
+- [ ] `functional.shaders.*` (indexing, loops, struct, conditionals : uniforms de contrôle, tableaux avec
+      stride Mesa 4 octets contre std140 16 octets ; `shaders.builtin_variable.*`)
+- [ ] `functional.state_query.shader.*` (`glGetUniform*`), `functional.lifetime.*` (relink → rebuild)
+- [ ] Régression complète en A/B
+
 ## Piste B5 — non retenue
 
 Les barrières `None + L2Cache | Descriptors | Zcull` après soumission (`dk_begin_frame`, `dk_submit_and_reset`,
