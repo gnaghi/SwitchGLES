@@ -248,6 +248,7 @@ static inline uint32_t dk_client_array_slot_size(const dk_backend_data_t *dk) {
  * @param size    Size of the freed block in bytes
  */
 void dk_vbo_free_insert(dk_backend_data_t *dk, uint32_t offset, uint32_t size);
+bool dk_vbo_free_reserve(dk_backend_data_t *dk, int extra);
 
 /**
  * Command buffer overflow callback.

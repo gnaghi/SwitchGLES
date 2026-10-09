@@ -214,11 +214,17 @@ static void sgl_buffer_data_impl(GLenum target, GLsizeiptr size, const void *dat
                 ctx->backend, size, buf->data_offset, (uint32_t)buf->size);
             if (new_offset != 0) {
                 buf->data_offset = new_offset;
+                buf->size = size;
             } else {
+                /* The old block is already queued for freeing: drop it so a
+                 * later glBufferData/glDeleteBuffers doesn't free it twice. */
+                buf->data_offset = 0;
+                buf->size = 0;
                 sgl_set_error(ctx, GL_OUT_OF_MEMORY);
             }
+        } else {
+            buf->size = size;
         }
-        buf->size = size;
         SGL_TRACE_BUFFER("glBufferData(0x%X, %zu, usage=0x%X, offset=%u)", target, (size_t)size,
                          usage, buf->data_offset);
         return;

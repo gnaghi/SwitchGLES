@@ -11,7 +11,6 @@
 #include <deko3d.h>
 
 /* Free-list block — shared type for VBO and texture memory reclamation */
-#define SGL_VBO_FREE_LIST_MAX 512
 #define SGL_TEX_FREE_LIST_MAX 256
 
 typedef struct {
@@ -102,9 +101,13 @@ typedef struct dk_backend_data {
     uint32_t data_offset;
     uint32_t data_offset_watermark; /* Peak VBO bump allocator usage */
 
-    /* VBO free list for memory reclamation */
-    sgl_vbo_free_block_t vbo_free_list[SGL_VBO_FREE_LIST_MAX];
+    /* VBO free list for memory reclamation, sorted by offset. Grown on demand
+     * (dk_vbo_free_reserve): a freed block that did not fit used to be
+     * dropped, and fragmentation under heavy orphaning (spearmint, 4-player
+     * split screen) leaked the VBO region that way. */
+    sgl_vbo_free_block_t *vbo_free_list;
     int vbo_free_count;
+    int vbo_free_capacity;
 
     /* Uniform buffer region */
     uint32_t uniform_base;
@@ -255,10 +258,13 @@ typedef struct dk_backend_data {
  * slot recorded with each entry (dk_wait_fence), or WaitIdle
  * (dk_submit_and_reset). Used by buffer orphaning: old allocation can't be
  * freed immediately because in-flight draws may still reference it.
- * Sized for SGL_FB_NUM frames of orphaning in flight. */
-#define SGL_DEFERRED_FREE_MAX 256
-    dk_deferred_free_t deferred_free[SGL_DEFERRED_FREE_MAX];
+ * Grown on demand (dk_buffer_data_orphan): it holds up to SGL_FB_NUM frames
+ * of orphaning, and an entry that did not fit would leak its block for good
+ * (spearmint in 4-player split screen orphans more than 256 blocks across
+ * three frames and filled the 192 MB VBO region that way). */
+    dk_deferred_free_t *deferred_free;
     int deferred_free_count;
+    int deferred_free_capacity;
 } dk_backend_data_t;
 
 /**

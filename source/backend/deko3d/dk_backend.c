@@ -171,6 +171,8 @@ void dk_backend_destroy(sgl_backend_t *be) {
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
     if (dk) {
         dk_shutdown(be);
+        free(dk->deferred_free);
+        free(dk->vbo_free_list);
         free(dk);
     }
 
@@ -285,6 +287,7 @@ int dk_init(sgl_backend_t *be, void *device) {
     dk->data_offset = 256; /* Reserve offset 0 as error indicator */
     dk->data_offset_watermark = 256;
     dk->vbo_free_count = 0; /* Free list starts empty */
+    dk->deferred_free_count = 0; /* Blocks of a previous device are gone with it */
 
     /* Reserve regions within data memory */
     dk->uniform_base = SGL_DATA_MEM_SIZE - SGL_UNIFORM_BUF_SIZE;

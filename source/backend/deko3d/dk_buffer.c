@@ -42,7 +42,29 @@ void dk_delete_buffer(sgl_backend_t *be, sgl_handle_t handle) {
  * Maintains a sorted (by offset) list of free blocks in the VBO region.
  * On free: insert block and coalesce with neighbors.
  * On alloc: first-fit search, then fall back to bump allocator.
+ * Offsets and sizes are all multiples of SGL_UNIFORM_ALIGNMENT: a freed block
+ * then fits exactly a later request of the same size. With unrounded sizes,
+ * each free block ended mid-granule and lost up to 255 bytes to the next
+ * request's alignment, so a stream of same-size orphans (spearmint in
+ * splitscreen) never reused them and kept bumping.
  * ============================================================================ */
+
+/* Makes room for `extra` more entries in the VBO free list. Returns false only
+ * when the list cannot grow (out of memory). */
+bool dk_vbo_free_reserve(dk_backend_data_t *dk, int extra) {
+    if (dk->vbo_free_count + extra <= dk->vbo_free_capacity)
+        return true;
+    int capacity = dk->vbo_free_capacity ? dk->vbo_free_capacity * 2 : 512;
+    while (capacity < dk->vbo_free_count + extra)
+        capacity *= 2;
+    sgl_vbo_free_block_t *grown =
+        (sgl_vbo_free_block_t *)realloc(dk->vbo_free_list, (size_t)capacity * sizeof(*grown));
+    if (!grown)
+        return false;
+    dk->vbo_free_list = grown;
+    dk->vbo_free_capacity = capacity;
+    return true;
+}
 
 /* Insert a freed block into the sorted VBO free-list, coalescing with the
  * previous and/or next block. Shared by dk_buffer_free() and the deferred-free
@@ -50,6 +72,9 @@ void dk_delete_buffer(sgl_backend_t *be, sgl_handle_t handle) {
 void dk_vbo_free_insert(dk_backend_data_t *dk, uint32_t offset, uint32_t size) {
     if (offset == 0 || size == 0)
         return;
+
+    /* Same rounding as dk_buffer_data, which reserved the whole rounded size */
+    size = SGL_ALIGN_UP(size, SGL_UNIFORM_ALIGNMENT);
 
     /* Only free blocks from the VBO region (not client_array or uniform) */
     if (offset >= dk->client_array_base)
@@ -95,9 +120,9 @@ void dk_vbo_free_insert(dk_backend_data_t *dk, uint32_t offset, uint32_t size) {
     }
 
     /* No coalescing possible — insert new block */
-    if (dk->vbo_free_count >= SGL_VBO_FREE_LIST_MAX) {
-        SGL_TRACE_BUFFER("buffer_free: free list full, leaking %u bytes at offset %u", size,
-                         offset);
+    if (!dk_vbo_free_reserve(dk, 1)) {
+        SGL_ERROR_BACKEND("buffer_free: out of memory for the free list, leaking %u bytes at %u",
+                          size, offset);
         return;
     }
 
@@ -131,6 +156,7 @@ uint32_t dk_buffer_data(sgl_backend_t *be, sgl_handle_t handle, GLenum target, G
     (void)usage;
 
     dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
+    uint32_t alloc_size = SGL_ALIGN_UP((uint32_t)size, SGL_UNIFORM_ALIGNMENT);
 
     /* First-fit search in free list */
     for (int i = 0; i < dk->vbo_free_count; i++) {
@@ -139,30 +165,30 @@ uint32_t dk_buffer_data(sgl_backend_t *be, sgl_handle_t handle, GLenum target, G
         uint32_t aligned = SGL_ALIGN_UP(block_offset, SGL_UNIFORM_ALIGNMENT);
         uint32_t alignment_waste = aligned - block_offset;
 
-        if (block_size >= alignment_waste + (uint32_t)size) {
+        if (block_size >= alignment_waste + alloc_size) {
             /* Found a fitting block */
-            uint32_t remaining = block_size - alignment_waste - (uint32_t)size;
+            uint32_t remaining = block_size - alignment_waste - alloc_size;
 
-            if (remaining >= SGL_UNIFORM_ALIGNMENT * 2) {
+            if (remaining > 0) {
                 /* Split: keep the tail remainder free. If there is alignment
                  * waste at the head (the block offset was not 256-aligned),
                  * keep it as its own free block instead of leaking it — it
                  * coalesces with neighbours on a later free. */
-                if (alignment_waste > 0 && dk->vbo_free_count < SGL_VBO_FREE_LIST_MAX) {
+                if (alignment_waste > 0 && dk_vbo_free_reserve(dk, 1)) {
                     memmove(&dk->vbo_free_list[i + 2], &dk->vbo_free_list[i + 1],
                             (dk->vbo_free_count - i - 1) * sizeof(sgl_vbo_free_block_t));
                     dk->vbo_free_list[i].offset = block_offset;
                     dk->vbo_free_list[i].size = alignment_waste;
-                    dk->vbo_free_list[i + 1].offset = aligned + (uint32_t)size;
+                    dk->vbo_free_list[i + 1].offset = aligned + alloc_size;
                     dk->vbo_free_list[i + 1].size = remaining;
                     dk->vbo_free_count++;
                 } else {
-                    dk->vbo_free_list[i].offset = aligned + (uint32_t)size;
+                    dk->vbo_free_list[i].offset = aligned + alloc_size;
                     dk->vbo_free_list[i].size = remaining;
                 }
             } else if (alignment_waste > 0) {
-                /* Allocation consumes the block (tiny tail over-allocated).
-                 * Preserve the head alignment waste rather than leaking it. */
+                /* Allocation consumes the block. Preserve the head alignment
+                 * waste rather than leaking it. */
                 dk->vbo_free_list[i].offset = block_offset;
                 dk->vbo_free_list[i].size = alignment_waste;
             } else {
@@ -188,7 +214,7 @@ uint32_t dk_buffer_data(sgl_backend_t *be, sgl_handle_t handle, GLenum target, G
 
     /* No free block fits — bump allocate */
     uint32_t aligned_offset = SGL_ALIGN_UP(dk->data_offset, SGL_UNIFORM_ALIGNMENT);
-    if (aligned_offset + size > dk->client_array_base) {
+    if (aligned_offset + alloc_size > dk->client_array_base) {
         SGL_ERROR_BACKEND(
             "Buffer allocation failed: out of memory (need %u at offset %u, limit %u)",
             (unsigned)size, aligned_offset, dk->client_array_base);
@@ -203,7 +229,7 @@ uint32_t dk_buffer_data(sgl_backend_t *be, sgl_handle_t handle, GLenum target, G
         dk->cpu_store_pending = true;
     }
 
-    dk->data_offset = aligned_offset + size;
+    dk->data_offset = aligned_offset + alloc_size;
     if (dk->data_offset > dk->data_offset_watermark)
         dk->data_offset_watermark = dk->data_offset;
     return aligned_offset;
@@ -233,8 +259,25 @@ uint32_t dk_buffer_data_orphan(sgl_backend_t *be, GLsizeiptr size, uint32_t old_
      * covers them all: freed in dk_wait_fence for that slot, or earlier in
      * dk_submit_and_reset after WaitIdle. */
     if (old_offset != 0 && old_size != 0 &&
-        old_offset < dk->client_array_base && /* Only VBO region blocks */
-        dk->deferred_free_count < SGL_DEFERRED_FREE_MAX) {
+        old_offset < dk->client_array_base) { /* Only VBO region blocks */
+        if (dk->deferred_free_count == dk->deferred_free_capacity) {
+            int capacity = dk->deferred_free_capacity ? dk->deferred_free_capacity * 2 : 256;
+            dk_deferred_free_t *grown = (dk_deferred_free_t *)realloc(
+                dk->deferred_free, (size_t)capacity * sizeof(*grown));
+            if (!grown) {
+                /* No memory to remember the block: wait for the GPU and
+                 * reuse it now rather than lose it. */
+                SGL_ERROR_BACKEND("deferred free list: out of memory, waiting idle");
+                dk_submit_and_reset(dk);
+                dk_vbo_free_insert(dk, old_offset, old_size);
+                old_size = 0;
+            } else {
+                dk->deferred_free = grown;
+                dk->deferred_free_capacity = capacity;
+            }
+        }
+    }
+    if (old_offset != 0 && old_size != 0 && old_offset < dk->client_array_base) {
         dk->deferred_free[dk->deferred_free_count].offset = old_offset;
         dk->deferred_free[dk->deferred_free_count].size = old_size;
         dk->deferred_free[dk->deferred_free_count].slot = dk->current_slot;
