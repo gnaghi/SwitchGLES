@@ -600,7 +600,17 @@ GL_APICALL void GL_APIENTRY glCompileShader(GLuint shader) {
          * reserved operators, qualification order, preprocessor restrictions, etc. */
         glslt_stage_t stage = (sh->type == GL_VERTEX_SHADER) ? GLSLT_VERTEX : GLSLT_FRAGMENT;
         char val_error[256];
-        if (!glslt_validate_es100(sh->source, stage, val_error, sizeof(val_error))) {
+        /* The language rules are checked on the preprocessed source, so that
+         * a construct inside an inactive #if block (spearmint's lightall_fp:
+         * textureCubeLod under #if defined(USE_CUBEMAP)) is not rejected. A
+         * preprocessor error leaves it NULL: the raw source is checked and
+         * the Mesa compile below reports the error. */
+        char *preprocessed = uam_preprocess(
+            sh->type == GL_VERTEX_SHADER ? DkStage_Vertex : DkStage_Fragment, sh->source);
+        int valid =
+            glslt_validate_es100(sh->source, preprocessed, stage, val_error, sizeof(val_error));
+        uam_free_preprocessed(preprocessed);
+        if (!valid) {
             sh->compiled = false;
             sh->info_log = strdup(val_error);
             SGL_TRACE_SHADER("glCompileShader(%u) - ES validation failed: %s", shader, val_error);

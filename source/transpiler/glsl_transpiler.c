@@ -1418,8 +1418,9 @@ static char *normalize_source(const char *source) {
 
 /* Public API: validate GLES 1.00 semantics at compile time.
  * Normalizes source before validation (inserts newlines). */
-static int glslt_validate_es100_impl(glslt_ctx_t *ctx, const char *source, glslt_stage_t stage,
-                                     char *error, int error_size) {
+static int glslt_validate_es100_impl(glslt_ctx_t *ctx, const char *source,
+                                     const char *preprocessed, glslt_stage_t stage, char *error,
+                                     int error_size) {
     if (!source) {
         snprintf(error, error_size, "source is NULL");
         return 0;
@@ -1433,7 +1434,9 @@ static int glslt_validate_es100_impl(glslt_ctx_t *ctx, const char *source, glslt
     if (!validate_preprocessor_undefined(source, error, error_size)) {
         return 0;
     }
-    char *norm = normalize_source(source);
+    /* Language rules: on the preprocessed text when available (inactive #if
+     * blocks removed, macros expanded), as the compiler sees it. */
+    char *norm = normalize_source(preprocessed ? preprocessed : source);
     if (!norm) {
         snprintf(error, error_size, "out of memory");
         return 0;
@@ -2129,13 +2132,14 @@ glslt_result_t glslt_transpile(const char *source, glslt_stage_t stage,
     return r;
 }
 
-int glslt_validate_es100(const char *source, glslt_stage_t stage, char *error, int error_size) {
+int glslt_validate_es100(const char *source, const char *preprocessed, glslt_stage_t stage,
+                         char *error, int error_size) {
     glslt_ctx_t *ctx = (glslt_ctx_t *)calloc(1, sizeof(*ctx));
     if (!ctx) {
         snprintf(error, error_size, "out of memory (transpiler context)");
         return 0;
     }
-    int ok = glslt_validate_es100_impl(ctx, source, stage, error, error_size);
+    int ok = glslt_validate_es100_impl(ctx, source, preprocessed, stage, error, error_size);
     free(ctx);
     return ok;
 }

@@ -237,8 +237,13 @@ int glslt_type_std140_align(glslt_type_t type);
 /* Validate GLES 1.00 semantic rules at compile time.
  * Returns 1 if valid, 0 if invalid (error message written to error[]).
  * stage: GLSLT_VERTEX or GLSLT_FRAGMENT.
- * Source should be raw GLSL ES 1.00 (not yet transpiled). */
-int glslt_validate_es100(const char *source, glslt_stage_t stage, char *error, int error_size);
+ * Source should be raw GLSL ES 1.00 (not yet transpiled): the preprocessor
+ * directives are checked on it. preprocessed, when not NULL, is the same
+ * source after the preprocessor (uam_preprocess): the language rules are
+ * checked on it, so that code in an inactive #if block or hidden behind a
+ * macro is judged as the compiler sees it. NULL checks them on source. */
+int glslt_validate_es100(const char *source, const char *preprocessed, glslt_stage_t stage,
+                         char *error, int error_size);
 
 #ifdef __cplusplus
 }
