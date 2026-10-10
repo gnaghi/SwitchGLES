@@ -46,6 +46,40 @@ static const GLint s_compressed_formats[] = {
 };
 #define NUM_COMPRESSED_FORMATS (sizeof(s_compressed_formats) / sizeof(s_compressed_formats[0]))
 
+/* Extensions, in the order glGetString(GL_EXTENSIONS) lists them. glGetStringi
+ * (ES 3.0) indexes the same table. */
+static const char *const s_extensions[] = {
+    "GL_OES_rgb8_rgba8",
+    "GL_OES_depth24",
+    "GL_OES_packed_depth_stencil",
+    "GL_OES_element_index_uint",
+    "GL_OES_compressed_ETC1_RGB8_texture",
+    "GL_EXT_blend_minmax",
+    "GL_EXT_texture_compression_s3tc",
+    "GL_KHR_texture_compression_astc_ldr",
+    "GL_OES_standard_derivatives",
+    "GL_OES_texture_half_float",
+    "GL_OES_texture_half_float_linear",
+    "GL_EXT_texture_format_BGRA8888",
+    "GL_ARB_framebuffer_object",
+    "GL_EXT_shader_texture_lod",
+    "GL_EXT_debug_marker",
+};
+#define NUM_EXTENSIONS (sizeof(s_extensions) / sizeof(s_extensions[0]))
+
+/* Space-separated list of s_extensions, built on first use */
+static const char *sgl_extensions_string(void) {
+    static char s_buf[512];
+    if (s_buf[0] == '\0') {
+        size_t len = 0;
+        for (size_t i = 0; i < NUM_EXTENSIONS; i++) {
+            len += (size_t)snprintf(s_buf + len, sizeof(s_buf) - len, "%s%s", i ? " " : "",
+                                    s_extensions[i]);
+        }
+    }
+    return s_buf;
+}
+
 /* Error Function */
 
 GL_APICALL GLenum GL_APIENTRY glGetError(void) {
@@ -71,21 +105,7 @@ GL_APICALL const GLubyte *GL_APIENTRY glGetString(GLenum name) {
         case GL_SHADING_LANGUAGE_VERSION:
             return (const GLubyte *)"OpenGL ES GLSL ES 1.00";
         case GL_EXTENSIONS:
-            return (const GLubyte *)"GL_OES_rgb8_rgba8 "
-                                    "GL_OES_depth24 "
-                                    "GL_OES_packed_depth_stencil "
-                                    "GL_OES_element_index_uint "
-                                    "GL_OES_compressed_ETC1_RGB8_texture "
-                                    "GL_EXT_blend_minmax "
-                                    "GL_EXT_texture_compression_s3tc "
-                                    "GL_KHR_texture_compression_astc_ldr "
-                                    "GL_OES_standard_derivatives "
-                                    "GL_OES_texture_half_float "
-                                    "GL_OES_texture_half_float_linear "
-                                    "GL_EXT_texture_format_BGRA8888 "
-                                    "GL_ARB_framebuffer_object "
-                                    "GL_EXT_shader_texture_lod "
-                                    "GL_EXT_debug_marker";
+            return (const GLubyte *)sgl_extensions_string();
         default: {
             sgl_context_t *ctx = sgl_get_current_context();
             if (!ctx)
@@ -432,7 +452,9 @@ GL_APICALL void GL_APIENTRY glGetIntegerv(GLenum pname, GLint *params) {
             *params = 1;
             break;
         case GL_NUM_EXTENSIONS:
-            *params = 0; /* Use glGetString(GL_EXTENSIONS) instead */
+            /* ES 2.0 contexts keep answering 0 (Spearmint then falls back to
+             * glGetString(GL_EXTENSIONS)); ES 3.0 counts the glGetStringi table */
+            *params = sgl_ctx_is_es3(ctx) ? (GLint)NUM_EXTENSIONS : 0;
             break;
 
         default:
@@ -939,12 +961,24 @@ GL_APICALL void GL_APIENTRY glSampleCoverage(GLfloat value, GLboolean invert) {
     ctx->sample_coverage_invert = invert != 0;
 }
 
-/* GL 3.0 stub (needed by Spearmint, not used in GLES2 path) */
+/* Indexed string query (ES 3.0 §6.1.6). ES 2.0 contexts have no such entry
+ * point; they keep the former behaviour (an empty string, no error) because
+ * Spearmint loads it through eglGetProcAddress. */
 
 GL_APICALL const GLubyte *GL_APIENTRY glGetStringi(GLenum name, GLuint index) {
-    (void)name;
-    (void)index;
-    return (const GLubyte *)"";
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx || !sgl_ctx_is_es3(ctx))
+        return (const GLubyte *)"";
+
+    if (name != GL_EXTENSIONS) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return NULL;
+    }
+    if (index >= NUM_EXTENSIONS) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return NULL;
+    }
+    return (const GLubyte *)s_extensions[index];
 }
 
 /* Fixed-function stubs (loaded by Spearmint QGL_1_1_PROCS but never called by renderergl2) */
