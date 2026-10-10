@@ -122,6 +122,8 @@ const sgl_backend_ops_t dk_backend_ops = {
     /* Sync Operations (dk_command.c) */
     .flush = dk_flush,
     .finish = dk_finish,
+    .fence_sync = dk_fence_sync,
+    .wait_sync = dk_wait_sync,
 
     /* Misc Operations (dk_state.c) */
     .set_depth_bias = NULL, /* Removed: bias and line width are recorded with apply_raster */

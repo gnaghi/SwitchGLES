@@ -59,6 +59,7 @@
 #define SGL_MAX_ATTRIB_BINDINGS 32 /* Capacity for attrib_bindings[] */
 #define SGL_MAX_UNIFORMS 16
 #define SGL_MAX_TEXTURE_UNITS 16
+#define SGL_MAX_SYNCS 64 /* GLES 3.0 fence sync objects alive at once */
 
 /* Packed UBO configuration */
 #define SGL_MAX_PACKED_UBO_SIZE 8192 /* Max bytes per packed UBO (supports 128 bones) */
@@ -345,6 +346,13 @@ typedef struct sgl_renderbuffer {
     bool delete_pending; /* glDeleteRenderbuffers called, but still referenced by FBO(s) */
     int fbo_ref_count;   /* Number of FBO attachment points referencing this RB */
 } sgl_renderbuffer_t;
+
+/* Fence sync object (GLES 3.0). The GPU fence itself lives in the backend,
+ * indexed like the sync object; the GLsync handle is that index + 1. */
+typedef struct sgl_sync {
+    bool used;
+    bool signaled; /* Seen signaled once: never waited on again */
+} sgl_sync_t;
 
 /* Vertex attribute state */
 typedef struct sgl_vertex_attrib {

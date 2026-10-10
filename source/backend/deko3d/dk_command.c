@@ -518,3 +518,40 @@ void dk_finish(sgl_backend_t *be) {
     SGL_TRACE_BACKEND("finish");
 }
 
+bool dk_fence_sync(sgl_backend_t *be, uint32_t index) {
+    dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
+    DkFence *fence = &dk->sync_fences[index];
+
+    if (dkQueueIsInErrorState(dk->queue)) {
+        SGL_ERROR_BACKEND("fence_sync: GPU queue in ERROR STATE — no fence recorded");
+        return false;
+    }
+
+    /* deko3d fills the DkFence when the signal command is submitted
+     * (Queue::signalFence); until then it is Empty, which dkFenceWait reports
+     * as signaled. So the commands are submitted right here (GLES 3.0 §5.2.1
+     * leaves the flush point to the implementation), and no fence depends on
+     * a later SYNC_FLUSH_COMMANDS_BIT. flush = true adds a cache flush, so
+     * the GPU writes are visible to the CPU once the fence has signaled. */
+    if (dk->cmdbuf_submitted) {
+        /* eglSwapBuffers already submitted everything recorded so far */
+        dkQueueSignalFence(dk->queue, fence, true);
+        dkQueueFlush(dk->queue);
+    } else {
+        dkCmdBufSignalFence(dk->cmdbuf, fence, true);
+        dk_flush(be);
+    }
+
+    SGL_TRACE_BACKEND("fence_sync index=%u", index);
+    return true;
+}
+
+bool dk_wait_sync(sgl_backend_t *be, uint32_t index, uint64_t timeout_ns) {
+    dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
+
+    /* dkFenceWait counts whole microseconds in an s32 (dk_fence.cpp): a
+     * longer timeout (over ~35 minutes) waits without limit. */
+    int64_t timeout = (timeout_ns > (uint64_t)INT32_MAX * 1000u) ? -1 : (int64_t)timeout_ns;
+    return dkFenceWait(&dk->sync_fences[index], timeout) == DkResult_Success;
+}
+

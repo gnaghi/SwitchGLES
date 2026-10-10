@@ -88,6 +88,8 @@ typedef struct dk_backend_data {
     /* Fences for synchronization */
     DkFence fences[SGL_FB_NUM];
     bool fence_active[SGL_FB_NUM];
+    /* GLES 3.0 fence sync objects (dk_fence_sync), indexed like the GL ones */
+    DkFence sync_fences[SGL_MAX_SYNCS];
 
     /* Shader code memory */
     DkMemBlock code_memblock;

@@ -191,6 +191,26 @@ void dk_flush(sgl_backend_t *be);
 void dk_finish(sgl_backend_t *be);
 
 /**
+ * Make sync fence `index` signal after every command issued so far, and
+ * submit those commands (glFenceSync).
+ *
+ * @param be     Backend pointer
+ * @param index  Sync object index (< SGL_MAX_SYNCS)
+ * @return false if the GPU queue is in error state (nothing recorded)
+ */
+bool dk_fence_sync(sgl_backend_t *be, uint32_t index);
+
+/**
+ * Wait for sync fence `index` (glClientWaitSync / sync status queries).
+ *
+ * @param be          Backend pointer
+ * @param index       Sync object index (< SGL_MAX_SYNCS)
+ * @param timeout_ns  Maximum wait, 0 = poll
+ * @return true once the fence has signaled
+ */
+bool dk_wait_sync(sgl_backend_t *be, uint32_t index, uint64_t timeout_ns);
+
+/**
  * Submit current command buffer, wait for GPU, and reset for continued use.
  * Called by flush, finish, and orphan overflow recovery.
  *

@@ -175,6 +175,13 @@ struct sgl_backend_ops {
     /* ======== Sync Operations ======== */
     void (*flush)(sgl_backend_t *be);
     void (*finish)(sgl_backend_t *be);
+    /* Fence sync objects (GLES 3.0), index < SGL_MAX_SYNCS. fence_sync makes
+     * fence `index` signal once every command issued so far has completed,
+     * and submits those commands; false if the GPU queue is unusable.
+     * wait_sync waits up to timeout_ns (0 = poll) and returns true once the
+     * fence has signaled. */
+    bool (*fence_sync)(sgl_backend_t *be, uint32_t index);
+    bool (*wait_sync)(sgl_backend_t *be, uint32_t index, uint64_t timeout_ns);
 
     /* ======== Misc Operations ======== */
     /* (line width is part of apply_raster: sgl_raster_state_t.line_width) */
