@@ -29,17 +29,6 @@
 #include "dk_internal.h"
 #include "../../context/sgl_context.h"
 
-/* deko3d 0.5.0 blend.dst workaround — accesses DkCmdBuf internal layout.
- * Offsets 112/120 = m_cmdPos/m_cmdEnd pointers in deko3d 0.5.0.
- * GPU method 0x786 = Maxwell IndependentBlend[0].DstAlphaFactor.
- * If the deko3d struct layout changes, this silently breaks. */
-#define DK_CMDBUF_CMDPOS_OFFSET 112 /* DkCmdBuf::m_cmdPos (deko3d 0.5.0) */
-#define DK_CMDBUF_CMDEND_OFFSET 120 /* DkCmdBuf::m_cmdEnd (deko3d 0.5.0) */
-#define NV_BLEND0_DST_ALPHA_METHOD 0x786
-/* Worst-case 32-bit words emitted by the blend recording sequence
- * (BindColorState + BindBlendStates + raw patch + SetBlendConst). Generous. */
-#define DK_BLEND_SEQ_RESERVE_WORDS 64
-
 /* True when the group's entry is recorded and equal to `key`. */
 #define DK_SC_SAME(dk, bit, field, key)                                                            \
     (((dk)->state_cache.valid & (bit)) && memcmp(&(dk)->state_cache.field, (key), sizeof(*(key))) == 0)
@@ -199,20 +188,6 @@ void dk_apply_blend(sgl_backend_t *be, const sgl_blend_state_t *state) {
     if (DK_SC_SAME(dk, DK_SC_BLEND, blend, &key))
         return;
 
-    /* The blend.dst workaround below patches a raw GPU register directly into
-     * the cmdbuf and MUST land in the same cmdbuf as its BindBlendStates. If
-     * the cmdbuf is nearly full, flush NOW — before recording any blend
-     * command — so the whole sequence stays coherent. Flushing mid-sequence
-     * would split BindBlendStates from its patch and reset the uniform/client
-     * allocators in the middle of state application. */
-    if (state->enabled) {
-        uint32_t **pos_ptr = (uint32_t **)((uint8_t *)dk->cmdbuf + DK_CMDBUF_CMDPOS_OFFSET);
-        uint32_t **end_ptr = (uint32_t **)((uint8_t *)dk->cmdbuf + DK_CMDBUF_CMDEND_OFFSET);
-        if (*pos_ptr + DK_BLEND_SEQ_RESERVE_WORDS > *end_ptr) {
-            dk_submit_and_reset(dk);
-        }
-    }
-
     DkColorState colorState;
     memset(&colorState, 0, sizeof(colorState));
     dkColorStateDefaults(&colorState);
@@ -227,35 +202,6 @@ void dk_apply_blend(sgl_backend_t *be, const sgl_blend_state_t *state) {
         const DkBlendState *blendState = &key.blend;
 
         dkCmdBufBindBlendStates(dk->cmdbuf, 0, blendState, 1);
-
-        /* Workaround: deko3d 0.5.0 has a copy-paste bug where
-         * dkCmdBufBindBlendStates writes dstColorBlendFactor into BOTH
-         * the FuncRgbDst and FuncAlphaDst GPU registers. Fix by writing
-         * the correct dstAlphaBlendFactor directly to the GPU register.
-         * Fixed in deko3d commit 63744e9 but we link the pre-built lib.
-         * Room was already reserved at the top of this function, so no
-         * mid-sequence flush is needed here (see DK_BLEND_SEQ_RESERVE_WORDS).
-         * The patch is part of the blend sequence: it is recorded with every
-         * BindBlendStates, never skipped on its own. */
-        {
-            uint32_t alpha_dst = (uint32_t)blendState->dstAlphaBlendFactor;
-            uint32_t gpu_val = (alpha_dst > 31) ? ((alpha_dst & 0x1f) | 0xc000) : alpha_dst;
-            /* NV method header: mode=1(incr), count=1, subchannel=0 */
-            uint32_t cmd[2] = {0x20010000 | NV_BLEND0_DST_ALPHA_METHOD, gpu_val};
-            uint32_t **pos_ptr = (uint32_t **)((uint8_t *)dk->cmdbuf + DK_CMDBUF_CMDPOS_OFFSET);
-            uint32_t **end_ptr = (uint32_t **)((uint8_t *)dk->cmdbuf + DK_CMDBUF_CMDEND_OFFSET);
-            uint32_t *pos = *pos_ptr;
-            if (pos + 2 <= *end_ptr) {
-                pos[0] = cmd[0];
-                pos[1] = cmd[1];
-                *pos_ptr = pos + 2;
-            } else {
-                /* Should not happen: reserve at function top guarantees room.
-                 * Skip the patch rather than flush mid-sequence (which would
-                 * split it from its BindBlendStates). */
-                SGL_ERROR_BACKEND("apply_blend: no room for dst-alpha patch");
-            }
-        }
 
         /* Apply blend constant color */
         dkCmdBufSetBlendConst(dk->cmdbuf, state->color[0], state->color[1], state->color[2],

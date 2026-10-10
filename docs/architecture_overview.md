@@ -208,7 +208,7 @@ typedef struct sgl_backend {
 | `dk_utils.c` | 442 | Format conversion tables, stencil/compare op mapping, compressed format lookup |
 | `dk_backend.c` | 439 | Device creation, memory pool init/destroy, backend ops vtable |
 | `dk_shader.c` | 399 | DKSH binary loading, code memory allocation, program linking, shader binding |
-| `dk_state.c` | 347 | Depth/stencil/blend/raster state → deko3d state conversion, blend.dst workaround |
+| `dk_state.c` | 347 | Depth/stencil/blend/raster state → deko3d state conversion |
 | `dk_clear.c` | 214 | glClear → dkCmdBufClearColor/DepthStencil with scissor, barriers |
 | `dk_buffer.c` | 242 | VBO free-list allocator (first-fit + coalescing), buffer data upload |
 | `dk_uniform.c` | 81 | Uniform ring buffer allocator (per-frame bump) |
