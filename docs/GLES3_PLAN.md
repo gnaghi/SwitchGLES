@@ -66,6 +66,7 @@ This branch adds:
 | `db00d52` | Fence sync objects (`glFenceSync` … `glGetSynciv`) implemented on `DkFence` |
 | `6a762a8` | The other 95 ES 3.0 entry points are `GL_INVALID_OPERATION` stubs, so all 104 functions of `gl3.h` link |
 | `19e0752` | `glGetInteger64v`, `GL_MAX_ELEMENT_INDEX`, `GL_MAX_SERVER_WAIT_TIMEOUT` (step 2) |
+| `83014c1` | `gl_es3_defaults.c`: the GLES 3.0 state dEQP resets between test cases (`gluStateReset.cpp` resetStateES) accepted at its default value, validated, queryable; non-default values are `GL_INVALID_OPERATION` until their feature exists |
 
 Outside this repository (none pushed, none on a master branch):
 
@@ -483,7 +484,9 @@ directory used for dEQP-GLES2:
 - Not done yet: `manage_tests.py` still knows only GLES2 (baseline
   `gles3-main.txt` from `CTS/external/openglcts/data/gl_cts/data/mustpass/gles/aosp_mustpass/3.2.2.x/`,
   `dEQP-GLES3` prefix, separate `lists/gles3/`); until then caselists are written by
-  hand, one trie line per file.
+  hand, one trie line per file. dEQP only matches **leaf case names**: a caselist
+  must list the cases themselves (taken from `CTS/android/cts/main/gles3-main-*.txt`,
+  e.g. with `manage_tests.flat_to_trie`), not group names.
 - Do **not** advertise `EGL_KHR_get_all_proc_addresses`: it would make
   `egluGLContextFactory.cpp:425-473` load every function through `eglGetProcAddress`,
   for dEQP-GLES2 too.
