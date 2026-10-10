@@ -28,11 +28,12 @@ Line references are taken from the working trees on that date:
    close to the GLES2 pass rate.
 3. **No faked features.** An entry point that is not implemented lives in
    `SGL/source/gl/gl_es3_stubs.c`. It sets `GL_INVALID_OPERATION`, logs its first call
-   and returns a neutral value. It is never listed by `eglGetProcAddress`. When a step
-   implements a function, the function leaves that file and enters the
-   `eglGetProcAddress` table.
+   and returns a neutral value. When a step implements a function, the function leaves
+   that file. No ES 3.0 function, implemented or not, is listed by `eglGetProcAddress`
+   before step 15: engines that probe entry points (Spearmint, SDL) would otherwise see
+   ES 3.0 functions in their ES 2.0 contexts. dEQP-GLES3 links them directly (§7).
 4. **`GL_VERSION` stays "OpenGL ES 2.0"** and `GL_SHADING_LANGUAGE_VERSION` stays
-   "GLSL ES 1.00", even in an ES 3.0 context, until the last step (§6, step 14).
+   "GLSL ES 1.00", even in an ES 3.0 context, until the last step (§6, step 15).
    dEQP-GLES3 does not parse `GL_VERSION`: it relies on the context type it asked EGL
    for (see §7). So the tests can run long before the strings change.
 
@@ -64,6 +65,16 @@ This branch adds:
 | `04894c8` | `glGetStringi` and `GL_NUM_EXTENSIONS` for ES 3.0 contexts; the extension list is now a table and `glGetString(GL_EXTENSIONS)` is unchanged (byte-identical) |
 | `db00d52` | Fence sync objects (`glFenceSync` … `glGetSynciv`) implemented on `DkFence` |
 | `6a762a8` | The other 95 ES 3.0 entry points are `GL_INVALID_OPERATION` stubs, so all 104 functions of `gl3.h` link |
+| `19e0752` | `glGetInteger64v`, `GL_MAX_ELEMENT_INDEX`, `GL_MAX_SERVER_WAIT_TIMEOUT` (step 2) |
+
+Outside this repository (none pushed, none on a master branch):
+
+| Where | Branch / files | Content |
+|---|---|---|
+| uam | branch `gles3-es300`: `9a7940a`, `44590dc` | Uniform blocks without a binding get bindings 2, 3, …; shaders after GLSL ES 1.00 get 4 draw buffers (§5.2 items 1, 2, 4) |
+| deko3d | branch `transform-feedback`: `70316aa`, `9f60ff7`, `6781084` | Transform feedback registers and API (§3.10) |
+| deko3d_review | `tests/tfb_tests.c` (not versioned) | Hardware checks of every unverified TFB fact, built as `build/tfb_tests_tfb.nro` |
+| VK-GL-CTS | `targets/switch-gles3/`, `framework/platform/switch/build_nro_gles3.sh` (new, untracked), build dir `build-switch-gles3/` | dEQP-GLES3 for Switch (§7) |
 
 ## 3. Inventory
 
@@ -159,8 +170,51 @@ problem.
 | Separate read/draw bindings | partial (fields exist, `sgl_context.h:44-45`) | completeness per target | S / low | – |
 | `glInvalidateFramebuffer` / `glInvalidateSubFramebuffer` | stub | Validation, then no-op (allowed: it is a hint), or `dkCmdBufDiscardColor/DepthStencil` (DK/h:1315-1316) for a perf win | S / low | – |
 | `glBlitFramebuffer` ES 3.0 rules | partial | Add validation (§4.3.3 errors). Depth/stencil blits work through the 2D engine with NEAREST (`ZF32`→R32F, `Z24S8`→BGRA8 surface formats, dk_image.cpp:552-660). Int/depth formats lack `CanUse2DFilter` | M / medium | MSAA for resolve |
-| Multisample renderbuffers + resolve blit, `GL_MAX_SAMPLES` ≥ 4 | **fake** today (`gl_framebuffer.c:1255`) | `DkImageLayoutMaker.msMode` with `DkImageType_2DMS` (DK/h:538-544), `DkMultisampleState` (DK/h:840-852), `dkCmdBufResolveImage` (DK/h:1329: whole image only, so use `BlitImage` for sub-rects, dk_image.cpp:602-616) | L / medium | sized formats, MRT |
+| Multisample renderbuffers + resolve blit, `GL_MAX_SAMPLES` ≥ 4 (4x real MSAA, decided Oct 2026) | **fake** today (`gl_framebuffer.c:1255` ignores `samples`) | See "MSAA design" below | L / medium | sized formats, MRT |
 | Default framebuffer MSAA (`EGL_SAMPLES`) | missing | swapchain images with msMode, plus a resolve at swap | M / medium | MSAA |
+
+#### MSAA design (step 12b)
+
+The user asked for real multisampling: `GL_MAX_SAMPLES` = 4 (ES 3.0 minimum) and
+`GL_SAMPLES`/`GL_NUM_SAMPLE_COUNTS` from `glGetInternalformativ` listing 4 (and 2, both
+supported by the hardware; 8 possible later).
+
+- **Storage.** `glRenderbufferStorageMultisample(samples > 0)` rounds `samples` up to
+  2 or 4 (ES 3.0 §4.4.2.1: at least the requested count, `GL_INVALID_OPERATION` above
+  `GL_MAX_SAMPLES` for the format) and creates a `DkImageType_2DMS` image (DK/h:365)
+  with `DkImageLayoutMaker.msMode = DkMsMode_2x/4x` (DK/h:540-543, field at DK/h:568),
+  flags `DkImageFlags_UsageRender | DkImageFlags_Usage2DEngine` (DK/h:384), so it can be
+  both rendered to and resolved. deko3d lays out 2DMS images itself
+  (DK/source/dk_image.cpp:257, 299-302). Depth/stencil renderbuffers use the same
+  `msMode` with a depth format. `samples = 0` keeps the current single-sample path, so
+  `glRenderbufferStorage` and ES 2.0 are unchanged.
+- **Rendering.** An FBO is multisampled when its attachments are (they must all have the
+  same sample count, else `GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE`). Binding it records
+  `dkCmdBufBindMultisampleState` (DK/h:1281) with `DkMultisampleState.mode =
+  rasterizerMode = DkMsMode_4x` (DK/h:840-866) and the standard sample locations; binding
+  a single-sample target records the 1x state again. `GL_SAMPLE_COVERAGE` and
+  `GL_SAMPLE_ALPHA_TO_COVERAGE`, which are stored but unused today (`sgl_context.h:60-66`),
+  become real: `dkCmdBufSetSampleMask` (DK/h:1301) for the coverage mask and the alpha-to-
+  coverage field (`alphaToCoverageEnable`, DK/h:844). `GL_SAMPLE_BUFFERS`/`GL_SAMPLES` queries report the bound FBO.
+- **Resolve.** `glBlitFramebuffer` from a multisampled read FBO to a single-sample draw
+  FBO (ES 3.0 §4.3.3: same rect, no scaling, `GL_INVALID_OPERATION` otherwise):
+  `dkCmdBufResolveImage(src, dst)` (DK/h:1329) when the rect covers the whole image
+  (the call has no rect; it checks a multisampled source, a single-sample destination,
+  non-layered images of the same size, DK/source/dk_image.cpp:662-691). For a sub-rect:
+  `dkCmdBufBlitImage`, which reads a multisampled source by scaling the sample
+  coordinates (DK/source/dk_image.cpp:602-616), with `DkBlitFlag_FilterNearest`. To be
+  checked on hardware: whether that blit averages the samples like a resolve or takes
+  one; if it takes one, resolve the whole image into a temporary image, then blit the
+  rect.
+- **Default framebuffer.** `EGL_SAMPLES = 4` configs need multisampled swapchain-side
+  render targets plus a resolve at `eglSwapBuffers` into the presented image. That is a
+  separate sub-step (not needed by dEQP-GLES3, which renders to FBOs for multisample
+  tests and to the default framebuffer with whatever config it gets).
+- **Sampling** a multisampled image is ES 3.1 (`sampler2DMS`), not needed; deko3d would
+  use `dkImageDescriptorInitialize(..., decayMS)` (DK/h:1360).
+- **Validation:** dEQP-GLES3 `functional.multisample.fbo_4_samples.*`,
+  `functional.fbo.msaa.*`, `functional.blit.*` resolve cases,
+  `functional.state_query.internal_format.*`.
 
 ### 3.7 Programs, uniforms, uniform blocks
 
@@ -195,7 +249,49 @@ problem.
 
 | Item | Status | Where / mechanism | Effort / risk | Deps |
 |---|---|---|---|---|
-| `glTransformFeedbackVaryings`, `glBegin/End/Pause/ResumeTransformFeedback`, TF objects, `GL_RASTERIZER_DISCARD` | stub | **Not exposed by deko3d** (no API in DK/h:1236-1370). `deko3d_review/N1-transform-feedback-design.md` describes the work: StrmOut registers in `engine_3d.def` (TFB_BUFFER_* 0x0E0+8i, TFB_STREAM/VARYING_COUNT/STRIDE 0x1C0+4i, TFB_ENABLE 0x1D1, TFB_VARYING_LOCS 0xA00), new `dkCmdBufBindTransformFeedbackLayouts/Buffers/Begin/End/Resume`, and an indexed counter report. uam needs no change for vertex-shader capture. In SwitchGLES: varyings → hardware slots (0x20 + 4·location + component) from uam varying reflection | L (deko3d) + M (GL) / **high** (unverified registers, console-only debugging) | deko3d fork work, indexed bindings, queries |
+| `glTransformFeedbackVaryings`, `glBegin/End/Pause/ResumeTransformFeedback`, TF objects, `GL_RASTERIZER_DISCARD` | stub | deko3d branch `transform-feedback` (below). In SwitchGLES: varying name → hardware slot `0x20 + 4·location + component` (`DK_TFB_SLOT_GENERIC`) from uam's varying reflection (`uam_get_varying_info` gives the location of each VS output), `gl_Position` → `DK_TFB_SLOT_POSITION`; interleaved = one layout, separate = one layout per buffer | M (GL) / **high** until the hardware test passes | deko3d branch, indexed bindings, queries |
+
+#### Transform feedback in deko3d (branch `transform-feedback`, decided Oct 2026)
+
+Done on the branch, following `deko3d_review/N1-transform-feedback-design.md`. Register
+offsets were checked against envytools rnndb `graph/gf100_3d.xml` (TFB stripe `0x0380`,
+`TFB_STREAM` `0x0700`, `TFB_ENABLE` `0x0744`, `TFB_VARYING_LOCS` `0x2800`, `DRAW_TFB_*`,
+`QUERY_GET` `STREAM` bits 5..7), the same values as the N1 table.
+
+- `70316aa` engine_3d.def: `TfbBuffer[4]` (Enable, Addr, Bytes, Offset), `TfbLayout[4]`
+  (Stream, VaryingCount, Stride), `TfbEnable`, `TfbVaryingLocs[128]`, `DrawTfbBase/Stride/
+  Bytes`, `SetReportSemaphore.Index` (bits 5..7).
+- `9f60ff7` API (`deko3d.h`): `DkTransformFeedbackLayout`, `DK_TFB_SLOT_*`,
+  `dkCmdBufBindTransformFeedbackLayouts`, `...Buffers`, `dkCmdBufBegin/EndTransformFeedback`,
+  `dkCmdBufSaveTransformFeedbackOffsets` (WaitForIdle + one `TransformFeedbackOffset`
+  report per buffer + full barrier), `dkCmdBufResumeTransformFeedback` and
+  `dkCmdBufDrawTransformFeedback` (offsets read by the GPU through gpfifo data entries,
+  like the indirect draws), in `DK/source/maxwell/gpu_3d_tfb.cpp`.
+- `6781084` `dkCmdBufDrawTransformFeedback` clears `DrawArraysFirst` first.
+
+Hardware test: `deko3d_review/tests/tfb_tests.c` → `deko3d_review/build/tfb_tests_tfb.nro`
+(linked with the branch's `libdeko3dd.a` copied to `build/tfb/`, shaders compiled at
+start-up by uam, no romfs). Each test prints PASS/FAIL; `--only <name>` runs one. What it
+must confirm:
+
+| Test | Fact to confirm | Used by |
+|---|---|---|
+| `basic` | TfbBuffer/TfbLayout/TfbVaryingLocs/TfbEnable offsets; slots `0x1C+c` (gl_Position) and `0x20+c` (output location 0); nothing written past the capture | everything |
+| `slots` | slot `0x20 + 4N + c` for locations 1 and 3, any component order | varying mapping in SwitchGLES |
+| `skip` | `0xFF` leaves the word untouched (informational, ES 3.0 does not need it) | – |
+| `report` | which word of the 16-byte `TransformFeedbackOffset` report holds the offset (deko3d assumes word 1 = byte 4, as nouveau; Primer.md says u64 at byte 0) | Resume, DrawTransformFeedback, `s_tfbOffsetWord` |
+| `index` | `SetReportSemaphore` Index bits select the buffer; two buffers captured at once | GL_SEPARATE_ATTRIBS, Save |
+| `resume` | `TfbBuffer::Offset` loaded from the saved report by a gpfifo entry; capture continues after pause | glPause/ResumeTransformFeedback |
+| `end` | `TfbEnable = 0` stops the capture | glEndTransformFeedback |
+| `overflow` | no write past `TfbBuffer::Bytes`; reported offset and primitives written for a full buffer (values printed) | GL overflow checks |
+| `counters` | `TransformFeedbackPrimitivesWritten` / `PrimitivesGenerated` count the captured points (word 0 of the report) | GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN, GL_PRIMITIVES_GENERATED (ES 3.2) |
+| `discard` | capture with `rasterizerEnable = 0`, nothing rasterized | GL_RASTERIZER_DISCARD |
+| `draw_tfb` | `DrawTfbBase/Stride/Bytes`: vertex count = saved offset / stride (runs after a draw with a non-zero first vertex) | ES 3.1 / GL 4 draw-from-TF (not ES 3.0), but proves the gpfifo path |
+| `align4` | buffer address aligned to 4 bytes only works | `DK_TRANSFORM_FEEDBACK_BUF_ALIGNMENT` (glBindBufferRange offset alignment) |
+| `triangles` | vertex order of captured triangles and lines | GL capture order |
+
+If `report` finds the offset in word 0, change `s_tfbOffsetWord` in `gpu_3d_tfb.cpp`; the
+`report` and `index` checks then need the same word.
 
 Transform feedback is the only ES 3.0 feature the stack cannot provide today. Every
 other item can land without it. dEQP-GLES3 `functional.transform_feedback.*` (and a few
@@ -303,8 +399,20 @@ branch.
    the varying → slot reflection is needed, and `uam_get_varying_info` already gives the
    locations.
 
-Item 1 (binding auto-assignment) and item 4 (`MaxDrawBuffers`) are small and isolated.
-Items 3 and 6 are API additions, M effort. All need a uam rebuild and a SwitchGLES relink
+Items 1, 2 and 4 are done on uam branch `gles3-es300` (not merged, not pushed):
+
+- `9a7940a`: unbound uniform blocks get sequential bindings starting at 2 (in the loop
+  that numbers unbound samplers; the members of an unnamed block share one binding, an
+  instance array takes one per element). This fixes item 2 too, as bindings ≥ 1 never
+  alias the remapped driver constbuf, and 0-1 stay free for SwitchGLES's packed UBOs.
+- `44590dc`: `MaxDrawBuffers`/`MaxColorAttachments` set per shader before compiling: 1
+  for GLSL ES 1.00 (so `gl_MaxDrawBuffers` stays 1, as `GL_MAX_DRAW_BUFFERS` in ES 2.0
+  contexts), 4 for every other version.
+
+Neither changes an ES 1.00 shader (no blocks, limit unchanged). Until step 12, an ES 3.00
+shader sees `gl_MaxDrawBuffers` = 4 while `GL_MAX_DRAW_BUFFERS` reports 1 (known
+mismatch, fixed by MRT). Built with meson in a worktree; not run on hardware. Items 3 and
+6 are API additions, M effort. All need a uam rebuild and a SwitchGLES relink
 (`-lSwitchGLES` bundles `libuam.a`).
 
 ## 6. Implementation order
@@ -316,9 +424,9 @@ below) built per §7, and, when marked **[ES2]**, also with the full dEQP-GLES2 
 
 | # | Step | Touches ES2 paths | dEQP-GLES3 groups to check |
 |---|---|---|---|
-| 0 | **Done here.** ES3 context opt-in, `glGetStringi`, sync objects, stubs | no (only the `glGetString(GL_EXTENSIONS)` refactor, byte-identical) | `info.*`, `functional.fence_sync.*`, `functional.negative_api.*` sync cases, `functional.state_query.integers.num_extensions*` |
-| 1 | dEQP-GLES3 build for Switch (CTS side, §7) | no | the run itself: all tests start and report, no crash |
-| 2 | ES3 limits/state queries scaffolding: `glGetInteger64v`, `glGetIntegeri_v`, `glGetInteger64i_v`, `GL_MAX_SERVER_WAIT_TIMEOUT`, `GL_MAJOR/MINOR_VERSION` kept for the last step | no (ES3-gated `pname`s) | `functional.state_query.integers.*`, `integers64.*` |
+| 0 | **Done.** ES3 context opt-in, `glGetStringi`, sync objects, stubs | no (only the `glGetString(GL_EXTENSIONS)` refactor, byte-identical) | `info.*`, `functional.fence_sync.*`, `functional.negative_api.*` sync cases, `functional.state_query.integers.num_extensions*` |
+| 1 | **Built, to run on the console.** dEQP-GLES3 for Switch (CTS side, §7) | no | the run itself: tests start and report, no crash; `info.*`, `functional.prerequisite.*`, `functional.fence_sync.*` |
+| 2 | **Done** (`19e0752`): `glGetInteger64v`, `GL_MAX_ELEMENT_INDEX`, `GL_MAX_SERVER_WAIT_TIMEOUT`. `glGetIntegeri_v`/`glGetInteger64i_v` stay stubs until indexed bindings exist (steps 11, 14); `GL_MAJOR/MINOR_VERSION` come with step 15 | no (ES3-gated `pname`s in shared `glGetIntegerv`/`glGetFloatv`) | `functional.state_query.integers64.*` (`max_element_index`, `max_server_wait_timeout`), `functional.state_query.integers.*` for already-supported states |
 | 3 | Buffer targets + `glCopyBufferSubData` + `glMapBufferRange`/`Unmap`/`Flush`, PBO unpack | **[ES2]** `glBindBuffer`/`glBufferData` target switch | `functional.buffer.*`, `functional.state_query.buffers.*` |
 | 4 | ES 3.00 shader compile path (route `300 es` to the Mesa metadata path), uint and non-square matrix uniforms, `transpose = GL_TRUE` | **[ES2]** `glCompileShader` dispatch, `uam_base_type_to_gl` | `functional.shaders.*` (constants, operators, conversions, swizzles…), `functional.uniform_api.*` (value.* without blocks) |
 | 5 | Primitive restart, `glDrawRangeElements`, new vertex types, integer attributes | **[ES2]** draw path | `functional.primitive_restart.*`, `functional.draw.draw_range_elements*`, `functional.vertex_arrays.*` |
@@ -328,9 +436,9 @@ below) built per §7, and, when marked **[ES2]**, also with the full dEQP-GLES2 
 | 9 | 3D and 2D array textures, `glTexStorage*`, pixel store, `glFramebufferTextureLayer` | **[ES2]** `glBindTexture`, texture binding at draw | `functional.texture.specification.*`, `functional.texture.filtering.3d/2d_array.*`, `functional.texture.vertex.*` |
 | 10 | Sampler objects | **[ES2]** texture binding at draw | `functional.samplers.*`, `functional.state_query.sampler.*` |
 | 11 | uam blocks API (§5.2 items 1-3), then uniform blocks in SwitchGLES | **[ES2]** `bind_program` | `functional.ubo.*`, `functional.uniform_api.info_query.*` |
-| 12 | MRT (uam `MaxDrawBuffers`), `glDrawBuffers`, `glReadBuffer`, `glClearBuffer*`, `glInvalidate*`, `glBlitFramebuffer` validation, depth/stencil blits; then MSAA renderbuffers + resolve | **[ES2]** FBO bind, clear, blend, color mask | `functional.fbo.*`, `functional.draw_buffers*`, `functional.fragment_out.*`, `functional.blit.*`, `functional.multisample.*`, `functional.color_clear.*` |
+| 12 | (a) MRT (uam `MaxDrawBuffers`: done on the uam branch), `glDrawBuffers`, `glReadBuffer`, `glClearBuffer*`, `glInvalidate*`, `glBlitFramebuffer` validation, depth/stencil blits; (b) real 4x MSAA renderbuffers + resolve (§3.6 "MSAA design") | **[ES2]** FBO bind, clear, blend, color mask | `functional.fbo.*`, `functional.draw_buffers*`, `functional.fragment_out.*`, `functional.blit.*`, `functional.multisample.*`, `functional.color_clear.*` |
 | 13 | Query objects (occlusion) | no | `functional.occlusion_query.*` |
-| 14 | Transform feedback (deko3d fork + GL) and `GL_RASTERIZER_DISCARD` | no (new paths) | `functional.transform_feedback.*`, `functional.rasterizer_discard.*` |
+| 14 | Transform feedback: deko3d side **done on the fork branch, waiting for `tfb_tests` on the console** (§3.10); then the GL side and `GL_RASTERIZER_DISCARD` | no (new paths) | `functional.transform_feedback.*`, `functional.rasterizer_discard.*` |
 | 15 | Flip the version: `GL_VERSION` "OpenGL ES 3.0", GLSL "OpenGL ES GLSL ES 3.00", `GL_MAJOR_VERSION` 3, remove the `ES3_CONTEXT` flag (ES3 contexts by default, `EGL_OPENGL_ES3_BIT` on configs), program binary formats = 0, revisit the extension list for ES3 contexts | yes: default EGL now advertises ES3 | full dEQP-GLES3 + full dEQP-GLES2 + GFXBench es2/es3 + spearmint |
 
 Steps 2, 3, 13 can be done in parallel with the uam work (step 11 prerequisite). Steps 5
@@ -340,53 +448,45 @@ regression and a GFXBench/spearmint smoke test.
 
 ## 7. dEQP-GLES3 on Switch
 
-The `deqp-gles3` target already exists in `CTS/build-switch`:
-- `Makefile:1153-1156`;
-- `modules/gles3/CMakeFiles/deqp-gles3.dir/link.txt` already links `libSwitchGLES.a`
-  (`CTS/targets/switch/switch.cmake:46-50`);
-- the romfs already carries `gles3/` data.
+Done (step 1), without modifying any existing VK-GL-CTS file or the `build-switch`
+directory used for dEQP-GLES2:
 
-It has never been built.
-
-What it takes (CTS side, not done here):
-
-1. **EGL side: done here.** With `make ES3_CONTEXT=1`:
-   - the configs list `EGL_OPENGL_ES3_BIT`, which `CTS/framework/egl/egluGLUtil.cpp:81-83`
-     requires;
-   - `EGL_KHR_create_context` is advertised (egluGLUtil.cpp:115-123 throws NotSupported
-     for ES ≥ 3 without it);
-   - version 3.0 is accepted.
-2. **Function loading.** Set `DEQP_GLES3_LIBRARIES` to `libSwitchGLES.a` in
-   `CTS/targets/switch/switch.cmake` (today it only sets the GLES2 and EGL ones, :27-28),
-   then re-run cmake. This defines `DEQP_GLES3_DIRECT_LINK`, so
-   `glw::initES30Direct` takes the address of every ES 2.0 + 3.0 function (~246). All
-   of them now exist in `libSwitchGLES.a` (104 ES 3.0 symbols checked with `nm`).
-   - Do **not** advertise `EGL_KHR_get_all_proc_addresses`. It would make
-     `egluGLContextFactory.cpp:425-473` load every function through
-     `eglGetProcAddress`, for dEQP-GLES2 too.
-3. **Module name.** Parameterise the hard-coded module name in
-   `CTS/framework/platform/switch/tcuSwitchMain.cpp`:
-   - the fallback caselist `dEQP-GLES2{info{...}}` at :96, which would otherwise run
-     nothing;
-   - `argv[0]` at :190 and :325;
-   - the banner at :281.
-
-   One way is a `-DDEQP_SWITCH_MODULE` define per target.
-4. **NRO script.** Parameterise `build_nro.sh`, which is hardwired to
-   `modules/gles2`, `deqp-gles2.*` and the title (:16, :36-52). For example:
-   `build_nro.sh gles3 skip-caselist`.
-5. **Test list management.** Parameterise `manage_tests.py`:
-   - `BASELINE_PATH` (:27) should point to `gles3-main.txt`
-     (`CTS/external/openglcts/data/gl_cts/data/mustpass/gles/aosp_mustpass/3.2.2.x/gles3-main.txt`);
-   - the `dEQP-GLES3` prefix handling;
-   - a separate `lists/gles3/`, so the GLES2 pass/skip lists are not overwritten.
-6. **Build:**
-   1. `libSwitchGLES` with `ES3_CONTEXT=1`;
-   2. `cd build-switch && make -j4 deqp-gles3`;
-   3. the NRO script.
-
-   Use a separate libSwitchGLES build directory, or rebuild without the flag before
-   relinking deqp-gles2, so the GLES2 regression keeps testing the default build.
+- `CTS/targets/switch-gles3/switch-gles3.cmake` (new): includes `targets/switch`, sets
+  `DEQP_GLES3_LIBRARIES` to `${SWITCHGLES_PATH}/lib/libSwitchGLES.a` (defines
+  `DEQP_GLES3_DIRECT_LINK`, so `glw::initES30Direct` takes the address of every ES 2.0
+  + 3.0 function: the link succeeds, all 104 ES 3.0 symbols exist), and generates the
+  Switch `main()` from `framework/platform/switch/tcuSwitchMain.cpp` with
+  `dEQP-GLES3`/`deqp-gles3` and SD names `gles3_caselist_NNN.txt` /
+  `gles3_TestResults*.qpa`, so a GLES3 run never overwrites the GLES2 files.
+  `switch-toolchain.cmake` there includes the switch one.
+- Build directory `CTS/build-switch-gles3/`, configured with:
+  ```
+  cmake .. -G "Unix Makefiles" -DCMAKE_MAKE_PROGRAM=/c/devkitPro/msys2/usr/bin/make.exe
+        -DDEQP_TARGET=switch-gles3 -DDEQP_TARGET_TOOLCHAIN=switch-toolchain
+        -DCMAKE_BUILD_TYPE=Release -DSWITCHGLES_PATH=<SwitchGLES tree with ES3_CONTEXT=1 lib>
+        -DSELECTED_BUILD_TARGETS=deqp-gles3 -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON
+        -DDEQP_DISABLE_VK_VIDEO_TESTS=ON -DZLIB_INCLUDE_DIR=/c/devkitPro/portlibs/switch/include
+        -DCMAKE_DEPENDS_USE_COMPILER=OFF -DCCACHE_EXECUTABLE=OFF
+  make -j8 deqp-gles3
+  ```
+  Gotchas: without `CMAKE_MAKE_PROGRAM` CMake picks Strawberry's gmake, the compiler ABI
+  check fails and `DE_PTR_SIZE` becomes 4 (`#error DE_CPU and DE_PTR_SIZE mismatch`);
+  without `CCACHE_EXECUTABLE=OFF` jsoncpp finds Strawberry's ccache, which fails without
+  `USERPROFILE`.
+- `SWITCHGLES_PATH` points to the `gles3-groundwork` worktree, whose `lib/` holds a
+  `make ES3_CONTEXT=1` build linked with the uam `gles3-es300` libuam. The library
+  under test in the main checkout (`switchGLES/lib`) is not used.
+- `CTS/framework/platform/switch/build_nro_gles3.sh` (new) and `romfs-gles3/` (GLES3
+  data + caselist): `build_nro_gles3.sh [caselist.txt]`. The first caselist is
+  `gles3_smoke.txt` = `{dEQP-GLES3{info,functional{prerequisite,fence_sync}}}`.
+  Output: `CTS/build-switch-gles3/modules/gles3/deqp-gles3.nro`.
+- Not done yet: `manage_tests.py` still knows only GLES2 (baseline
+  `gles3-main.txt` from `CTS/external/openglcts/data/gl_cts/data/mustpass/gles/aosp_mustpass/3.2.2.x/`,
+  `dEQP-GLES3` prefix, separate `lists/gles3/`); until then caselists are written by
+  hand, one trie line per file.
+- Do **not** advertise `EGL_KHR_get_all_proc_addresses`: it would make
+  `egluGLContextFactory.cpp:425-473` load every function through `eglGetProcAddress`,
+  for dEQP-GLES2 too.
 
 The context reports `GL_VERSION` 2.0 at this stage. dEQP-GLES3 only logs it
 (`dEQP-GLES3.info.version`) and does not parse it. Version-dependent checks use the
@@ -395,27 +495,21 @@ context type requested from EGL (`CTS/modules/gles3/tes3Context.hpp:49`,
 from it and fail cleanly. A stub never returns a null object that the test could
 dereference.
 
-## 8. Open questions
+## 8. Decisions (Oct 10, 2026) and open questions
 
-1. **ES3 contexts and `GL_VERSION`.** This plan keeps "OpenGL ES 2.0" until step 15.
-   Some engines (GFXBench es3, SDL) pick their renderer from `GL_VERSION` and might
-   want an ES3 context that claims 3.0 earlier for testing. Should a second opt-in
-   string be added, or should those engines wait?
-2. **GFXBench es3 flavour.** It generates logging stubs only for symbols that
-   `libSwitchGLES.a` does not define (`gfxbench/tools/gen_gl_stubs.sh`). Since this
-   branch defines all ES 3.0 functions, its `[gl-stub]` report is replaced by
-   SwitchGLES's `[SGL][WARN] glXxx: GLES 3.0 entry point not implemented` lines (first
-   call of each). The report is the same in practice but printed by another component.
-   Is this acceptable, or should the stubs be kept out of the release library used by
-   GFXBench?
-3. **uam ownership.** §5.2 items 1, 2 and 4 are small changes in the Mesa-imported
-   linker and frontend. Should they go on a uam branch now (block binding
-   auto-assignment from 2, `MaxDrawBuffers` 4)?
-4. **Transform feedback** requires the deko3d fork changes of the N1 design, with
-   registers unverified on hardware. Is ES 3.0 without transform feedback (not
-   conformant, `GL_VERSION` kept at 2.0, or 3.0 with known failures) an acceptable
-   intermediate target?
-5. **MSAA.** `GL_MAX_SAMPLES` ≥ 4 is mandatory in ES 3.0. The current
-   `glRenderbufferStorageMultisample` silently ignores `samples`. It should become a
-   real 4x MSAA path (step 12) or an error, rather than stay as it is once ES3
-   contexts are on by default.
+Decided by the user:
+
+1. `GL_VERSION` stays "OpenGL ES 2.0" until step 15.
+2. GFXBench es3 losing its own `[gl-stub]` report is fine (SwitchGLES's first-call
+   warnings replace it).
+3. uam changes go on a uam branch (`gles3-es300`), merged later.
+4. Transform feedback is wanted: deko3d side on fork branch `transform-feedback`,
+   hardware facts checked by `tfb_tests` on the console.
+5. MSAA must be real (4x), not an error (§3.6 "MSAA design", step 12b).
+
+Open:
+
+1. `dkCmdBufBlitImage` from a multisampled source: averaged or single sample? Decides
+   the sub-rect resolve path (§3.6).
+2. `tfb_tests` results decide `s_tfbOffsetWord` and whether `DK_TFB_SLOT_SKIP` can be
+   documented as working.
