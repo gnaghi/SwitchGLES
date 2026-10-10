@@ -33,10 +33,23 @@
 
 /* Limits reported for features that are not implemented yet: the GLES 3.0
  * minimums, which the planned implementations meet (docs/GLES3_PLAN.md: 24
- * uniform buffer binding points, 4 deko3d transform feedback buffers). dEQP
- * reads them to know how many binding points to reset. */
+ * uniform buffer binding points, 12 blocks per stage in deko3d uniform buffer
+ * slots 2..13, 4 deko3d transform feedback buffers, 3D and array textures
+ * with DkImageType_3D / _2DArray). dEQP reads them to size its resets and its
+ * reference renderer (sglrReferenceContext). */
 #define SGL_ES3_MAX_UNIFORM_BUFFER_BINDINGS 24
 #define SGL_ES3_MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS 4
+#define SGL_ES3_MAX_STAGE_UNIFORM_BLOCKS 12
+#define SGL_ES3_MAX_UNIFORM_BLOCK_SIZE 16384
+#define SGL_ES3_MAX_3D_TEXTURE_SIZE 256
+#define SGL_ES3_MAX_ARRAY_TEXTURE_LAYERS 256
+
+/* Default-block uniform components per stage: same 256 vec4 as
+ * GL_MAX_{VERTEX,FRAGMENT}_UNIFORM_VECTORS */
+#define SGL_ES3_MAX_STAGE_UNIFORM_COMPONENTS 1024
+
+/* GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT: DK_UNIFORM_BUF_ALIGNMENT */
+#define SGL_ES3_UNIFORM_BUFFER_OFFSET_ALIGNMENT SGL_UNIFORM_ALIGNMENT
 
 /* Same value as glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS) */
 #define SGL_ES3_MAX_TEXTURE_UNITS SGL_MAX_TEXTURE_UNITS
@@ -647,6 +660,34 @@ bool sgl_es3_get_integer(sgl_context_t *ctx, GLenum pname, GLint *params) {
             return true;
         case GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS:
             *params = SGL_ES3_MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS;
+            return true;
+        case GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT:
+            *params = SGL_ES3_UNIFORM_BUFFER_OFFSET_ALIGNMENT;
+            return true;
+        case GL_MAX_VERTEX_UNIFORM_BLOCKS:
+        case GL_MAX_FRAGMENT_UNIFORM_BLOCKS:
+            *params = SGL_ES3_MAX_STAGE_UNIFORM_BLOCKS;
+            return true;
+        case GL_MAX_COMBINED_UNIFORM_BLOCKS:
+            *params = 2 * SGL_ES3_MAX_STAGE_UNIFORM_BLOCKS;
+            return true;
+        case GL_MAX_UNIFORM_BLOCK_SIZE:
+            *params = SGL_ES3_MAX_UNIFORM_BLOCK_SIZE;
+            return true;
+        case GL_MAX_FRAGMENT_UNIFORM_COMPONENTS:
+            *params = SGL_ES3_MAX_STAGE_UNIFORM_COMPONENTS;
+            return true;
+        case GL_MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS:
+        case GL_MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS:
+            /* GLES 3.0 Table 6.32: blocks * block size / 4 + default-block components */
+            *params = SGL_ES3_MAX_STAGE_UNIFORM_BLOCKS * SGL_ES3_MAX_UNIFORM_BLOCK_SIZE / 4 +
+                      SGL_ES3_MAX_STAGE_UNIFORM_COMPONENTS;
+            return true;
+        case GL_MAX_3D_TEXTURE_SIZE:
+            *params = SGL_ES3_MAX_3D_TEXTURE_SIZE;
+            return true;
+        case GL_MAX_ARRAY_TEXTURE_LAYERS:
+            *params = SGL_ES3_MAX_ARRAY_TEXTURE_LAYERS;
             return true;
 
         default:
