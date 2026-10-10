@@ -293,15 +293,20 @@ bool sgl_compile_glsl460(sgl_context_t *ctx, GLuint shader_id, sgl_shader_t *sh,
  *   0=uint, 1=int, 2=float, 3=float16, 4=double,
  *   5=uint8, 6=int8, 7=uint16, 8=int16, 9=uint64, 10=int64,
  *   11=bool, 12=sampler
+ * For a matrix, mat_cols is the column count and vec_elems the row count.
+ * The unsigned and non-square matrix types only occur in GLSL ES 3.00.
  */
 GLenum uam_base_type_to_gl(uint8_t base_type, uint8_t vec_elems, uint8_t mat_cols) {
     if (base_type == 2) { /* GLSL_TYPE_FLOAT */
         if (mat_cols > 1) {
-            if (mat_cols == 2)
-                return GL_FLOAT_MAT2;
-            if (mat_cols == 3)
-                return GL_FLOAT_MAT3;
-            return GL_FLOAT_MAT4;
+            static const GLenum s_mat[3][3] = {
+                {GL_FLOAT_MAT2, GL_FLOAT_MAT2x3, GL_FLOAT_MAT2x4},
+                {GL_FLOAT_MAT3x2, GL_FLOAT_MAT3, GL_FLOAT_MAT3x4},
+                {GL_FLOAT_MAT4x2, GL_FLOAT_MAT4x3, GL_FLOAT_MAT4},
+            };
+            int c = (mat_cols > 4 ? 4 : mat_cols) - 2;
+            int r = (vec_elems < 2 || vec_elems > 4) ? c : vec_elems - 2;
+            return s_mat[c][r];
         }
         if (vec_elems == 1)
             return GL_FLOAT;
@@ -331,14 +336,14 @@ GLenum uam_base_type_to_gl(uint8_t base_type, uint8_t vec_elems, uint8_t mat_col
     }
     if (base_type == 12)
         return GL_SAMPLER_2D; /* GLSL_TYPE_SAMPLER */
-    if (base_type == 0) {     /* GLSL_TYPE_UINT — map to int for GLES2 */
+    if (base_type == 0) {     /* GLSL_TYPE_UINT */
         if (vec_elems == 1)
-            return GL_INT;
+            return GL_UNSIGNED_INT;
         if (vec_elems == 2)
-            return GL_INT_VEC2;
+            return GL_UNSIGNED_INT_VEC2;
         if (vec_elems == 3)
-            return GL_INT_VEC3;
-        return GL_INT_VEC4;
+            return GL_UNSIGNED_INT_VEC3;
+        return GL_UNSIGNED_INT_VEC4;
     }
     return GL_FLOAT_VEC4; /* fallback */
 }
@@ -564,6 +569,38 @@ static bool sgl_is_es100_source(const char *source) {
 
     return false;
 }
+
+/* True if the source starts (after blanks and comments) with #version 300 es */
+static bool sgl_is_es300_source(const char *p) {
+    for (;;) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+            p++;
+        if (p[0] == '/' && p[1] == '/') {
+            while (*p && *p != '\n')
+                p++;
+        } else if (p[0] == '/' && p[1] == '*') {
+            p += 2;
+            while (*p && !(p[0] == '*' && p[1] == '/'))
+                p++;
+            if (*p)
+                p += 2;
+        } else {
+            break;
+        }
+    }
+    if (strncmp(p, "#version", 8) != 0)
+        return false;
+    p += 8;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    if (strncmp(p, "300", 3) != 0)
+        return false;
+    p += 3;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    return strncmp(p, "es", 2) == 0 && (p[2] == '\0' || p[2] == ' ' || p[2] == '\t' ||
+                                         p[2] == '\r' || p[2] == '\n');
+}
 #endif /* SGL_ENABLE_RUNTIME_COMPILER */
 
 GL_APICALL void GL_APIENTRY glCompileShader(GLuint shader) {
@@ -592,6 +629,22 @@ GL_APICALL void GL_APIENTRY glCompileShader(GLuint shader) {
 
 #ifdef SGL_ENABLE_RUNTIME_COMPILER
     sh->compiled_via_mesa = false;
+    sh->es300 = false;
+
+    /* GLSL ES 3.00 in a GLES 3.0 context: Mesa compiles it with the ES rules
+     * and reports its uniforms, samplers, inputs and varyings, the same
+     * metadata path as ES 1.00 (sgl_compile_es100_mesa). No transpiler
+     * fallback (it only knows ES 1.00) and no glslt_validate_es100 (ES 1.00
+     * rules). A GLES 2.0 context keeps compiling it as before. */
+    if (sgl_ctx_is_es3(ctx) && sgl_is_es300_source(sh->source)) {
+        sh->es300 = true;
+        sh->compiled = sgl_compile_es100_mesa(ctx, shader, sh, NULL);
+        if (!sh->compiled && !sh->info_log)
+            sh->info_log = strdup("ERROR: GLSL ES 3.00 compilation failed\n");
+        SGL_TRACE_SHADER("glCompileShader(%u) - ES 3.00 %s", shader,
+                         sh->compiled ? "OK" : "FAILED");
+        return;
+    }
 
     /* Check if source is GLSL ES 1.00 */
     if (sgl_is_es100_source(sh->source)) {

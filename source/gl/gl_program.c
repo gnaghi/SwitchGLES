@@ -214,10 +214,16 @@ static bool sgl_varyings_mismatch(const sgl_mesa_metadata_t *vs, const sgl_mesa_
 static int sgl_attrib_type_locations(GLenum gl_type) {
     switch (gl_type) {
         case GL_FLOAT_MAT2:
+        case GL_FLOAT_MAT2x3:
+        case GL_FLOAT_MAT2x4:
             return 2;
         case GL_FLOAT_MAT3:
+        case GL_FLOAT_MAT3x2:
+        case GL_FLOAT_MAT3x4:
             return 3;
         case GL_FLOAT_MAT4:
+        case GL_FLOAT_MAT4x2:
+        case GL_FLOAT_MAT4x3:
             return 4;
         default:
             return 1;
@@ -1223,6 +1229,19 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
     if (prog->info_log) {
         free(prog->info_log);
         prog->info_log = NULL;
+    }
+
+    /* GLES 3.0 §2.11.3: the shaders of a program must use the same shading
+     * language version (ES 1.00 and ES 3.00 cannot be mixed). */
+    if (sgl_ctx_is_es3(ctx)) {
+        sgl_shader_t *vs = prog->vertex_shader ? GET_SHADER(prog->vertex_shader) : NULL;
+        sgl_shader_t *fs = prog->fragment_shader ? GET_SHADER(prog->fragment_shader) : NULL;
+        if (vs && fs && vs->es300 != fs->es300) {
+            prog->linked = false;
+            prog->info_log = strdup("error: vertex and fragment shaders use different GLSL ES "
+                                    "versions\n");
+            return;
+        }
     }
 
     /* On relink: remove linker-added attrib_bindings, keep only user-bound ones.

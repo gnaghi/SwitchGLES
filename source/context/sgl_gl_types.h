@@ -148,6 +148,7 @@ typedef struct sgl_shader {
     bool needs_transpile;   /* true if source is GLSL ES 1.00 (deferred to link time) */
     bool compiled_via_mesa; /* true if compiled directly by Mesa (not transpiler) */
     bool delete_pending;    /* glDeleteShader called; defer actual free until detached */
+    bool es300;             /* GLSL ES 3.00 source compiled in a GLES 3.0 context */
     int attach_count;       /* number of programs this shader is attached to */
     uint32_t backend_handle;
     uint32_t code_offset;

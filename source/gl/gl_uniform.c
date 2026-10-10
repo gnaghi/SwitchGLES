@@ -13,6 +13,7 @@
 static int sgl_uniform_type_components(GLenum type);
 static bool sgl_is_bool_uniform_type(GLenum type);
 static int uniform_type_std140_size(GLenum type);
+static bool sgl_matrix_shape(GLenum type, int *cols, int *rows);
 static bool is_valid_uniform_location(sgl_program_t *prog, GLint location);
 static const sgl_uniform_cache_entry_t *sgl_uniform_resolve(sgl_program_t *prog, GLint location);
 static inline const sgl_active_uniform_info_t *
@@ -352,31 +353,76 @@ static int uniform_type_std140_size(GLenum type) {
     switch (type) {
         case GL_FLOAT:
         case GL_INT:
+        case GL_UNSIGNED_INT:
         case GL_BOOL:
         case GL_SAMPLER_2D:
         case GL_SAMPLER_CUBE:
             return 4;
         case GL_FLOAT_VEC2:
         case GL_INT_VEC2:
+        case GL_UNSIGNED_INT_VEC2:
         case GL_BOOL_VEC2:
             return 8;
         case GL_FLOAT_VEC3:
         case GL_INT_VEC3:
+        case GL_UNSIGNED_INT_VEC3:
         case GL_BOOL_VEC3:
             return 12;
         case GL_FLOAT_VEC4:
         case GL_INT_VEC4:
+        case GL_UNSIGNED_INT_VEC4:
         case GL_BOOL_VEC4:
             return 16;
-        case GL_FLOAT_MAT2:
-            return 32; /* 2 columns × 16 bytes (vec4-padded) */
-        case GL_FLOAT_MAT3:
-            return 48; /* 3 columns × 16 bytes (vec4-padded) */
-        case GL_FLOAT_MAT4:
-            return 64; /* 4 columns × 16 bytes */
-        default:
+        default: {
+            /* Matrices: one vec4-padded column (16 bytes) per column */
+            int cols, rows;
+            if (sgl_matrix_shape(type, &cols, &rows))
+                return cols * 16;
             return 4;
+        }
     }
+}
+
+/* Columns and rows of a matrix uniform type (GLES 3.0 adds the non-square
+ * ones). Returns false for a non-matrix type. */
+static bool sgl_matrix_shape(GLenum type, int *cols, int *rows) {
+    switch (type) {
+        case GL_FLOAT_MAT2:
+            *cols = 2, *rows = 2;
+            return true;
+        case GL_FLOAT_MAT3:
+            *cols = 3, *rows = 3;
+            return true;
+        case GL_FLOAT_MAT4:
+            *cols = 4, *rows = 4;
+            return true;
+        case GL_FLOAT_MAT2x3:
+            *cols = 2, *rows = 3;
+            return true;
+        case GL_FLOAT_MAT2x4:
+            *cols = 2, *rows = 4;
+            return true;
+        case GL_FLOAT_MAT3x2:
+            *cols = 3, *rows = 2;
+            return true;
+        case GL_FLOAT_MAT3x4:
+            *cols = 3, *rows = 4;
+            return true;
+        case GL_FLOAT_MAT4x2:
+            *cols = 4, *rows = 2;
+            return true;
+        case GL_FLOAT_MAT4x3:
+            *cols = 4, *rows = 3;
+            return true;
+        default:
+            return false;
+    }
+}
+
+/* GLES 3.0 unsigned uniform types (uint, uvecN) */
+static bool sgl_is_uint_uniform_type(GLenum type) {
+    return type == GL_UNSIGNED_INT || type == GL_UNSIGNED_INT_VEC2 ||
+           type == GL_UNSIGNED_INT_VEC3 || type == GL_UNSIGNED_INT_VEC4;
 }
 
 /* Forward declarations */
@@ -946,6 +992,7 @@ GL_APICALL void GL_APIENTRY glGetUniformfv(GLuint program, GLint location, GLflo
         if (packed->valid && (uint32_t)offset + 4 <= packed->size) {
             /* Look up uniform type to copy the full value (not just 4 bytes).
              * Use dual lookup (same as set_*_uniform) for robustness. */
+            int mat_cols, mat_rows;
             GLenum uni_type = ue->packed_type;
             if (!uni_type) {
                 const sgl_active_uniform_info_t *ainfo = sgl_uniform_active_info(prog, ue);
@@ -970,12 +1017,19 @@ GL_APICALL void GL_APIENTRY glGetUniformfv(GLuint program, GLint location, GLflo
                     memcpy(&ival, packed->data + offset + j * 4, 4);
                     params[j] = (GLfloat)ival;
                 }
-            } else if (uni_type == GL_FLOAT_MAT2 || uni_type == GL_FLOAT_MAT3 ||
-                       uni_type == GL_FLOAT_MAT4) {
+            } else if (sgl_is_uint_uniform_type(uni_type)) {
+                /* GLES 3.0 uint stored as uint32 — convert to float */
+                int nc = sgl_uniform_type_components(uni_type);
+                for (int j = 0; j < nc; j++) {
+                    uint32_t uval;
+                    memcpy(&uval, packed->data + offset + j * 4, 4);
+                    params[j] = (GLfloat)uval;
+                }
+            } else if (sgl_matrix_shape(uni_type, &mat_cols, &mat_rows)) {
                 /* Matrices in std140: columns padded to vec4 (16 bytes each).
                  * Must de-pad when reading back to contiguous float array. */
-                int cols = (uni_type == GL_FLOAT_MAT2) ? 2 : (uni_type == GL_FLOAT_MAT3) ? 3 : 4;
-                int rows = cols;
+                int cols = mat_cols;
+                int rows = mat_rows;
                 for (int c = 0; c < cols; c++) {
                     int src_off = offset + c * 16; /* std140: each column at 16-byte stride */
                     if ((uint32_t)src_off + (uint32_t)rows * 4 > packed->size)
@@ -1078,16 +1132,14 @@ GL_APICALL void GL_APIENTRY glGetUniformiv(GLuint program, GLint location, GLint
                     uni_type = ainfo->type;
             }
             /* For bool types, data is stored as uint32 in std140 */
+            int mat_cols, mat_rows;
+            bool is_matrix = sgl_matrix_shape(uni_type, &mat_cols, &mat_rows);
             if (uni_type == GL_FLOAT || uni_type == GL_FLOAT_VEC2 || uni_type == GL_FLOAT_VEC3 ||
-                uni_type == GL_FLOAT_VEC4 || uni_type == GL_FLOAT_MAT2 ||
-                uni_type == GL_FLOAT_MAT3 || uni_type == GL_FLOAT_MAT4) {
+                uni_type == GL_FLOAT_VEC4 || is_matrix) {
                 /* Convert float data to int */
-                if (uni_type == GL_FLOAT_MAT2 || uni_type == GL_FLOAT_MAT3 ||
-                    uni_type == GL_FLOAT_MAT4) {
-                    int cols = (uni_type == GL_FLOAT_MAT2)   ? 2
-                               : (uni_type == GL_FLOAT_MAT3) ? 3
-                                                             : 4;
-                    int rows = cols;
+                if (is_matrix) {
+                    int cols = mat_cols;
+                    int rows = mat_rows;
                     for (int c = 0; c < cols; c++) {
                         int src_off = offset + c * 16;
                         if ((uint32_t)src_off + (uint32_t)rows * 4 > packed->size)
@@ -1429,30 +1481,32 @@ static int sgl_uniform_type_components(GLenum type) {
     switch (type) {
         case GL_FLOAT:
         case GL_INT:
+        case GL_UNSIGNED_INT:
         case GL_BOOL:
         case GL_SAMPLER_2D:
         case GL_SAMPLER_CUBE:
             return 1;
         case GL_FLOAT_VEC2:
         case GL_INT_VEC2:
+        case GL_UNSIGNED_INT_VEC2:
         case GL_BOOL_VEC2:
             return 2;
         case GL_FLOAT_VEC3:
         case GL_INT_VEC3:
+        case GL_UNSIGNED_INT_VEC3:
         case GL_BOOL_VEC3:
             return 3;
         case GL_FLOAT_VEC4:
         case GL_INT_VEC4:
+        case GL_UNSIGNED_INT_VEC4:
         case GL_BOOL_VEC4:
             return 4;
-        case GL_FLOAT_MAT2:
-            return 4; /* 2x2 */
-        case GL_FLOAT_MAT3:
-            return 9; /* 3x3 */
-        case GL_FLOAT_MAT4:
-            return 16; /* 4x4 */
-        default:
+        default: {
+            int cols, rows;
+            if (sgl_matrix_shape(type, &cols, &rows))
+                return cols * rows;
             return 4;
+        }
     }
 }
 
@@ -1502,6 +1556,20 @@ static bool sgl_validate_int_uniform(const sgl_active_uniform_info_t *info, int 
     return true;
 }
 
+/* Validate a glUniform*ui[v] call (GLES 3.0): uint/uvec or bool/bvec. */
+static bool sgl_validate_uint_uniform(const sgl_active_uniform_info_t *info, int num_components,
+                                      GLsizei count) {
+    if (!info)
+        return true; /* No metadata = legacy path, allow */
+    if (!sgl_is_uint_uniform_type(info->type) && !sgl_is_bool_uniform_type(info->type))
+        return false;
+    if (sgl_uniform_type_components(info->type) != num_components)
+        return false;
+    if (count > 1 && info->size <= 1)
+        return false;
+    return true;
+}
+
 /* Validate a glUniformMatrix*fv call. Returns true if valid. */
 static bool sgl_validate_matrix_uniform(const sgl_active_uniform_info_t *info,
                                         GLenum expected_type, GLsizei count) {
@@ -1535,16 +1603,18 @@ static bool sgl_validate_matrix_uniform(const sgl_active_uniform_info_t *info,
  * the set_float_uniform / set_int_uniform wrappers below.
  */
 static void set_scalar_uniform_impl(GLint location, int num_components, GLsizei count,
-                                    const void *values, bool is_int);
+                                    const void *values, bool is_int, bool is_uint);
 static void set_scalar_uniform(GLint location, int num_components, GLsizei count,
                                const void *values, bool is_int) {
     SGL_PERF_BEGIN(perf);
-    set_scalar_uniform_impl(location, num_components, count, values, is_int);
+    set_scalar_uniform_impl(location, num_components, count, values, is_int, false);
     SGL_PERF_END(SGL_PERF_UNIFORM, perf);
 }
 
+/* is_uint (glUniform*ui, GLES 3.0) implies is_int: same 32-bit layout, bool
+ * conversion and shadow; only the type validation differs. */
 static void set_scalar_uniform_impl(GLint location, int num_components, GLsizei count,
-                                    const void *values, bool is_int) {
+                                    const void *values, bool is_int, bool is_uint) {
     const GLfloat *fv = (const GLfloat *)values;
     const GLint *iv = (const GLint *)values;
     sgl_context_t *ctx = sgl_get_current_context();
@@ -1580,9 +1650,9 @@ static void set_scalar_uniform_impl(GLint location, int num_components, GLsizei 
     }
 
     /* Sampler locations: int writes (glUniform1i/1iv) set the texture unit;
-     * float writes are GL_INVALID_OPERATION per spec. */
+     * float and unsigned writes are GL_INVALID_OPERATION per spec. */
     if (location & SGL_LOC_SAMPLER_FLAG) {
-        if (!is_int) {
+        if (!is_int || is_uint) {
             sgl_set_error(ctx, GL_INVALID_OPERATION);
             return;
         }
@@ -1609,8 +1679,9 @@ static void set_scalar_uniform_impl(GLint location, int num_components, GLsizei 
     const sgl_active_uniform_info_t *ainfo = sgl_uniform_active_info(prog, ue);
 
     /* Validate type/count against declared uniform metadata (if available) */
-    bool valid_uniform = is_int ? sgl_validate_int_uniform(ainfo, num_components, count)
-                                : sgl_validate_float_uniform(ainfo, num_components, count);
+    bool valid_uniform = is_uint  ? sgl_validate_uint_uniform(ainfo, num_components, count)
+                         : is_int ? sgl_validate_int_uniform(ainfo, num_components, count)
+                                  : sgl_validate_float_uniform(ainfo, num_components, count);
     if (!valid_uniform) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
         return;
@@ -1912,31 +1983,54 @@ GL_APICALL void GL_APIENTRY glUniform4iv(GLint location, GLsizei count, const GL
 
 /*
  * Matrix uniforms
- * std140 layout: mat2 = 2 vec4 (32 bytes), mat3 = 3 vec4 (48 bytes), mat4 = 4 vec4 (64 bytes)
+ * std140 layout: one vec4-padded column per matrix column, so a CxR matrix
+ * takes C*16 bytes (mat2 = 32, mat3 = 48, mat4 = 64).
  */
 /*
- * Unified matrix uniform setter for mat2/mat3/mat4 (cols = 2/3/4). The three
- * differ only in the std140 element size (cols*16 bytes), the source component
- * count (cols*cols floats) and the per-column vec4 padding (mat4 needs none).
- * glUniformMatrix{2,3,4}fv are thin wrappers below.
+ * Unified matrix uniform setter for every matrix type (cols, rows = 2..4;
+ * GLES 2.0 only has the square ones). The source holds cols*rows floats per
+ * matrix, column-major, or row-major when transpose is set (GLES 3.0 only).
+ * glUniformMatrix{2,3,4}fv and the GLES 3.0 glUniformMatrix{CxR}fv are thin
+ * wrappers below.
  */
-static void set_matrix_uniform_impl(GLint location, int cols, GLsizei count, GLboolean transpose,
-                                    const GLfloat *value);
-static void set_matrix_uniform(GLint location, int cols, GLsizei count, GLboolean transpose,
-                               const GLfloat *value) {
+static void set_matrix_uniform_impl(GLint location, int cols, int rows, GLsizei count,
+                                    GLboolean transpose, const GLfloat *value);
+static void set_matrix_uniform(GLint location, int cols, int rows, GLsizei count,
+                               GLboolean transpose, const GLfloat *value) {
     SGL_PERF_BEGIN(perf);
-    set_matrix_uniform_impl(location, cols, count, transpose, value);
+    set_matrix_uniform_impl(location, cols, rows, count, transpose, value);
     SGL_PERF_END(SGL_PERF_UNIFORM, perf);
 }
 
-static void set_matrix_uniform_impl(GLint location, int cols, GLsizei count, GLboolean transpose,
-                                    const GLfloat *value) {
+/* Matrix m of a glUniformMatrix source into std140 columns (vec4-padded) */
+static void sgl_matrix_to_std140(float *dst, const GLfloat *value, GLsizei m, int cols, int rows,
+                                 bool transpose) {
+    const float *src = value + (size_t)m * cols * rows;
+    for (int c = 0; c < cols; c++) {
+        for (int r = 0; r < rows; r++)
+            dst[c * 4 + r] = transpose ? src[r * cols + c] : src[c * rows + r];
+        for (int r = rows; r < 4; r++)
+            dst[c * 4 + r] = 0.0f;
+    }
+}
+
+static GLenum sgl_matrix_type(int cols, int rows) {
+    static const GLenum s_types[3][3] = {
+        {GL_FLOAT_MAT2, GL_FLOAT_MAT2x3, GL_FLOAT_MAT2x4},
+        {GL_FLOAT_MAT3x2, GL_FLOAT_MAT3, GL_FLOAT_MAT3x4},
+        {GL_FLOAT_MAT4x2, GL_FLOAT_MAT4x3, GL_FLOAT_MAT4},
+    };
+    return s_types[cols - 2][rows - 2];
+}
+
+static void set_matrix_uniform_impl(GLint location, int cols, int rows, GLsizei count,
+                                    GLboolean transpose, const GLfloat *value) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx || !ctx->backend)
         return;
 
-    /* GLES2 spec: transpose must be GL_FALSE */
-    if (transpose != GL_FALSE) {
+    /* GLES2 spec: transpose must be GL_FALSE (GLES 3.0 allows GL_TRUE) */
+    if (transpose != GL_FALSE && !sgl_ctx_is_es3(ctx)) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
@@ -1973,12 +2067,13 @@ static void set_matrix_uniform_impl(GLint location, int cols, GLsizei count, GLb
 
     /* Validate type/count against declared uniform metadata */
     const sgl_uniform_cache_entry_t *ue = sgl_uniform_resolve(prog, location);
-    GLenum mat_type = (cols == 2) ? GL_FLOAT_MAT2 : (cols == 3) ? GL_FLOAT_MAT3 : GL_FLOAT_MAT4;
+    GLenum mat_type = sgl_matrix_type(cols, rows);
     if (!sgl_validate_matrix_uniform(sgl_uniform_active_info(prog, ue), mat_type, count)) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
         return;
     }
 
+    bool transposed = transpose != GL_FALSE;
     uint32_t elem = (uint32_t)cols * 16u; /* std140 bytes per matrix */
 
     /* Packed mode: write std140 matrix to shadow buffer */
@@ -1994,20 +2089,14 @@ static void set_matrix_uniform_impl(GLint location, int cols, GLsizei count, GLb
         if (!packed->valid || (uint32_t)offset > packed->size ||
             (uint64_t)elem * (uint32_t)count > (uint64_t)(packed->size - offset))
             return;
-        /* Each column: cols floats then zero-pad to a full vec4 (mat4: no pad) */
-        for (GLsizei m = 0; m < count; m++) {
-            const float *src = value + (size_t)m * cols * cols;
-            float *dst = (float *)(packed->data + offset + (size_t)m * elem);
-            for (int c = 0; c < cols; c++) {
-                for (int r = 0; r < cols; r++)
-                    dst[c * 4 + r] = src[c * cols + r];
-                for (int r = cols; r < 4; r++)
-                    dst[c * 4 + r] = 0.0f;
-            }
-        }
+        /* Each column: rows floats then zero-pad to a full vec4 */
+        for (GLsizei m = 0; m < count; m++)
+            sgl_matrix_to_std140((float *)(packed->data + offset + (size_t)m * elem), value, m,
+                                 cols, rows, transposed);
         packed->dirty = true;
         apply_packed_mirror(prog, ue->mirror_idx, location, packed->data + offset, dataSize);
-        SGL_TRACE_UNIFORM("glUniformMatrix%dfv(packed loc=0x%X, count=%d)", cols, location, count);
+        SGL_TRACE_UNIFORM("glUniformMatrix%dx%dfv(packed loc=0x%X, count=%d)", cols, rows, location,
+                          count);
         return;
     }
 
@@ -2034,24 +2123,19 @@ static void set_matrix_uniform_impl(GLint location, int cols, GLsizei count, GLb
     if (ub->valid && ctx->backend->ops->write_uniform) {
         const float *payload;
         float std140_data[12 * 4]; /* up to 4 matrices; mat3 (48 floats) worst case */
-        if (cols == 4) {
+        if (cols == 4 && rows == 4 && !transposed) {
             /* mat4 is already std140 (4 vec4): write directly, no count clamp. */
             payload = value;
         } else {
-            /* mat2/mat3: pad each column to vec4 in a bounded stack buffer. */
-            if (count > 4)
-                count = 4;
+            /* Pad each column to vec4 in a bounded stack buffer of 48 floats:
+             * 4 matrices of 2 or 3 columns, 3 of 4 columns. */
+            GLsizei max_count = (cols == 4) ? 3 : 4;
+            if (count > max_count)
+                count = max_count;
             data_size = elem * (uint32_t)count; /* recompute after clamp */
-            for (GLsizei m = 0; m < count; m++) {
-                const float *src = value + (size_t)m * cols * cols;
-                float *dst = std140_data + (size_t)m * cols * 4;
-                for (int c = 0; c < cols; c++) {
-                    for (int r = 0; r < cols; r++)
-                        dst[c * 4 + r] = src[c * cols + r];
-                    for (int r = cols; r < 4; r++)
-                        dst[c * 4 + r] = 0.0f;
-                }
-            }
+            for (GLsizei m = 0; m < count; m++)
+                sgl_matrix_to_std140(std140_data + (size_t)m * cols * 4, value, m, cols, rows,
+                                     transposed);
             payload = std140_data;
         }
         ctx->backend->ops->write_uniform(ctx->backend, ub->offset, payload, data_size);
@@ -2059,25 +2143,136 @@ static void set_matrix_uniform_impl(GLint location, int cols, GLsizei count, GLb
         /* Save shadow copy (first matrix, std140) */
         memcpy(ub->shadow, payload, elem);
         ub->shadow_size = elem;
-        ub->shadow_components = cols * cols;
+        ub->shadow_components = cols * rows;
         ub->shadow_type = GL_FLOAT;
     }
 
     ub->dirty = true;
-    SGL_TRACE_UNIFORM("glUniformMatrix%dfv(loc=%d, count=%d)", cols, location, count);
+    SGL_TRACE_UNIFORM("glUniformMatrix%dx%dfv(loc=%d, count=%d)", cols, rows, location, count);
 }
 
 GL_APICALL void GL_APIENTRY glUniformMatrix2fv(GLint location, GLsizei count, GLboolean transpose,
                                                const GLfloat *value) {
-    set_matrix_uniform(location, 2, count, transpose, value);
+    set_matrix_uniform(location, 2, 2, count, transpose, value);
 }
 
 GL_APICALL void GL_APIENTRY glUniformMatrix3fv(GLint location, GLsizei count, GLboolean transpose,
                                                const GLfloat *value) {
-    set_matrix_uniform(location, 3, count, transpose, value);
+    set_matrix_uniform(location, 3, 3, count, transpose, value);
 }
 
 GL_APICALL void GL_APIENTRY glUniformMatrix4fv(GLint location, GLsizei count, GLboolean transpose,
                                                const GLfloat *value) {
-    set_matrix_uniform(location, 4, count, transpose, value);
+    set_matrix_uniform(location, 4, 4, count, transpose, value);
+}
+
+/* ============================================================================
+ * GLES 3.0: unsigned and non-square matrix uniforms
+ * (GL_INVALID_OPERATION in a GLES 2.0 context, like every GLES 3.0 function)
+ * ============================================================================ */
+
+static bool sgl_uniform_es3_check(void) {
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (ctx && !sgl_ctx_is_es3(ctx)) {
+        sgl_set_error(ctx, GL_INVALID_OPERATION);
+        return false;
+    }
+    return ctx != NULL;
+}
+
+static void set_uint_uniform(GLint location, int num_components, GLsizei count,
+                             const GLuint *values) {
+    if (!sgl_uniform_es3_check())
+        return;
+    if (count < 0) {
+        sgl_set_error(sgl_get_current_context(), GL_INVALID_VALUE);
+        return;
+    }
+    if (count == 0 || !values)
+        return;
+    SGL_PERF_BEGIN(perf);
+    set_scalar_uniform_impl(location, num_components, count, values, true, true);
+    SGL_PERF_END(SGL_PERF_UNIFORM, perf);
+}
+
+GL_APICALL void GL_APIENTRY glUniform1ui(GLint location, GLuint v0) {
+    GLuint values[1] = {v0};
+    set_uint_uniform(location, 1, 1, values);
+}
+
+GL_APICALL void GL_APIENTRY glUniform2ui(GLint location, GLuint v0, GLuint v1) {
+    GLuint values[2] = {v0, v1};
+    set_uint_uniform(location, 2, 1, values);
+}
+
+GL_APICALL void GL_APIENTRY glUniform3ui(GLint location, GLuint v0, GLuint v1, GLuint v2) {
+    GLuint values[3] = {v0, v1, v2};
+    set_uint_uniform(location, 3, 1, values);
+}
+
+GL_APICALL void GL_APIENTRY glUniform4ui(GLint location, GLuint v0, GLuint v1, GLuint v2,
+                                         GLuint v3) {
+    GLuint values[4] = {v0, v1, v2, v3};
+    set_uint_uniform(location, 4, 1, values);
+}
+
+GL_APICALL void GL_APIENTRY glUniform1uiv(GLint location, GLsizei count, const GLuint *value) {
+    set_uint_uniform(location, 1, count, value);
+}
+
+GL_APICALL void GL_APIENTRY glUniform2uiv(GLint location, GLsizei count, const GLuint *value) {
+    set_uint_uniform(location, 2, count, value);
+}
+
+GL_APICALL void GL_APIENTRY glUniform3uiv(GLint location, GLsizei count, const GLuint *value) {
+    set_uint_uniform(location, 3, count, value);
+}
+
+GL_APICALL void GL_APIENTRY glUniform4uiv(GLint location, GLsizei count, const GLuint *value) {
+    set_uint_uniform(location, 4, count, value);
+}
+
+/* The packed and shadow storage of a uint uniform is its 32-bit value: the
+ * glGetUniformiv readback returns the same bits. Float and bool uniforms go
+ * through its int conversion (a negative float has no uint value anyway). */
+GL_APICALL void GL_APIENTRY glGetUniformuiv(GLuint program, GLint location, GLuint *params) {
+    if (!sgl_uniform_es3_check())
+        return;
+    glGetUniformiv(program, location, (GLint *)params);
+}
+
+GL_APICALL void GL_APIENTRY glUniformMatrix2x3fv(GLint location, GLsizei count,
+                                                 GLboolean transpose, const GLfloat *value) {
+    if (sgl_uniform_es3_check())
+        set_matrix_uniform(location, 2, 3, count, transpose, value);
+}
+
+GL_APICALL void GL_APIENTRY glUniformMatrix3x2fv(GLint location, GLsizei count,
+                                                 GLboolean transpose, const GLfloat *value) {
+    if (sgl_uniform_es3_check())
+        set_matrix_uniform(location, 3, 2, count, transpose, value);
+}
+
+GL_APICALL void GL_APIENTRY glUniformMatrix2x4fv(GLint location, GLsizei count,
+                                                 GLboolean transpose, const GLfloat *value) {
+    if (sgl_uniform_es3_check())
+        set_matrix_uniform(location, 2, 4, count, transpose, value);
+}
+
+GL_APICALL void GL_APIENTRY glUniformMatrix4x2fv(GLint location, GLsizei count,
+                                                 GLboolean transpose, const GLfloat *value) {
+    if (sgl_uniform_es3_check())
+        set_matrix_uniform(location, 4, 2, count, transpose, value);
+}
+
+GL_APICALL void GL_APIENTRY glUniformMatrix3x4fv(GLint location, GLsizei count,
+                                                 GLboolean transpose, const GLfloat *value) {
+    if (sgl_uniform_es3_check())
+        set_matrix_uniform(location, 3, 4, count, transpose, value);
+}
+
+GL_APICALL void GL_APIENTRY glUniformMatrix4x3fv(GLint location, GLsizei count,
+                                                 GLboolean transpose, const GLfloat *value) {
+    if (sgl_uniform_es3_check())
+        set_matrix_uniform(location, 4, 3, count, transpose, value);
 }
