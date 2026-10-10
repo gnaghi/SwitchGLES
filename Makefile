@@ -37,6 +37,12 @@ CFLAGS	:=	-g -Wall -Wextra -Wunused-function -Wunused-variable -O0 \
 
 CFLAGS	+=	$(INCLUDE) -D__SWITCH__ -DSGL_DEBUG -DSGL_ENABLE_RUNTIME_COMPILER
 
+# GLES 3.0 development path (docs/GLES3_PLAN.md): `make ES3_CONTEXT=1` lets EGL
+# create GLES 3.0 contexts while ES 3.0 is incomplete. Off by default.
+ifeq ($(ES3_CONTEXT),1)
+CFLAGS	+=	-DSGL_ENABLE_ES3_CONTEXT
+endif
+
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++17
 
 ASFLAGS	:=	-g $(ARCH)

@@ -177,7 +177,8 @@ EGLAPI EGLBoolean EGLAPIENTRY eglGetConfigAttrib(EGLDisplay dpy, EGLConfig confi
             *value = EGL_NONE;
             break;
         case EGL_CONFORMANT:
-            *value = cfg->renderable_type;
+            /* GLES 3.0 contexts (SGL_ENABLE_ES3_CONTEXT) are not conformant */
+            *value = cfg->renderable_type & ~EGL_OPENGL_ES3_BIT;
             break;
         case EGL_LEVEL:
             *value = 0;

@@ -31,6 +31,8 @@ EGLAPI EGLContext EGLAPIENTRY eglCreateContext(EGLDisplay dpy, EGLConfig config,
         return EGL_NO_CONTEXT;
     }
 
+    /* EGL_CONTEXT_CLIENT_VERSION and EGL_CONTEXT_MAJOR_VERSION_KHR are the
+     * same attribute (0x3098). */
     EGLint client_version = 1;
     if (attrib_list) {
         for (int i = 0; attrib_list[i] != EGL_NONE; i += 2) {
@@ -40,7 +42,25 @@ EGLAPI EGLContext EGLAPIENTRY eglCreateContext(EGLDisplay dpy, EGLConfig config,
         }
     }
 
-    if (client_version != 2) {
+    bool version_ok = (client_version == 2);
+#ifdef SGL_ENABLE_ES3_CONTEXT
+    /* Development path: GLES 3.0 is incomplete (docs/GLES3_PLAN.md). Only
+     * 3.0 exactly, on a config that lists EGL_OPENGL_ES3_BIT
+     * (EGL_KHR_create_context: a version that cannot be met is EGL_BAD_MATCH). */
+    if (client_version == 3) {
+        EGLint minor_version = 0;
+        for (int i = 0; attrib_list[i] != EGL_NONE; i += 2) {
+            if (attrib_list[i] == EGL_CONTEXT_MINOR_VERSION)
+                minor_version = attrib_list[i + 1];
+        }
+        if (minor_version != 0 || !(cfg->renderable_type & EGL_OPENGL_ES3_BIT)) {
+            sgl_egl_set_error(EGL_BAD_MATCH);
+            return EGL_NO_CONTEXT;
+        }
+        version_ok = true;
+    }
+#endif
+    if (!version_ok) {
         sgl_egl_set_error(EGL_BAD_ATTRIBUTE);
         return EGL_NO_CONTEXT;
     }

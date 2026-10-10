@@ -75,9 +75,17 @@ typedef struct sgl_context {
     /* eglDestroyContext called while the context was current: the handle is
      * invalid but the context lives until it is no longer current (EGL §3.7.2). */
     bool delete_pending;
-    int client_version; /* 2 for GLES2 */
+    int client_version; /* GLES major version: 2, or 3 (SGL_ENABLE_ES3_CONTEXT builds only) */
     int config_id;      /* EGLConfig id this context was created with */
 } sgl_context_t;
+
+/* True for a GLES 3.0 context. Entry points and enums introduced by ES 3.0
+ * check it, so that an ES 2.0 context keeps the exact ES 2.0 behaviour. Only
+ * builds with SGL_ENABLE_ES3_CONTEXT can create such a context (development
+ * path, see docs/GLES3_PLAN.md). */
+static inline bool sgl_ctx_is_es3(const sgl_context_t *ctx) {
+    return ctx->client_version >= 3;
+}
 
 /* Context lifecycle */
 void sgl_context_init(sgl_context_t *ctx);

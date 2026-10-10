@@ -255,6 +255,13 @@ EGLAPI EGLBoolean EGLAPIENTRY eglInitialize(EGLDisplay dpy, EGLint *major, EGLin
 
     g_sgl.num_configs = 2;
 
+#ifdef SGL_ENABLE_ES3_CONTEXT
+    /* Development path (docs/GLES3_PLAN.md): the configs can also create a
+     * GLES 3.0 context. EGL_CONFORMANT stays EGL_OPENGL_ES2_BIT. */
+    g_sgl.configs[0].renderable_type |= EGL_OPENGL_ES3_BIT;
+    g_sgl.configs[1].renderable_type |= EGL_OPENGL_ES3_BIT;
+#endif
+
     display->major_version = 1;
     display->minor_version = 4;
     display->initialized = true;
@@ -423,7 +430,15 @@ EGLAPI const char *EGLAPIENTRY eglQueryString(EGLDisplay dpy, EGLint name) {
         case EGL_VERSION:
             return "1.4 SwitchGLES";
         case EGL_EXTENSIONS:
+#ifdef SGL_ENABLE_ES3_CONTEXT
+            /* Needed to request an ES 3.0 context by major/minor version.
+             * EGL_KHR_get_all_proc_addresses is deliberately NOT listed: dEQP
+             * would then load every GL entry point through eglGetProcAddress
+             * instead of linking them directly. */
+            return "EGL_KHR_create_context";
+#else
             return "";
+#endif
         case EGL_CLIENT_APIS:
             return "OpenGL_ES";
         default:
