@@ -456,12 +456,41 @@ static size_t sgl_unpack_image_size(sgl_context_t *ctx, GLsizei width, GLsizei h
  * (buffers live in CPU-visible memory). Sets GL_INVALID_OPERATION and returns
  * false if the buffer is mapped or the size bytes do not fit in it. Without a
  * bound buffer (always the case in a GLES 2.0 context) *pixels is unchanged. */
-static bool sgl_unpack_source(sgl_context_t *ctx, const void **pixels, size_t size) {
+/* Bytes of the GL data type of a pixel transfer type (GLES 3.0 Table 3.5),
+ * 1 for a compressed upload (type 0) */
+static size_t sgl_pixel_type_size(GLenum type) {
+    switch (type) {
+        case GL_UNSIGNED_SHORT:
+        case GL_SHORT:
+        case GL_HALF_FLOAT:
+        case GL_HALF_FLOAT_OES:
+        case GL_UNSIGNED_SHORT_5_6_5:
+        case GL_UNSIGNED_SHORT_4_4_4_4:
+        case GL_UNSIGNED_SHORT_5_5_5_1:
+            return 2;
+        case GL_UNSIGNED_INT:
+        case GL_INT:
+        case GL_FLOAT:
+        case GL_UNSIGNED_INT_2_10_10_10_REV:
+        case GL_UNSIGNED_INT_10F_11F_11F_REV:
+        case GL_UNSIGNED_INT_5_9_9_9_REV:
+        case GL_UNSIGNED_INT_24_8:
+        case GL_FLOAT_32_UNSIGNED_INT_24_8_REV:
+            return 4;
+        default:
+            return 1;
+    }
+}
+
+static bool sgl_unpack_source(sgl_context_t *ctx, const void **pixels, size_t size, GLenum type) {
     if (ctx->bound_pixel_unpack_buffer == 0)
         return true;
     sgl_buffer_t *buf = GET_BUFFER(ctx->bound_pixel_unpack_buffer);
     uintptr_t offset = (uintptr_t)*pixels;
-    if (!buf || buf->mapped || offset > (uintptr_t)buf->size ||
+    /* GLES 3.0 §3.7.1: the offset must be a multiple of the size of the
+     * data type, and the buffer must not be mapped nor too small */
+    if (!buf || buf->mapped || offset % sgl_pixel_type_size(type) != 0 ||
+        offset > (uintptr_t)buf->size ||
         size > (size_t)buf->size - (size_t)offset || !ctx->backend->ops->get_data_cpu_ptr) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
         return false;
@@ -563,7 +592,8 @@ GL_APICALL void GL_APIENTRY glTexImage2D(GLenum target, GLint level, GLint inter
     }
 
     /* GLES 3.0 pixel unpack buffer */
-    if (!sgl_unpack_source(ctx, &pixels, sgl_unpack_image_size(ctx, width, height, format, type)))
+    if (!sgl_unpack_source(ctx, &pixels, sgl_unpack_image_size(ctx, width, height, format, type),
+                           type))
         return;
 
     /* Empty texture - silently return */
@@ -723,7 +753,8 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint xo
     }
 
     /* GLES 3.0 pixel unpack buffer */
-    if (!sgl_unpack_source(ctx, &pixels, sgl_unpack_image_size(ctx, width, height, format, type)))
+    if (!sgl_unpack_source(ctx, &pixels, sgl_unpack_image_size(ctx, width, height, format, type),
+                           type))
         return;
 
     /* Delegate to backend for actual GPU texture update */
@@ -1004,6 +1035,23 @@ GL_APICALL void GL_APIENTRY glCopyTexImage2D(GLenum target, GLint level, GLenum 
         return;
     }
 
+    /* GLES 3.0 sized internal formats (gl_texture_es3.c): the ones stored as
+     * RGBA8 are copied as their unsized format, the others are refused after
+     * the framebuffer checks below */
+    GLenum sized_internalformat = 0;
+    bool sized_unsupported = false;
+    {
+        GLenum unsized = 0;
+        int es3 = sgl_es3_copy_tex_format(ctx, internalformat, &unsized);
+        if (es3 < 0)
+            return;
+        if (es3 > 0) {
+            sized_internalformat = internalformat;
+            sized_unsupported = unsized == 0;
+            internalformat = unsized ? unsized : GL_RGBA;
+        }
+    }
+
     /* Validate internalformat: only color-renderable formats are valid */
     if (internalformat != GL_RGBA && internalformat != GL_RGB &&
         internalformat != GL_LUMINANCE_ALPHA && internalformat != GL_LUMINANCE &&
@@ -1051,6 +1099,11 @@ GL_APICALL void GL_APIENTRY glCopyTexImage2D(GLenum target, GLint level, GLenum 
         }
     }
 
+    if (sized_unsupported) {
+        SGL_ES3_UNSUPPORTED(ctx, "glCopyTexImage2D into a GLES 3.0 sized format not stored as RGBA8");
+        return;
+    }
+
     if (width == 0 || height == 0) {
         return;
     }
@@ -1070,7 +1123,7 @@ GL_APICALL void GL_APIENTRY glCopyTexImage2D(GLenum target, GLint level, GLenum 
     if (level == 0) {
         tex->width = width;
         tex->height = height;
-        tex->internal_format = internalformat;
+        tex->internal_format = sized_internalformat ? sized_internalformat : internalformat;
     }
     tex->target = sgl_is_cubemap_face(target) ? GL_TEXTURE_CUBE_MAP : target;
 
@@ -1234,6 +1287,11 @@ GL_APICALL void GL_APIENTRY glCompressedTexImage2D(GLenum target, GLint level,
         }
     }
 
+    /* GLES 3.0 pixel unpack buffer: checked before the no-op cases below,
+     * whose errors do not depend on the texture (no buffer in GLES 2.0) */
+    if (!sgl_unpack_source(ctx, &data, (size_t)imageSize, 0))
+        return;
+
     /* Empty texture - silently return */
     if (width == 0 || height == 0) {
         return;
@@ -1249,10 +1307,6 @@ GL_APICALL void GL_APIENTRY glCompressedTexImage2D(GLenum target, GLint level,
         sgl_set_error(ctx, GL_INVALID_OPERATION);
         return;
     }
-
-    /* GLES 3.0 pixel unpack buffer */
-    if (!sgl_unpack_source(ctx, &data, (size_t)imageSize))
-        return;
 
     /* Update GL-level texture state — only update base dimensions at level 0 */
     tex->used = true;
@@ -1311,6 +1365,10 @@ GL_APICALL void GL_APIENTRY glCompressedTexSubImage2D(GLenum target, GLint level
         }
     }
 
+    /* GLES 3.0 pixel unpack buffer (none in GLES 2.0) */
+    if (!sgl_unpack_source(ctx, &data, (size_t)imageSize, 0))
+        return;
+
     if (width == 0 || height == 0)
         return;
 
@@ -1322,10 +1380,6 @@ GL_APICALL void GL_APIENTRY glCompressedTexSubImage2D(GLenum target, GLint level
         sgl_set_error(ctx, GL_INVALID_OPERATION);
         return;
     }
-
-    /* GLES 3.0 pixel unpack buffer */
-    if (!sgl_unpack_source(ctx, &data, (size_t)imageSize))
-        return;
 
     /* Delegate to backend for actual GPU texture update */
     if (ctx->backend->ops->compressed_texture_sub_image_2d) {

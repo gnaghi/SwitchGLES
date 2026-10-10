@@ -272,6 +272,33 @@ int sgl_es3_tex_sub_image_validate(sgl_context_t *ctx, GLenum tex_internalformat
     return sgl_es3_check_sized(ctx, tex_internalformat, format, type, has_data) ? 1 : -1;
 }
 
+int sgl_es3_copy_tex_format(sgl_context_t *ctx, GLenum internalformat, GLenum *unsized) {
+    if (!sgl_ctx_is_es3(ctx) || sgl_es3_is_unsized_format(internalformat))
+        return 0;
+    *unsized = 0;
+    switch (internalformat) {
+        case GL_RGBA8:
+        case GL_RGBA4:
+        case GL_RGB5_A1:
+            *unsized = GL_RGBA;
+            return 1;
+        case GL_RGB8:
+        case GL_RGB565:
+            *unsized = GL_RGB;
+            return 1;
+        default:
+            break;
+    }
+    /* Depth / stencil formats cannot be copied into (GLES 3.0 §3.8.5) */
+    if (!sgl_es3_is_sized_format(internalformat) || internalformat == GL_DEPTH_COMPONENT16 ||
+        internalformat == GL_DEPTH_COMPONENT24 || internalformat == GL_DEPTH_COMPONENT32F ||
+        internalformat == GL_DEPTH24_STENCIL8 || internalformat == GL_DEPTH32F_STENCIL8) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return -1;
+    }
+    return 1; /* valid but not supported yet: *unsized stays 0 */
+}
+
 /* ============================================================================
  * glTexStorage2D (GLES 3.0 §3.8.4)
  * ============================================================================ */

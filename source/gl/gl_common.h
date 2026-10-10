@@ -91,6 +91,9 @@ bool sgl_es3_get_integer(sgl_context_t *ctx, GLenum pname, GLint *params);
  * GL_PIXEL_UNPACK_BUFFER). */
 int sgl_es3_tex_image_validate(sgl_context_t *ctx, GLint internalformat, GLenum format,
                                GLenum type, bool has_data);
+/* glCopyTexImage2D: 0 = GLES 2.0 rules; 1 = GLES 3.0 sized format, *unsized
+ * = the unsized format it is copied as, or 0 if not supported yet; -1 = error */
+int sgl_es3_copy_tex_format(sgl_context_t *ctx, GLenum internalformat, GLenum *unsized);
 int sgl_es3_tex_sub_image_validate(sgl_context_t *ctx, GLenum tex_internalformat, GLenum format,
                                    GLenum type, bool has_data);
 
