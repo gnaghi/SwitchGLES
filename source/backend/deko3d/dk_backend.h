@@ -300,8 +300,10 @@ DkPrimitive dk_convert_primitive(GLenum mode);
 DkImageFormat dk_convert_format(GLenum internalformat, GLenum format, GLenum type);
 
 /* Vertex attribute helpers */
-void dk_get_attrib_format(GLenum type, GLint size, GLboolean normalized, DkVtxAttribSize *outSize,
+void dk_get_attrib_format(GLenum type, GLint size, GLboolean normalized, bool integer,
+                          DkVtxAttribSize *outSize,
                           DkVtxAttribType *outType);
 GLsizei dk_get_type_size(GLenum type);
+GLsizei dk_get_attrib_bytes(GLenum type, GLint size);
 
 #endif /* DK_BACKEND_H */

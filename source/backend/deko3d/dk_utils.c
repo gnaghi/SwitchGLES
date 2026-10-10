@@ -454,8 +454,25 @@ int dk_get_compressed_block_bytes(GLenum internalformat) {
  * Vertex Attribute Format Conversion
  * ============================================================================ */
 
-void dk_get_attrib_format(GLenum type, GLint size, GLboolean normalized, DkVtxAttribSize *outSize,
-                          DkVtxAttribType *outType) {
+void dk_get_attrib_format(GLenum type, GLint size, GLboolean normalized, bool integer,
+                          DkVtxAttribSize *outSize, DkVtxAttribType *outType) {
+    /* GLES 3.0 packed 2_10_10_10 (always 4 components) */
+    if (type == GL_INT_2_10_10_10_REV || type == GL_UNSIGNED_INT_2_10_10_10_REV) {
+        bool is_signed = type == GL_INT_2_10_10_10_REV;
+        *outSize = DkVtxAttribSize_10_10_10_2;
+        *outType = normalized ? (is_signed ? DkVtxAttribType_Snorm : DkVtxAttribType_Unorm)
+                              : (is_signed ? DkVtxAttribType_Sscaled : DkVtxAttribType_Uscaled);
+        return;
+    }
+    /* GLES 3.0 half float: 16-bit components, fetched as float */
+    if (type == GL_HALF_FLOAT) {
+        static const DkVtxAttribSize s_half[4] = {DkVtxAttribSize_1x16, DkVtxAttribSize_2x16,
+                                                  DkVtxAttribSize_3x16, DkVtxAttribSize_4x16};
+        *outSize = s_half[(size < 1 || size > 4) ? 3 : size - 1];
+        *outType = DkVtxAttribType_Float;
+        return;
+    }
+
     /* Size: GL_FIXED uses 32-bit sizes (same as GL_FLOAT, converted during staging) */
     switch (size) {
         case 1:
@@ -541,6 +558,12 @@ void dk_get_attrib_format(GLenum type, GLint size, GLboolean normalized, DkVtxAt
      * normalized=FALSE → Sscaled/Uscaled (int→float, e.g. 127 → 127.0)
      * NOT Sint/Uint which pass raw integers (incompatible with float attribs)
      * GL_FIXED: 16.16 fixed-point → converted to float during staging, so Float type. */
+    /* GLES 3.0 glVertexAttribIPointer: raw integers for int/uint shader inputs */
+    if (integer) {
+        bool is_signed = type == GL_BYTE || type == GL_SHORT || type == GL_INT;
+        *outType = is_signed ? DkVtxAttribType_Sint : DkVtxAttribType_Uint;
+        return;
+    }
     switch (type) {
         case GL_BYTE:
             *outType = normalized ? DkVtxAttribType_Snorm : DkVtxAttribType_Sscaled;
@@ -552,6 +575,12 @@ void dk_get_attrib_format(GLenum type, GLint size, GLboolean normalized, DkVtxAt
             *outType = normalized ? DkVtxAttribType_Snorm : DkVtxAttribType_Sscaled;
             break;
         case GL_UNSIGNED_SHORT:
+            *outType = normalized ? DkVtxAttribType_Unorm : DkVtxAttribType_Uscaled;
+            break;
+        case GL_INT: /* GLES 3.0 */
+            *outType = normalized ? DkVtxAttribType_Snorm : DkVtxAttribType_Sscaled;
+            break;
+        case GL_UNSIGNED_INT: /* GLES 3.0 */
             *outType = normalized ? DkVtxAttribType_Unorm : DkVtxAttribType_Uscaled;
             break;
         case GL_FLOAT:
@@ -574,6 +603,7 @@ GLsizei dk_get_type_size(GLenum type) {
         case GL_SHORT:
         case GL_UNSIGNED_SHORT:
         case GL_HALF_FLOAT_OES:
+        case GL_HALF_FLOAT:
             return 2;
         case GL_INT:
         case GL_UNSIGNED_INT:
@@ -583,4 +613,12 @@ GLsizei dk_get_type_size(GLenum type) {
         default:
             return 4;
     }
+}
+
+/* Bytes of one vertex of an attribute (the GLES 3.0 packed 2_10_10_10 types
+ * hold their 4 components in 4 bytes) */
+GLsizei dk_get_attrib_bytes(GLenum type, GLint size) {
+    if (type == GL_INT_2_10_10_10_REV || type == GL_UNSIGNED_INT_2_10_10_10_REV)
+        return 4;
+    return size * dk_get_type_size(type);
 }

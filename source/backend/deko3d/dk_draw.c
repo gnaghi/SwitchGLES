@@ -70,10 +70,8 @@ static bool dk_attrib_const_block(dk_backend_data_t *dk, const sgl_vertex_attrib
     /* Every slot is written (the table always has SGL_MAX_ATTRIBS entries) so
      * that the shadow describes the whole block, whatever a later draw declares. */
     for (int i = 0; i < SGL_MAX_ATTRIBS; i++) {
-        dst[i * 4 + 0] = attribs[i].current_value[0];
-        dst[i * 4 + 1] = attribs[i].current_value[1];
-        dst[i * 4 + 2] = attribs[i].current_value[2];
-        dst[i * 4 + 3] = attribs[i].current_value[3];
+        /* Copied as bits: GLES 3.0 integer values are stored there as is */
+        memcpy(&dst[i * 4], attribs[i].current_value, sizeof(float[4]));
         memcpy(dk->attrib_const_shadow[i], attribs[i].current_value, sizeof(float[4]));
     }
     dk->client_array_offset = alignedOff + totalSize;
@@ -187,7 +185,11 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
             attribStates[i].isFixed = 0;
             attribStates[i].offset = (uint32_t)i * 16; /* slot i of the block */
             attribStates[i].size = DkVtxAttribSize_4x32;
-            attribStates[i].type = DkVtxAttribType_Float;
+            /* The block holds the raw bits of current_value: integers after
+             * glVertexAttribI4* (GLES 3.0), floats otherwise */
+            attribStates[i].type = (attr->current_type == GL_INT)            ? DkVtxAttribType_Sint
+                                   : (attr->current_type == GL_UNSIGNED_INT) ? DkVtxAttribType_Uint
+                                                                             : DkVtxAttribType_Float;
             attribStates[i].isBgra = 0;
             continue;
         }
@@ -195,7 +197,7 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
         /* Calculate effective stride (0 means tightly packed) */
         GLsizei effectiveStride = attr->stride;
         if (effectiveStride == 0) {
-            effectiveStride = attr->size * dk_get_type_size(attr->type);
+            effectiveStride = dk_get_attrib_bytes(attr->type, attr->size);
         }
 
         /*
@@ -369,7 +371,8 @@ void dk_bind_vertex_attribs(sgl_backend_t *be, const sgl_vertex_attrib_t *attrib
         /* Get deko3d format */
         DkVtxAttribSize attrSize;
         DkVtxAttribType attrType;
-        dk_get_attrib_format(attr->type, attr->size, attr->normalized, &attrSize, &attrType);
+        dk_get_attrib_format(attr->type, attr->size, attr->normalized, attr->integer, &attrSize,
+                             &attrType);
 
         /* Attribute state */
         attribStates[i].bufferId = (uint32_t)bufIdx;

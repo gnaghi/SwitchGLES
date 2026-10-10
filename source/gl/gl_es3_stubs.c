@@ -128,61 +128,6 @@ GL_APICALL void GL_APIENTRY glDrawElementsInstanced(GLenum mode, GLsizei count, 
     SGL_ES3_UNIMPLEMENTED();
 }
 
-GL_APICALL void GL_APIENTRY glVertexAttribIPointer(GLuint index, GLint size, GLenum type,
-                                                   GLsizei stride, const void *pointer) {
-    (void)index;
-    (void)size;
-    (void)type;
-    (void)stride;
-    (void)pointer;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
-GL_APICALL void GL_APIENTRY glGetVertexAttribIiv(GLuint index, GLenum pname, GLint *params) {
-    (void)index;
-    (void)pname;
-    (void)params;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
-GL_APICALL void GL_APIENTRY glGetVertexAttribIuiv(GLuint index, GLenum pname, GLuint *params) {
-    (void)index;
-    (void)pname;
-    (void)params;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
-GL_APICALL void GL_APIENTRY glVertexAttribI4i(GLuint index, GLint x, GLint y, GLint z, GLint w) {
-    (void)index;
-    (void)x;
-    (void)y;
-    (void)z;
-    (void)w;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
-GL_APICALL void GL_APIENTRY glVertexAttribI4ui(GLuint index, GLuint x, GLuint y, GLuint z,
-                                               GLuint w) {
-    (void)index;
-    (void)x;
-    (void)y;
-    (void)z;
-    (void)w;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
-GL_APICALL void GL_APIENTRY glVertexAttribI4iv(GLuint index, const GLint *v) {
-    (void)index;
-    (void)v;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
-GL_APICALL void GL_APIENTRY glVertexAttribI4uiv(GLuint index, const GLuint *v) {
-    (void)index;
-    (void)v;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
 /* 3D / array textures and immutable storage */
 
 GL_APICALL void GL_APIENTRY glTexSubImage3D(GLenum target, GLint level, GLint xoffset,

@@ -373,6 +373,11 @@ typedef struct sgl_vertex_attrib {
     uint32_t buffer_offset;    /* GPU buffer offset (computed before draw) */
     uint32_t buffer_data_size; /* Total VBO data size (for correct buffer extents) */
     GLfloat current_value[4];  /* Constant value when array is disabled (default: 0,0,0,1) */
+    /* GLES 3.0: what current_value holds. 0 or GL_FLOAT: floats; GL_INT or
+     * GL_UNSIGNED_INT (glVertexAttribI4*): the 32-bit integers, bit for bit.
+     * Context state like current_value (not swapped with vertex arrays). */
+    GLenum current_type;
+    bool integer; /* GLES 3.0 glVertexAttribIPointer: fetched as integers, not floats */
 } sgl_vertex_attrib_t;
 
 /* Vertex array object (GLES 3.0). The bound one lives in the context
