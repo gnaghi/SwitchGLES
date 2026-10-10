@@ -26,6 +26,11 @@ void sgl_res_mgr_destroy(sgl_resource_manager_t *mgr) {
             sgl_res_mgr_free_program(mgr, i);
         }
     }
+    /* Saved vertex array state (GLES 3.0), including the default one */
+    for (GLuint i = 0; i < SGL_MAX_VERTEX_ARRAYS; i++) {
+        free(mgr->vertex_arrays[i].attribs);
+        mgr->vertex_arrays[i].attribs = NULL;
+    }
 }
 
 /* ============================================================================

@@ -44,6 +44,7 @@ typedef struct sgl_context {
     GLuint bound_read_framebuffer; /* GL_READ_FRAMEBUFFER */
     GLuint bound_draw_framebuffer; /* GL_DRAW_FRAMEBUFFER */
     GLuint bound_renderbuffer;
+    GLuint bound_vertex_array; /* GLES 3.0 vertex array object (0 = default) */
 
     /* Vertex attributes */
     sgl_vertex_attrib_t vertex_attribs[SGL_MAX_ATTRIBS];

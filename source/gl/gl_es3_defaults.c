@@ -2,8 +2,8 @@
  * SwitchGLES - OpenGL ES 2.0 / EGL implementation for Nintendo Switch
  * GL Layer - GLES 3.0 state that only exists at its default value
  *
- * GLES 3.0 adds binding points and parameters (vertex array objects, sampler
- * objects, transform feedback, indexed buffer bindings, draw/read buffers, 3D
+ * GLES 3.0 adds binding points and parameters (sampler objects, transform
+ * feedback, indexed buffer bindings, draw/read buffers, 3D
  * and array textures, pixel store and texture parameters...) whose features
  * SwitchGLES does not implement yet. Applications and dEQP still set them back
  * to their defaults: dEQP-GLES3 resets the whole context after every test case
@@ -15,8 +15,8 @@
  *  - every argument is validated with the errors of the GLES 3.0 spec;
  *  - a valid non-default value needs the missing feature: it sets
  *    GL_INVALID_OPERATION and is logged once (SGL_ES3_UNSUPPORTED), never
- *    silently accepted. Where no object name can exist yet (vertex arrays,
- *    samplers, transform feedbacks: their glGen* are still stubs), binding a
+ *    silently accepted. Where no object name can exist yet (samplers,
+ *    transform feedbacks: their glGen* are still stubs), binding a
  *    non-zero name is GL_INVALID_OPERATION by the spec itself;
  *  - queries return the defaults, which are therefore always the real state.
  *
@@ -94,24 +94,8 @@ bool sgl_es3_is_enabled_cap(sgl_context_t *ctx, GLenum cap) {
 }
 
 /* ============================================================================
- * Vertex array objects, attribute divisors
+ * Attribute divisors
  * ============================================================================ */
-
-GL_APICALL void GL_APIENTRY glBindVertexArray(GLuint array) {
-    sgl_context_t *ctx = sgl_es3_context();
-    if (!ctx)
-        return;
-    /* Only the default vertex array exists: glGenVertexArrays is not
-     * implemented, so any other name was not returned by it (§2.10). */
-    if (array != 0)
-        sgl_set_error(ctx, GL_INVALID_OPERATION);
-}
-
-GL_APICALL GLboolean GL_APIENTRY glIsVertexArray(GLuint array) {
-    (void)array;
-    sgl_es3_context();
-    return GL_FALSE; /* no vertex array object can exist */
-}
 
 GL_APICALL void GL_APIENTRY glVertexAttribDivisor(GLuint index, GLuint divisor) {
     sgl_context_t *ctx = sgl_es3_context();
@@ -615,8 +599,11 @@ bool sgl_es3_get_integer(sgl_context_t *ctx, GLenum pname, GLint *params) {
         return false;
 
     switch (pname) {
-        /* Default bindings: nothing else can be bound */
         case GL_VERTEX_ARRAY_BINDING:
+            *params = (GLint)ctx->bound_vertex_array;
+            return true;
+
+        /* Default bindings: nothing else can be bound */
         case GL_TRANSFORM_FEEDBACK_BINDING:
         case GL_SAMPLER_BINDING:
         case GL_TEXTURE_BINDING_3D:

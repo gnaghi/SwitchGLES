@@ -29,6 +29,7 @@ typedef struct sgl_resource_manager {
     sgl_framebuffer_t framebuffers[SGL_MAX_FRAMEBUFFERS];
     sgl_renderbuffer_t renderbuffers[SGL_MAX_RENDERBUFFERS];
     sgl_sync_t syncs[SGL_MAX_SYNCS];
+    sgl_vertex_array_t vertex_arrays[SGL_MAX_VERTEX_ARRAYS];
 
     /* Overflow IDs: tracks objects with IDs >= SGL_MAX_* */
     GLuint overflow_buffer_ids[SGL_MAX_OVERFLOW_IDS];

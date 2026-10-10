@@ -139,18 +139,6 @@ GL_APICALL void GL_APIENTRY glDrawElementsInstanced(GLenum mode, GLsizei count, 
     SGL_ES3_UNIMPLEMENTED();
 }
 
-GL_APICALL void GL_APIENTRY glDeleteVertexArrays(GLsizei n, const GLuint *arrays) {
-    (void)n;
-    (void)arrays;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
-GL_APICALL void GL_APIENTRY glGenVertexArrays(GLsizei n, GLuint *arrays) {
-    (void)n;
-    (void)arrays;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
 GL_APICALL void GL_APIENTRY glVertexAttribIPointer(GLuint index, GLint size, GLenum type,
                                                    GLsizei stride, const void *pointer) {
     (void)index;

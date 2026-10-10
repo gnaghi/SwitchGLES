@@ -60,6 +60,7 @@
 #define SGL_MAX_UNIFORMS 16
 #define SGL_MAX_TEXTURE_UNITS 16
 #define SGL_MAX_SYNCS 64 /* GLES 3.0 fence sync objects alive at once */
+#define SGL_MAX_VERTEX_ARRAYS 256 /* GLES 3.0 vertex array object names (0 = default) */
 
 /* Packed UBO configuration */
 #define SGL_MAX_PACKED_UBO_SIZE 8192 /* Max bytes per packed UBO (supports 128 bones) */
@@ -368,5 +369,19 @@ typedef struct sgl_vertex_attrib {
     uint32_t buffer_data_size; /* Total VBO data size (for correct buffer extents) */
     GLfloat current_value[4];  /* Constant value when array is disabled (default: 0,0,0,1) */
 } sgl_vertex_attrib_t;
+
+/* Vertex array object (GLES 3.0). The bound one lives in the context
+ * (ctx->vertex_attribs, ctx->bound_element_buffer); binding another swaps
+ * that state with the object's copy, so the draw path never sees a VAO.
+ * Slot 0 holds the default vertex array while another one is bound. */
+typedef struct sgl_vertex_array {
+    bool used;    /* name returned by glGenVertexArrays (always true for 0) */
+    bool created; /* bound at least once: the object exists (glIsVertexArray) */
+    /* Saved attribute arrays (SGL_MAX_ATTRIBS entries, heap), NULL until the
+     * object is unbound for the first time. current_value is not VAO state
+     * (GLES 3.0 §2.8): it stays in the context. */
+    sgl_vertex_attrib_t *attribs;
+    GLuint element_buffer;
+} sgl_vertex_array_t;
 
 #endif /* SGL_GL_TYPES_H */
