@@ -404,10 +404,7 @@ static int sgl_is_cubemap_face(GLenum target) {
 
 /* Bytes read from client memory for a width x height image of format/type,
  * rows padded to GL_UNPACK_ALIGNMENT (GLES 2.0 §3.6.2) */
-static size_t sgl_unpack_image_size(sgl_context_t *ctx, GLsizei width, GLsizei height,
-                                    GLenum format, GLenum type) {
-    if (width <= 0 || height <= 0)
-        return 0;
+static size_t sgl_unpack_pixel_size(GLenum format, GLenum type) {
     size_t comps = (format == GL_RGBA || format == GL_BGRA_EXT || format == GL_RGBA_INTEGER) ? 4
                    : (format == GL_RGB || format == GL_RGB_INTEGER)                        ? 3
                    : (format == GL_LUMINANCE_ALPHA || format == GL_RG ||
@@ -445,9 +442,34 @@ static size_t sgl_unpack_image_size(sgl_context_t *ctx, GLsizei width, GLsizei h
             bpp = comps;
             break;
     }
+    return bpp;
+}
+
+/* Row stride of the client image: GL_UNPACK_ROW_LENGTH pixels (width if 0)
+ * padded to GL_UNPACK_ALIGNMENT */
+static size_t sgl_unpack_row_stride(sgl_context_t *ctx, GLsizei width, size_t bpp) {
     size_t align = ctx->unpack_alignment > 0 ? (size_t)ctx->unpack_alignment : 1;
-    size_t row = ((size_t)width * bpp + align - 1) / align * align;
-    return row * (size_t)(height - 1) + (size_t)width * bpp;
+    size_t row_pixels = ctx->unpack_row_length > 0 ? (size_t)ctx->unpack_row_length : (size_t)width;
+    return (row_pixels * bpp + align - 1) / align * align;
+}
+
+/* Bytes skipped before the first texel (GLES 3.0 GL_UNPACK_SKIP_ROWS /
+ * SKIP_PIXELS, always 0 in a GLES 2.0 context) */
+static size_t sgl_unpack_skip_bytes(sgl_context_t *ctx, GLsizei width, GLenum format,
+                                    GLenum type) {
+    size_t bpp = sgl_unpack_pixel_size(format, type);
+    return (size_t)ctx->unpack_skip_rows * sgl_unpack_row_stride(ctx, width, bpp) +
+           (size_t)ctx->unpack_skip_pixels * bpp;
+}
+
+static size_t sgl_unpack_image_size(sgl_context_t *ctx, GLsizei width, GLsizei height,
+                                    GLenum format, GLenum type) {
+    if (width <= 0 || height <= 0)
+        return 0;
+    size_t bpp = sgl_unpack_pixel_size(format, type);
+    size_t row = sgl_unpack_row_stride(ctx, width, bpp);
+    return sgl_unpack_skip_bytes(ctx, width, format, type) + row * (size_t)(height - 1) +
+           (size_t)width * bpp;
 }
 
 /* GLES 3.0 pixel unpack buffer (§3.7.1): with a buffer bound to
@@ -595,6 +617,9 @@ GL_APICALL void GL_APIENTRY glTexImage2D(GLenum target, GLint level, GLint inter
     if (!sgl_unpack_source(ctx, &pixels, sgl_unpack_image_size(ctx, width, height, format, type),
                            type))
         return;
+    /* GLES 3.0 GL_UNPACK_SKIP_ROWS / SKIP_PIXELS (0 in GLES 2.0) */
+    if (pixels)
+        pixels = (const uint8_t *)pixels + sgl_unpack_skip_bytes(ctx, width, format, type);
 
     /* Empty texture - silently return */
     if (width == 0 || height == 0) {
@@ -756,6 +781,9 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint xo
     if (!sgl_unpack_source(ctx, &pixels, sgl_unpack_image_size(ctx, width, height, format, type),
                            type))
         return;
+    /* GLES 3.0 GL_UNPACK_SKIP_ROWS / SKIP_PIXELS (0 in GLES 2.0) */
+    if (pixels)
+        pixels = (const uint8_t *)pixels + sgl_unpack_skip_bytes(ctx, width, format, type);
 
     /* Delegate to backend for actual GPU texture update */
     if (ctx->backend->ops->texture_sub_image_2d) {

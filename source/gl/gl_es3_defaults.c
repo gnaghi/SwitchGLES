@@ -540,6 +540,19 @@ bool sgl_es3_tex_parameter(sgl_context_t *ctx, GLenum target, GLenum pname, GLfl
         sgl_set_error(ctx, error);
         return true;
     }
+    /* Implemented: the level range of 2D and cube map textures */
+    if ((pname == GL_TEXTURE_BASE_LEVEL || pname == GL_TEXTURE_MAX_LEVEL) &&
+        (target == GL_TEXTURE_2D || target == GL_TEXTURE_CUBE_MAP)) {
+        GLuint tex_id = sgl_get_bound_texture(ctx, target);
+        sgl_texture_t *tex = tex_id ? GET_TEXTURE(tex_id) : NULL;
+        if (tex) {
+            if (pname == GL_TEXTURE_BASE_LEVEL)
+                tex->base_level = (GLint)value;
+            else
+                tex->max_level = (GLint)value;
+        }
+        return true;
+    }
     if (value != def)
         SGL_ES3_UNSUPPORTED(ctx, "glTexParameter (GLES 3.0 texture parameters / targets)");
     return true;
@@ -570,6 +583,13 @@ int sgl_es3_get_tex_parameter(sgl_context_t *ctx, GLenum target, GLenum pname, G
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return -1;
     }
+    if ((pname == GL_TEXTURE_BASE_LEVEL || pname == GL_TEXTURE_MAX_LEVEL) &&
+        (target == GL_TEXTURE_2D || target == GL_TEXTURE_CUBE_MAP)) {
+        GLuint tex_id = sgl_get_bound_texture(ctx, target);
+        sgl_texture_t *tex = tex_id ? GET_TEXTURE(tex_id) : NULL;
+        if (tex)
+            def = (GLfloat)(pname == GL_TEXTURE_BASE_LEVEL ? tex->base_level : tex->max_level);
+    }
     *value = def;
     return 1;
 }
@@ -594,10 +614,25 @@ bool sgl_es3_pixel_store(sgl_context_t *ctx, GLenum pname, GLint param) {
         default:
             return false;
     }
-    if (param < 0)
+    if (param < 0) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
-    else if (param != 0)
-        SGL_ES3_UNSUPPORTED(ctx, "glPixelStorei (row length / skip / image height)");
+        return true;
+    }
+    switch (pname) {
+        case GL_UNPACK_ROW_LENGTH:
+            ctx->unpack_row_length = param;
+            return true;
+        case GL_UNPACK_SKIP_ROWS:
+            ctx->unpack_skip_rows = param;
+            return true;
+        case GL_UNPACK_SKIP_PIXELS:
+            ctx->unpack_skip_pixels = param;
+            return true;
+        default:
+            break;
+    }
+    if (param != 0)
+        SGL_ES3_UNSUPPORTED(ctx, "glPixelStorei (image height / skip images / pack row length / pack skip)");
     return true;
 }
 
@@ -625,15 +660,22 @@ bool sgl_es3_get_integer(sgl_context_t *ctx, GLenum pname, GLint *params) {
         case GL_TRANSFORM_FEEDBACK_ACTIVE:
         case GL_TRANSFORM_FEEDBACK_PAUSED:
         /* Pixel store parameters that only accept 0 */
-        case GL_UNPACK_ROW_LENGTH:
         case GL_UNPACK_IMAGE_HEIGHT:
-        case GL_UNPACK_SKIP_ROWS:
-        case GL_UNPACK_SKIP_PIXELS:
         case GL_UNPACK_SKIP_IMAGES:
         case GL_PACK_ROW_LENGTH:
         case GL_PACK_SKIP_ROWS:
         case GL_PACK_SKIP_PIXELS:
             *params = 0;
+            return true;
+
+        case GL_UNPACK_ROW_LENGTH:
+            *params = ctx->unpack_row_length;
+            return true;
+        case GL_UNPACK_SKIP_ROWS:
+            *params = ctx->unpack_skip_rows;
+            return true;
+        case GL_UNPACK_SKIP_PIXELS:
+            *params = ctx->unpack_skip_pixels;
             return true;
 
         case GL_READ_BUFFER:

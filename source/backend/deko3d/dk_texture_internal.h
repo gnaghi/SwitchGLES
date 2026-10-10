@@ -27,6 +27,9 @@ void dk_apply_format_swizzle(DkImageView *view, GLenum gl_format);
 
 /* Bytes-per-pixel for an uncompressed GL format/type pair. */
 uint32_t dk_gl_format_bpp(GLenum gl_format, GLenum gl_type);
+/* Restrict a sampling view to the GLES 3.0 level range of the texture
+ * (GL_TEXTURE_BASE_LEVEL / MAX_LEVEL). No change at the defaults. */
+void dk_apply_level_range(dk_backend_data_t *dk, sgl_handle_t handle, DkImageView *view);
 
 /* True if target is one of the 6 GL_TEXTURE_CUBE_MAP_* faces. */
 bool dk_is_cubemap_face(GLenum target);

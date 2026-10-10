@@ -63,6 +63,11 @@ typedef struct sgl_context {
     /* Pixel store state */
     GLint pack_alignment;   /* GL_PACK_ALIGNMENT (default 4) */
     GLint unpack_alignment; /* GL_UNPACK_ALIGNMENT (default 4) */
+    /* GLES 3.0 GL_UNPACK_ROW_LENGTH / SKIP_ROWS / SKIP_PIXELS (default 0;
+     * always 0 in a GLES 2.0 context) */
+    GLint unpack_row_length;
+    GLint unpack_skip_rows;
+    GLint unpack_skip_pixels;
 
     /* Sample coverage (MSAA not supported but values stored for query) */
     float sample_coverage_value; /* default 1.0 */

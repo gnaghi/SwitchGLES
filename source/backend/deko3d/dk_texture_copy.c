@@ -345,6 +345,7 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
             dkImageViewDefaults(&descView, texImage);
             dk_apply_format_swizzle(&descView, dk->texture_gl_format[handle]);
             DkImageDescriptor *imgDesc = &dk->texture_descriptors[handle];
+            dk_apply_level_range(dk, handle, &descView);
             dkImageDescriptorInitialize(imgDesc, &descView, false, false);
             dk_write_image_descriptor_to_gpu(dk, handle);
             dk_write_sampler_descriptor_to_gpu(dk, handle);
@@ -357,6 +358,7 @@ void dk_copy_tex_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
         dkImageViewDefaults(&descView, texImage);
         dk_apply_format_swizzle(&descView, dk->texture_gl_format[handle]);
         DkImageDescriptor *imgDesc = &dk->texture_descriptors[handle];
+        dk_apply_level_range(dk, handle, &descView);
         dkImageDescriptorInitialize(imgDesc, &descView, false, false);
         dk_write_image_descriptor_to_gpu(dk, handle);
         dk_write_sampler_descriptor_to_gpu(dk, handle);
@@ -568,6 +570,7 @@ void dk_copy_tex_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum tar
     dkImageViewDefaults(&updatedView, texImage);
     dk_apply_format_swizzle(&updatedView, dk->texture_gl_format[handle]);
     DkImageDescriptor *imgDesc = &dk->texture_descriptors[handle];
+    dk_apply_level_range(dk, handle, &updatedView);
     dkImageDescriptorInitialize(imgDesc, &updatedView, false, false);
     dk_write_image_descriptor_to_gpu(dk, handle);
 

@@ -324,6 +324,9 @@ typedef struct sgl_texture {
     /* GLES 3.0 glTexStorage2D: immutable format and level count */
     bool immutable;
     GLint immutable_levels;
+    /* GLES 3.0 GL_TEXTURE_BASE_LEVEL / GL_TEXTURE_MAX_LEVEL (0 / 1000) */
+    GLint base_level;
+    GLint max_level;
     /* Deferred deletion: GPU data kept alive while attached to non-current FBOs */
     bool delete_pending; /* glDeleteTextures called, but still referenced by FBO(s) */
     int fbo_ref_count;   /* Number of FBO attachment points referencing this texture */

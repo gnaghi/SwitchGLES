@@ -25,6 +25,9 @@
 static inline uint32_t dk_src_row_stride(int width, int bpp) {
     sgl_context_t *ctx = sgl_get_current_context();
     int align = (ctx && ctx->unpack_alignment > 0) ? ctx->unpack_alignment : 4;
+    /* GLES 3.0 GL_UNPACK_ROW_LENGTH: row pitch in pixels (0 in GLES 2.0) */
+    if (ctx && ctx->unpack_row_length > 0)
+        width = ctx->unpack_row_length;
     uint32_t raw = (uint32_t)(width * bpp);
     return (raw + align - 1) & ~((uint32_t)align - 1);
 }
@@ -431,6 +434,8 @@ void dk_delete_texture(sgl_backend_t *be, sgl_handle_t handle) {
     dk->texture_height[handle] = 0;
     dk->texture_mip_levels[handle] = 0;
     dk->texture_level_mask[handle] = 0;
+    dk->texture_base_level[handle] = 0;
+    dk->texture_level_limit[handle] = 0;
 
     /* Zero out descriptor in GPU memory to prevent stale sampling */
     uint8_t *desc_cpu = (uint8_t *)dkMemBlockGetCpuAddr(dk->descriptor_memblock);
@@ -779,6 +784,7 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle, G
             dk_apply_format_swizzle(&imageView, dk->texture_gl_format[handle]);
 
             DkImageDescriptor *imgDesc = &dk->texture_descriptors[handle];
+            dk_apply_level_range(dk, handle, &imageView);
             dkImageDescriptorInitialize(imgDesc, &imageView, false, false);
 
             /* Write descriptors directly to GPU memory */
@@ -817,6 +823,7 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle, G
             dk_apply_format_swizzle(&imageView, dk->texture_gl_format[handle]);
 
             DkImageDescriptor *imgDesc = &dk->texture_descriptors[handle];
+            dk_apply_level_range(dk, handle, &imageView);
             dkImageDescriptorInitialize(imgDesc, &imageView, false, false);
 
             dk_write_image_descriptor_to_gpu(dk, handle);
@@ -1136,6 +1143,7 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, 
             DkImageView imageView;
             dkImageViewDefaults(&imageView, texImage);
             dk_apply_format_swizzle(&imageView, internalformat);
+            dk_apply_level_range(dk, handle, &imageView);
             dkImageDescriptorInitialize(&dk->texture_descriptors[handle], &imageView, false, false);
             dk_write_image_descriptor_to_gpu(dk, handle);
             dk_write_sampler_descriptor_to_gpu(dk, handle);
@@ -1322,6 +1330,7 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, 
     dk_apply_format_swizzle(&imageView, internalformat);
 
     DkImageDescriptor *imgDesc = &dk->texture_descriptors[handle];
+    dk_apply_level_range(dk, handle, &imageView);
     dkImageDescriptorInitialize(imgDesc, &imageView, false, false);
 
     /* Write descriptors directly to GPU memory (CpuUncached → DRAM).
@@ -1513,6 +1522,44 @@ void dk_texture_sub_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum targ
  * Texture Parameter Setting (glTexParameteri)
  * ============================================================================ */
 
+void dk_apply_level_range(dk_backend_data_t *dk, sgl_handle_t handle, DkImageView *view) {
+    uint32_t base = dk->texture_base_level[handle];
+    uint32_t limit = dk->texture_level_limit[handle];
+    uint32_t levels = dk->texture_mip_levels[handle];
+    if ((base == 0 && limit == 0) || levels == 0)
+        return;
+    /* The view must stay inside the image (dk_image.cpp:152); a base level
+     * past the last one makes the texture incomplete (dk_texture_is_complete),
+     * so it is never sampled through this view */
+    if (base >= levels)
+        base = levels - 1;
+    uint32_t last = levels - 1;
+    if (limit != 0 && limit - 1 < last)
+        last = limit - 1;
+    if (last < base)
+        last = base;
+    /* TIC view_mip_min_level / view_mip_max_level (tic_generate.cpp:160-173):
+     * the hardware base level, LOD 0 being the base level */
+    view->mipLevelOffset = base;
+    view->mipLevelCount = last - base + 1;
+}
+
+/* Rebuild the sampling descriptor of a texture after its level range changed */
+static void dk_rebuild_sampling_descriptor(dk_backend_data_t *dk, sgl_handle_t handle) {
+    if (!dk->texture_initialized[handle])
+        return;
+    if (dk->texture_is_cubemap[handle] && dk->cubemap_face_mask[handle] != DK_CUBEMAP_ALL_FACES)
+        return; /* created when the last face is defined, with the range applied */
+    DkImageView view;
+    dkImageViewDefaults(&view, &dk->textures[handle]);
+    if (dk->texture_is_cubemap[handle])
+        view.type = DkImageType_Cubemap;
+    dk_apply_format_swizzle(&view, dk->texture_gl_format[handle]);
+    dk_apply_level_range(dk, handle, &view);
+    dkImageDescriptorInitialize(&dk->texture_descriptors[handle], &view, false, false);
+    dk_write_image_descriptor_to_gpu(dk, handle);
+}
+
 void dk_texture_parameter(sgl_backend_t *be, sgl_handle_t handle, GLenum target, GLenum pname,
                           GLint param) {
     (void)target;
@@ -1520,6 +1567,21 @@ void dk_texture_parameter(sgl_backend_t *be, sgl_handle_t handle, GLenum target,
 
     if (handle == 0 || handle >= SGL_MAX_TEXTURES)
         return;
+
+    /* GLES 3.0 level range (only sent by a GLES 3.0 context) */
+    if (pname == GL_TEXTURE_BASE_LEVEL || pname == GL_TEXTURE_MAX_LEVEL) {
+        uint32_t *stored = pname == GL_TEXTURE_BASE_LEVEL ? &dk->texture_base_level[handle]
+                                                          : &dk->texture_level_limit[handle];
+        uint32_t value = param < 0 ? 0 : (uint32_t)param;
+        if (pname == GL_TEXTURE_MAX_LEVEL)
+            value = value >= 1000 ? 0 : value + 1; /* 0: no limit */
+        if (*stored == value)
+            return;
+        *stored = value;
+        dk_rebuild_sampling_descriptor(dk, handle);
+        dk->sampler_dirty[handle] = true; /* invalidated at the next bind */
+        return;
+    }
 
     /* Check if value actually changed — avoid redundant GPU memory writes.
      * sgl_prepare_draw calls texture_parameter for every draw; early-out
@@ -1723,8 +1785,11 @@ static bool dk_texture_is_complete(dk_backend_data_t *dk, sgl_handle_t handle) {
 
     /* NPOT texture completeness per GLES2 §3.7.10:
      * An NPOT texture is incomplete if it uses a mipmap filter or if any
-     * wrap mode is not GL_CLAMP_TO_EDGE. We do NOT advertise GL_OES_texture_npot. */
-    bool is_npot = ((w & (w - 1)) != 0) || ((h & (h - 1)) != 0);
+     * wrap mode is not GL_CLAMP_TO_EDGE. We do NOT advertise GL_OES_texture_npot.
+     * GLES 3.0 has no NPOT rule (GLES 3.0 §3.8.13). */
+    sgl_context_t *cur = sgl_get_current_context();
+    bool es3 = cur && sgl_ctx_is_es3(cur);
+    bool is_npot = !es3 && (((w & (w - 1)) != 0) || ((h & (h - 1)) != 0));
     if (is_npot) {
         if (dk->texture_wrap_s[handle] != GL_CLAMP_TO_EDGE ||
             dk->texture_wrap_t[handle] != GL_CLAMP_TO_EDGE)
@@ -1734,6 +1799,25 @@ static bool dk_texture_is_complete(dk_backend_data_t *dk, sgl_handle_t handle) {
     GLenum min_f = dk->texture_min_filter[handle];
     bool needs_mipmaps = (min_f == GL_NEAREST_MIPMAP_NEAREST || min_f == GL_LINEAR_MIPMAP_NEAREST ||
                           min_f == GL_NEAREST_MIPMAP_LINEAR || min_f == GL_LINEAR_MIPMAP_LINEAR);
+
+    /* GLES 3.0 level range: levels base..min(max_level, last) (§3.8.13).
+     * Both are 0 / unlimited in a GLES 2.0 context. */
+    uint32_t base = dk->texture_base_level[handle];
+    uint32_t limit = dk->texture_level_limit[handle];
+    if (base != 0 || limit != 0) {
+        uint32_t levels = dk->texture_mip_levels[handle];
+        if (base >= levels || (limit != 0 && base > limit - 1))
+            return false;
+        if (!needs_mipmaps)
+            return (dk->texture_level_mask[handle] >> base) & 1u;
+        uint32_t last = levels - 1;
+        if (limit != 0 && limit - 1 < last)
+            last = limit - 1;
+        for (uint32_t l = base; l <= last; l++)
+            if (!((dk->texture_level_mask[handle] >> l) & 1u))
+                return false;
+        return true;
+    }
 
     if (needs_mipmaps) {
         /* NPOT with mipmap filter is always incomplete per §3.7.10 */

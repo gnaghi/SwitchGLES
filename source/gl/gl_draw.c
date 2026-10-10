@@ -16,11 +16,15 @@
  * - NPOT dimensions with REPEAT or MIRRORED_REPEAT wrap mode
  * - NPOT dimensions with mipmap min filter
  * - Cubemap face dimension mismatch (cubemap_incomplete flag) */
-static bool sgl_is_texture_complete(const sgl_texture_t *tex) {
+static bool sgl_is_texture_complete(const sgl_context_t *ctx, const sgl_texture_t *tex) {
     if (!tex || !tex->used)
         return false;
     if (tex->cubemap_incomplete)
         return false;
+    /* GLES 3.0 has no NPOT restriction (GLES 3.0 §3.8.13); the level range
+     * is checked by the backend, which knows the defined levels */
+    if (sgl_ctx_is_es3(ctx))
+        return true;
 
     bool npot = !sgl_is_pot(tex->width) || !sgl_is_pot(tex->height);
     if (npot) {
@@ -38,6 +42,25 @@ static bool sgl_is_texture_complete(const sgl_texture_t *tex) {
         }
     }
     return true;
+}
+
+/* GLES 3.0 GL_TEXTURE_BASE_LEVEL / MAX_LEVEL to the backend. For an
+ * immutable texture both are clamped to its levels (GLES 3.0 §3.8.10). */
+static void sgl_push_texture_level_range(sgl_context_t *ctx, GLuint tex_id,
+                                         const sgl_texture_t *tex, GLenum target) {
+    GLint base = tex->base_level, max = tex->max_level;
+    if (tex->immutable) {
+        GLint last = tex->immutable_levels - 1;
+        if (base > last)
+            base = last;
+        if (max < base)
+            max = base;
+        if (max > last)
+            max = last;
+    }
+    ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target, GL_TEXTURE_BASE_LEVEL,
+                                         base);
+    ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target, GL_TEXTURE_MAX_LEVEL, max);
 }
 
 /* Number of vertex attribute slots to declare for the current program: the
@@ -220,7 +243,7 @@ static void sgl_prepare_draw(sgl_context_t *ctx) {
                     sgl_texture_t *tex = GET_TEXTURE(tex_id);
                     if (!tex || !tex->used)
                         continue;
-                    if (!sgl_is_texture_complete(tex)) {
+                    if (!sgl_is_texture_complete(ctx, tex)) {
                         /* GLES2 §3.7.10: incomplete textures sample as black fallback */
                         handle = is_cubemap_sampler ? 1 : 0;
                     } else {
@@ -237,6 +260,8 @@ static void sgl_prepare_draw(sgl_context_t *ctx) {
                                                                  GL_TEXTURE_WRAP_S, tex->wrap_s);
                             ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target,
                                                                  GL_TEXTURE_WRAP_T, tex->wrap_t);
+                            if (sgl_ctx_is_es3(ctx))
+                                sgl_push_texture_level_range(ctx, tex_id, tex, target);
                         }
                         handle = tex_id;
                     }
@@ -298,7 +323,7 @@ static void sgl_prepare_draw(sgl_context_t *ctx) {
                     sgl_texture_t *tex = GET_TEXTURE(tex_id);
                     if (tex && tex->used) {
                         /* GLES2 §3.7.10: incomplete textures sample as black fallback */
-                        if (!sgl_is_texture_complete(tex)) {
+                        if (!sgl_is_texture_complete(ctx, tex)) {
                             bool is_cube = (tex->target == GL_TEXTURE_CUBE_MAP);
                             sgl_handle_t fallback = is_cube ? 1 : 0;
                             ctx->backend->ops->bind_texture(ctx->backend, unit, fallback, -1);
@@ -316,6 +341,8 @@ static void sgl_prepare_draw(sgl_context_t *ctx) {
                                                                  GL_TEXTURE_WRAP_S, tex->wrap_s);
                             ctx->backend->ops->texture_parameter(ctx->backend, tex_id, target,
                                                                  GL_TEXTURE_WRAP_T, tex->wrap_t);
+                            if (sgl_ctx_is_es3(ctx))
+                                sgl_push_texture_level_range(ctx, tex_id, tex, target);
                         }
                         ctx->backend->ops->bind_texture(ctx->backend, unit, tex_id, -1);
                     }

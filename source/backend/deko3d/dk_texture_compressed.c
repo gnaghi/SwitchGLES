@@ -178,6 +178,7 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLen
             texView.type = DkImageType_Cubemap;
             dk_apply_format_swizzle(&texView, dk->texture_gl_format[handle]);
             DkImageDescriptor *desc = &dk->texture_descriptors[handle];
+            dk_apply_level_range(dk, handle, &texView);
             dkImageDescriptorInitialize(desc, &texView, false, false);
             dk_write_image_descriptor_to_gpu(dk, handle);
             dk_write_sampler_descriptor_to_gpu(dk, handle);
@@ -357,6 +358,8 @@ void dk_compressed_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLen
     DkImageView texView;
     dkImageViewDefaults(&texView, texImage);
     DkImageDescriptor *desc = &dk->texture_descriptors[handle];
+    dk->texture_mip_levels[handle] = mip_levels; /* the level range is clamped to it */
+    dk_apply_level_range(dk, handle, &texView);
     dkImageDescriptorInitialize(desc, &texView, false, false);
 
     /* Store texture info */

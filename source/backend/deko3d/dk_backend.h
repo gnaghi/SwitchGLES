@@ -181,6 +181,10 @@ typedef struct dk_backend_data {
     uint32_t texture_width[SGL_MAX_TEXTURES];
     uint32_t texture_height[SGL_MAX_TEXTURES];
     uint32_t texture_mip_levels[SGL_MAX_TEXTURES];
+    /* GLES 3.0 GL_TEXTURE_BASE_LEVEL, and GL_TEXTURE_MAX_LEVEL + 1 (0 = no
+     * limit): zero, the GL defaults, unless a GLES 3.0 context sets them */
+    uint32_t texture_base_level[SGL_MAX_TEXTURES];
+    uint32_t texture_level_limit[SGL_MAX_TEXTURES];
     uint32_t texture_level_mask[SGL_MAX_TEXTURES]; /* Bitmask of defined mip levels (bit N = level N
                                                       uploaded) */
     DkImageFormat texture_format[SGL_MAX_TEXTURES];

@@ -156,6 +156,7 @@ GLuint sgl_res_mgr_alloc_texture(sgl_resource_manager_t *mgr) {
             mgr->textures[i].used = true;
             /* OpenGL defaults for texture parameters */
             mgr->textures[i].min_filter = GL_NEAREST_MIPMAP_LINEAR;
+            mgr->textures[i].max_level = 1000;
             mgr->textures[i].mag_filter = GL_LINEAR;
             mgr->textures[i].wrap_s = GL_REPEAT;
             mgr->textures[i].wrap_t = GL_REPEAT;
