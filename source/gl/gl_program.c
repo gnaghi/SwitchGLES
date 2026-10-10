@@ -1242,6 +1242,21 @@ GL_APICALL void GL_APIENTRY glLinkProgram(GLuint program) {
                                     "versions\n");
             return;
         }
+#ifdef SGL_ENABLE_RUNTIME_COMPILER
+        /* Each stage is compiled and linked on its own (uam), so the rules
+         * between the stages (varying types and qualifiers, uniforms and
+         * uniform blocks declared in both) are checked here by linking the
+         * two sources together once (GLES 3.0 §2.11.3, GLSL ES 3.00 §4.3) */
+        if (vs && fs && vs->es300 && vs->source && fs->source) {
+            char *log = uam_check_program_link(vs->source, fs->source);
+            if (log) {
+                prog->linked = false;
+                prog->info_log = strdup(log);
+                uam_free_preprocessed(log);
+                return;
+            }
+        }
+#endif
     }
 
     /* On relink: remove linker-added attrib_bindings, keep only user-bound ones.
