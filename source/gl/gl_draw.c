@@ -636,3 +636,22 @@ GL_APICALL void GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum ty
 
     SGL_TRACE_DRAW("glDrawElements(mode=0x%X, count=%d, type=0x%X)", mode, count, type);
 }
+
+/* GLES 3.0 §2.8.3: glDrawElements with the promise that every index is in
+ * [start, end]. The range is only a hint (indices outside it are allowed to
+ * give undefined results), so after its own check this is glDrawElements. */
+GL_APICALL void GL_APIENTRY glDrawRangeElements(GLenum mode, GLuint start, GLuint end,
+                                                GLsizei count, GLenum type, const void *indices) {
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
+    if (!sgl_ctx_is_es3(ctx)) {
+        sgl_set_error(ctx, GL_INVALID_OPERATION);
+        return;
+    }
+    if (end < start) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
+    }
+    glDrawElements(mode, count, type, indices);
+}

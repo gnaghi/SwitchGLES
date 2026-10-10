@@ -109,17 +109,6 @@ GL_APICALL void GL_APIENTRY glGetInternalformativ(GLenum target, GLenum internal
 
 /* Draws, instancing and vertex arrays */
 
-GL_APICALL void GL_APIENTRY glDrawRangeElements(GLenum mode, GLuint start, GLuint end,
-                                                GLsizei count, GLenum type, const void *indices) {
-    (void)mode;
-    (void)start;
-    (void)end;
-    (void)count;
-    (void)type;
-    (void)indices;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
 GL_APICALL void GL_APIENTRY glDrawArraysInstanced(GLenum mode, GLint first, GLsizei count,
                                                   GLsizei instancecount) {
     (void)mode;
