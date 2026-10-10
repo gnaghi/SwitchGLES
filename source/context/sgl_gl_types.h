@@ -321,6 +321,9 @@ typedef struct sgl_texture {
      * dimensions different from level-0. Cleared on glTexImage2D level 0
      * if the first face re-establishes a consistent size. */
     bool cubemap_incomplete;
+    /* GLES 3.0 glTexStorage2D: immutable format and level count */
+    bool immutable;
+    GLint immutable_levels;
     /* Deferred deletion: GPU data kept alive while attached to non-current FBOs */
     bool delete_pending; /* glDeleteTextures called, but still referenced by FBO(s) */
     int fbo_ref_count;   /* Number of FBO attachment points referencing this texture */

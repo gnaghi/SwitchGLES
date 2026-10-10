@@ -197,16 +197,6 @@ GL_APICALL void GL_APIENTRY glCompressedTexSubImage3D(GLenum target, GLint level
     SGL_ES3_UNIMPLEMENTED();
 }
 
-GL_APICALL void GL_APIENTRY glTexStorage2D(GLenum target, GLsizei levels, GLenum internalformat,
-                                           GLsizei width, GLsizei height) {
-    (void)target;
-    (void)levels;
-    (void)internalformat;
-    (void)width;
-    (void)height;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
 GL_APICALL void GL_APIENTRY glTexStorage3D(GLenum target, GLsizei levels, GLenum internalformat,
                                            GLsizei width, GLsizei height, GLsizei depth) {
     (void)target;

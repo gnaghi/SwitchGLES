@@ -408,10 +408,12 @@ static size_t sgl_unpack_image_size(sgl_context_t *ctx, GLsizei width, GLsizei h
                                     GLenum format, GLenum type) {
     if (width <= 0 || height <= 0)
         return 0;
-    size_t comps = (format == GL_RGBA || format == GL_BGRA_EXT) ? 4
-                   : (format == GL_RGB)                         ? 3
-                   : (format == GL_LUMINANCE_ALPHA)             ? 2
-                                                                : 1;
+    size_t comps = (format == GL_RGBA || format == GL_BGRA_EXT || format == GL_RGBA_INTEGER) ? 4
+                   : (format == GL_RGB || format == GL_RGB_INTEGER)                        ? 3
+                   : (format == GL_LUMINANCE_ALPHA || format == GL_RG ||
+                      format == GL_RG_INTEGER)
+                       ? 2
+                       : 1;
     size_t bpp;
     switch (type) {
         case GL_UNSIGNED_SHORT_5_6_5:
@@ -420,15 +422,24 @@ static size_t sgl_unpack_image_size(sgl_context_t *ctx, GLsizei width, GLsizei h
             bpp = 2;
             break;
         case GL_UNSIGNED_SHORT:
+        case GL_SHORT:
         case GL_HALF_FLOAT_OES:
+        case GL_HALF_FLOAT:
             bpp = 2 * comps;
             break;
         case GL_UNSIGNED_INT:
+        case GL_INT:
         case GL_FLOAT:
             bpp = 4 * comps;
             break;
         case GL_UNSIGNED_INT_24_8_OES:
+        case GL_UNSIGNED_INT_2_10_10_10_REV:
+        case GL_UNSIGNED_INT_10F_11F_11F_REV:
+        case GL_UNSIGNED_INT_5_9_9_9_REV:
             bpp = 4;
+            break;
+        case GL_FLOAT_32_UNSIGNED_INT_24_8_REV:
+            bpp = 8;
             break;
         default:
             bpp = comps;
@@ -514,29 +525,36 @@ GL_APICALL void GL_APIENTRY glTexImage2D(GLenum target, GLint level, GLint inter
         return;
     }
 
+    /* GLES 3.0 sized internal formats (GLES 3.0 Table 3.2) */
+    int es3_format = sgl_es3_tex_image_validate(ctx, internalformat, format, type,
+                                                pixels != NULL ||
+                                                    ctx->bound_pixel_unpack_buffer != 0);
+    if (es3_format < 0)
+        return;
+
     /* Validate format and type enums individually, then check combination.
      * GLES2 spec: GL_INVALID_ENUM for unrecognized values,
      * GL_INVALID_OPERATION for valid but incompatible combos. */
-    if (!sgl_is_valid_tex_format(format) || !sgl_is_valid_tex_type(type)) {
+    if (es3_format == 0 && (!sgl_is_valid_tex_format(format) || !sgl_is_valid_tex_type(type))) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
     }
 
     /* GLES2: internalformat must be a valid format value.
      * 0 is not a valid internalformat → GL_INVALID_VALUE per spec. */
-    if (!sgl_is_valid_tex_format((GLenum)internalformat)) {
+    if (es3_format == 0 && !sgl_is_valid_tex_format((GLenum)internalformat)) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
 
     /* GLES2: internalformat must equal format */
-    if ((GLenum)internalformat != format) {
+    if (es3_format == 0 && (GLenum)internalformat != format) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
         return;
     }
 
     /* Validate format/type combination (GLES2 Table 3.4) */
-    {
+    if (es3_format == 0) {
         GLenum err = sgl_validate_tex_format_type(format, type);
         if (err != 0) {
             sgl_set_error(ctx, err);
@@ -563,7 +581,8 @@ GL_APICALL void GL_APIENTRY glTexImage2D(GLenum target, GLint level, GLint inter
         return;
     }
     sgl_texture_t *tex = GET_TEXTURE(tex_id);
-    if (!tex) {
+    /* GLES 3.0 §3.8.4: the storage of an immutable texture cannot be respecified */
+    if (!tex || tex->immutable) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
         return;
     }
@@ -651,8 +670,18 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint xo
         return;
     }
 
+    /* GLES 3.0 sized formats: format/type must match the internal format of
+     * the texture (GLES 3.0 §3.8.5, Table 3.2) */
+    GLuint sub_tex_id = sgl_get_bound_texture(ctx, target);
+    sgl_texture_t *sub_tex = sub_tex_id ? GET_TEXTURE(sub_tex_id) : NULL;
+    int es3_format = sgl_es3_tex_sub_image_validate(
+        ctx, sub_tex ? (GLenum)sub_tex->internal_format : 0, format, type,
+        pixels != NULL || ctx->bound_pixel_unpack_buffer != 0);
+    if (es3_format < 0)
+        return;
+
     /* Validate format/type combination */
-    {
+    if (es3_format == 0) {
         GLenum err = sgl_validate_tex_format_type(format, type);
         if (err != 0) {
             sgl_set_error(ctx, err);
@@ -1030,7 +1059,8 @@ GL_APICALL void GL_APIENTRY glCopyTexImage2D(GLenum target, GLint level, GLenum 
     if (tex_id == 0)
         return; /* Default texture — no-op */
     sgl_texture_t *tex = GET_TEXTURE(tex_id);
-    if (!tex) {
+    /* GLES 3.0 §3.8.4: an immutable texture cannot be respecified */
+    if (!tex || tex->immutable) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
         return;
     }
@@ -1103,6 +1133,30 @@ GL_APICALL void GL_APIENTRY glCopyTexSubImage2D(GLenum target, GLint level, GLin
     if (!tex) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
         return;
+    }
+
+    /* The copy converts the RGBA8 read back from the framebuffer into the
+     * formats stored as RGBA8 only (dk_texture_copy.c). A GLES 3.0 sized format
+     * stored otherwise (float, integer, snorm, sRGB, 10-bit, depth) would get
+     * wrong texels: refused until the copy path handles it. */
+    if (sgl_ctx_is_es3(ctx)) {
+        switch ((GLenum)tex->internal_format) {
+            case GL_RGB8:
+            case GL_RGBA8:
+            case GL_RGB565:
+            case GL_RGBA4:
+            case GL_RGB5_A1:
+            case GL_RGBA:
+            case GL_RGB:
+            case GL_LUMINANCE_ALPHA:
+            case GL_LUMINANCE:
+            case GL_ALPHA:
+            case GL_BGRA_EXT:
+                break;
+            default:
+                SGL_ES3_UNSUPPORTED(ctx, "glCopyTexSubImage2D into a GLES 3.0 sized format");
+                return;
+        }
     }
 
     /* Validate offsets + size against texture dimensions */
@@ -1190,7 +1244,8 @@ GL_APICALL void GL_APIENTRY glCompressedTexImage2D(GLenum target, GLint level,
     if (tex_id == 0)
         return; /* Default texture — no-op */
     sgl_texture_t *tex = GET_TEXTURE(tex_id);
-    if (!tex) {
+    /* GLES 3.0 §3.8.4: an immutable texture cannot be respecified */
+    if (!tex || tex->immutable) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
         return;
     }

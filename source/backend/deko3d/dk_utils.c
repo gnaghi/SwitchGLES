@@ -159,7 +159,114 @@ DkPrimitive dk_convert_primitive(GLenum mode) {
  * Image Format Conversion
  * ============================================================================ */
 
+/* GLES 3.0 sized internal formats of glTexImage2D / glTexStorage2D (GLES 3.0
+ * Table 3.13). The three-component ones are stored with four components:
+ * dk_convert_to_staging expands the data and writes alpha = 1. RGBA4, RGB5_A1
+ * and RGB565 are stored as RGBA8, as the GLES 2.0 unsized formats are (the
+ * staging copy unpacks them), RGBA4 not being renderable on Maxwell. */
+static DkImageFormat dk_convert_sized_format(GLenum internalformat) {
+    switch (internalformat) {
+        case GL_R8:
+            return DkImageFormat_R8_Unorm;
+        case GL_R8_SNORM:
+            return DkImageFormat_R8_Snorm;
+        case GL_RG8:
+            return DkImageFormat_RG8_Unorm;
+        case GL_RG8_SNORM:
+            return DkImageFormat_RG8_Snorm;
+        case GL_RGB8:
+        case GL_RGB565:
+        case GL_RGBA8:
+        case GL_RGBA4:
+        case GL_RGB5_A1:
+            return DkImageFormat_RGBA8_Unorm;
+        case GL_SRGB8:
+        case GL_SRGB8_ALPHA8:
+            return DkImageFormat_RGBA8_Unorm_sRGB;
+        case GL_RGB8_SNORM:
+        case GL_RGBA8_SNORM:
+            return DkImageFormat_RGBA8_Snorm;
+        case GL_RGB10_A2:
+            return DkImageFormat_RGB10A2_Unorm;
+        case GL_RGB10_A2UI:
+            return DkImageFormat_RGB10A2_Uint;
+        case GL_R11F_G11F_B10F:
+            return DkImageFormat_RG11B10_Float;
+        case GL_RGB9_E5:
+            return DkImageFormat_E5BGR9_Float;
+        case GL_R16F:
+            return DkImageFormat_R16_Float;
+        case GL_RG16F:
+            return DkImageFormat_RG16_Float;
+        case GL_RGB16F:
+        case GL_RGBA16F:
+            return DkImageFormat_RGBA16_Float;
+        case GL_R32F:
+            return DkImageFormat_R32_Float;
+        case GL_RG32F:
+            return DkImageFormat_RG32_Float;
+        case GL_RGB32F:
+        case GL_RGBA32F:
+            return DkImageFormat_RGBA32_Float;
+        case GL_R8I:
+            return DkImageFormat_R8_Sint;
+        case GL_R8UI:
+            return DkImageFormat_R8_Uint;
+        case GL_R16I:
+            return DkImageFormat_R16_Sint;
+        case GL_R16UI:
+            return DkImageFormat_R16_Uint;
+        case GL_R32I:
+            return DkImageFormat_R32_Sint;
+        case GL_R32UI:
+            return DkImageFormat_R32_Uint;
+        case GL_RG8I:
+            return DkImageFormat_RG8_Sint;
+        case GL_RG8UI:
+            return DkImageFormat_RG8_Uint;
+        case GL_RG16I:
+            return DkImageFormat_RG16_Sint;
+        case GL_RG16UI:
+            return DkImageFormat_RG16_Uint;
+        case GL_RG32I:
+            return DkImageFormat_RG32_Sint;
+        case GL_RG32UI:
+            return DkImageFormat_RG32_Uint;
+        case GL_RGB8I:
+        case GL_RGBA8I:
+            return DkImageFormat_RGBA8_Sint;
+        case GL_RGB8UI:
+        case GL_RGBA8UI:
+            return DkImageFormat_RGBA8_Uint;
+        case GL_RGB16I:
+        case GL_RGBA16I:
+            return DkImageFormat_RGBA16_Sint;
+        case GL_RGB16UI:
+        case GL_RGBA16UI:
+            return DkImageFormat_RGBA16_Uint;
+        case GL_RGB32I:
+        case GL_RGBA32I:
+            return DkImageFormat_RGBA32_Sint;
+        case GL_RGB32UI:
+        case GL_RGBA32UI:
+            return DkImageFormat_RGBA32_Uint;
+        case GL_DEPTH24_STENCIL8:
+            return DkImageFormat_Z24S8;
+        case GL_DEPTH_COMPONENT32F:
+            return DkImageFormat_ZF32;
+        case GL_DEPTH32F_STENCIL8:
+            return DkImageFormat_ZF32_X24S8;
+        default:
+            return DkImageFormat_None;
+    }
+}
+
 DkImageFormat dk_convert_format(GLenum internalformat, GLenum format, GLenum type) {
+    /* GLES 3.0 sized formats (a GLES 2.0 texture upload is always unsized) */
+    DkImageFormat sized = dk_convert_sized_format(internalformat);
+    if (sized != DkImageFormat_None)
+        return sized;
+
     /* Depth texture formats (check internalformat first) */
     if (internalformat == GL_DEPTH_COMPONENT || internalformat == GL_DEPTH_COMPONENT16 ||
         internalformat == GL_DEPTH_COMPONENT24 || internalformat == GL_DEPTH_COMPONENT32 ||

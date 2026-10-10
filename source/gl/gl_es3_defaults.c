@@ -549,9 +549,17 @@ int sgl_es3_get_tex_parameter(sgl_context_t *ctx, GLenum target, GLenum pname, G
     if (!sgl_ctx_is_es3(ctx) || !sgl_es3_is_tex_param_target(target))
         return 0;
 
-    /* Immutable storage (glTexStorage*) does not exist yet */
+    /* Immutable storage (glTexStorage2D, gl_texture_es3.c) */
     if (pname == GL_TEXTURE_IMMUTABLE_FORMAT || pname == GL_TEXTURE_IMMUTABLE_LEVELS) {
-        *value = 0.0f;
+        sgl_texture_t *tex = NULL;
+        if (target == GL_TEXTURE_2D || target == GL_TEXTURE_CUBE_MAP) {
+            GLuint tex_id = sgl_get_bound_texture(ctx, target);
+            tex = tex_id ? GET_TEXTURE(tex_id) : NULL;
+        }
+        if (!tex || !tex->immutable)
+            *value = 0.0f;
+        else
+            *value = pname == GL_TEXTURE_IMMUTABLE_FORMAT ? 1.0f : (GLfloat)tex->immutable_levels;
         return 1;
     }
     GLfloat def = 0.0f;

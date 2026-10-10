@@ -122,6 +122,56 @@ static bool dk_unpack_packed_to_rgba8(uint8_t *staging, const uint8_t *src, int 
     return false;
 }
 
+/* GLES 3.0: expand three-component source pixels (comp_bytes per component)
+ * to four, alpha = `one` (the representation of 1 in that component type) */
+static void dk_expand_rgb_to_rgba(uint8_t *staging, const uint8_t *src, int width, int height,
+                                  uint32_t aligned_row_size, uint32_t comp_bytes, uint32_t one) {
+    for (int y = 0; y < height; y++) {
+        uint8_t *dst_row = staging + y * aligned_row_size;
+        const uint8_t *src_row = src + y * dk_src_row_stride(width, (int)(3 * comp_bytes));
+        for (int x = 0; x < width; x++) {
+            memcpy(dst_row + x * 4 * comp_bytes, src_row + x * 3 * comp_bytes, 3 * comp_bytes);
+            memcpy(dst_row + x * 4 * comp_bytes + 3 * comp_bytes, &one, comp_bytes);
+        }
+    }
+}
+
+/* GLES 3.0 three-component uploads stored as four components: component size
+ * and alpha value, false for any other format/type (and every GLES 2.0 one) */
+static bool dk_es3_rgb_expansion(GLenum format, GLenum type, uint32_t *comp_bytes, uint32_t *one) {
+    if (format == GL_RGB) {
+        switch (type) {
+            case GL_BYTE:
+                *comp_bytes = 1, *one = 0x7F; /* snorm 1.0 */
+                return true;
+            case GL_FLOAT:
+                *comp_bytes = 4, *one = 0x3F800000u; /* 1.0f */
+                return true;
+            default:
+                return false;
+        }
+    }
+    if (format == GL_RGB_INTEGER) {
+        switch (type) {
+            case GL_BYTE:
+            case GL_UNSIGNED_BYTE:
+                *comp_bytes = 1, *one = 1;
+                return true;
+            case GL_SHORT:
+            case GL_UNSIGNED_SHORT:
+                *comp_bytes = 2, *one = 1;
+                return true;
+            case GL_INT:
+            case GL_UNSIGNED_INT:
+                *comp_bytes = 4, *one = 1;
+                return true;
+            default:
+                return false;
+        }
+    }
+    return false;
+}
+
 /* Convert a source pixel rectangle into the staging buffer, choosing the
  * conversion by GL format/type: packed->RGBA8, BGRA->RGBA, RGB16F->RGBA16F,
  * RGB8->RGBA8, or a plain bpp-per-pixel row copy (RGBA/LUMINANCE/ALPHA/...).
@@ -129,12 +179,16 @@ static bool dk_unpack_packed_to_rgba8(uint8_t *staging, const uint8_t *src, int 
 static void dk_convert_to_staging(uint8_t *staging, const uint8_t *src, int width, int height,
                                   uint32_t aligned_row_size, uint32_t bpp, GLenum format,
                                   GLenum type) {
+    uint32_t es3_comp_bytes, es3_one;
     if (dk_unpack_packed_to_rgba8(staging, src, width, height, aligned_row_size, format, type)) {
         /* Packed format unpacked to RGBA8 */
     } else if (format == GL_BGRA_EXT && type == GL_UNSIGNED_BYTE) {
         dk_swizzle_bgra_to_rgba(staging, src, width, height, aligned_row_size);
-    } else if (format == GL_RGB && type == GL_HALF_FLOAT_OES) {
+    } else if (format == GL_RGB && (type == GL_HALF_FLOAT_OES || type == GL_HALF_FLOAT)) {
         dk_expand_rgb16f_to_rgba16f(staging, src, width, height, aligned_row_size);
+    } else if (dk_es3_rgb_expansion(format, type, &es3_comp_bytes, &es3_one)) {
+        dk_expand_rgb_to_rgba(staging, src, width, height, aligned_row_size, es3_comp_bytes,
+                              es3_one);
     } else if (format == GL_RGB && type == GL_UNSIGNED_BYTE) {
         /* Convert RGB to RGBA (bpp=4 for staging) */
         for (int y = 0; y < height; y++) {
@@ -425,6 +479,25 @@ void dk_apply_format_swizzle(DkImageView *view, GLenum gl_format) {
             view->swizzle[3] = DkImageSwizzle_Green; /* A = A (stored in G) */
             break;
         case GL_RGB:
+        /* GLES 3.0 three-component sized formats, stored with four
+         * components (dk_convert_format). The staging copy already writes
+         * alpha = 1; the swizzle keeps it 1 whatever is written there. For the
+         * integer ones deko3d turns One into the integer 1 (tic_generate.cpp:16,
+         * FormatTraitFlags_IsRawInt). One- and two-component formats need no
+         * swizzle: their missing components read 0 and alpha 1 from the format
+         * traits (deko3d maxwell/format_traits.inc). */
+        case GL_RGB8:
+        case GL_RGB565:
+        case GL_SRGB8:
+        case GL_RGB8_SNORM:
+        case GL_RGB16F:
+        case GL_RGB32F:
+        case GL_RGB8I:
+        case GL_RGB8UI:
+        case GL_RGB16I:
+        case GL_RGB16UI:
+        case GL_RGB32I:
+        case GL_RGB32UI:
             /* RGB stored as RGBA8 internally — force alpha to 1.0.
              * Per GLES2 §3.7.14, table 3.12: RGB texture has A=1.0 */
             view->swizzle[3] = DkImageSwizzle_One;
@@ -434,10 +507,68 @@ void dk_apply_format_swizzle(DkImageView *view, GLenum gl_format) {
     }
 }
 
+/* GLES 3.0 formats and types: staging bytes per pixel (components x
+ * component size, three-component ones expanded to four, packed 32-bit types
+ * 4). 0 for every GLES 2.0 format/type pair, which keep the rules below. */
+static uint32_t dk_es3_format_bpp(GLenum gl_format, GLenum gl_type) {
+    uint32_t comps;
+    switch (gl_format) {
+        case GL_RED:
+        case GL_RED_INTEGER:
+            comps = 1;
+            break;
+        case GL_RG:
+        case GL_RG_INTEGER:
+            comps = 2;
+            break;
+        case GL_RGB:
+        case GL_RGB_INTEGER:
+        case GL_RGBA:
+        case GL_RGBA_INTEGER:
+            comps = 4; /* RGB is expanded to RGBA */
+            break;
+        case GL_DEPTH_COMPONENT:
+            /* GL_FLOAT only: the GLES 2.0 depth types keep their path */
+            return gl_type == GL_FLOAT ? 4 : 0;
+        case GL_DEPTH_STENCIL:
+            return gl_type == GL_FLOAT_32_UNSIGNED_INT_24_8_REV ? 8 : 4;
+        default:
+            return 0;
+    }
+    bool es3_format = gl_format == GL_RED || gl_format == GL_RG || gl_format == GL_RED_INTEGER ||
+                      gl_format == GL_RG_INTEGER || gl_format == GL_RGB_INTEGER ||
+                      gl_format == GL_RGBA_INTEGER;
+    switch (gl_type) {
+        case GL_UNSIGNED_INT_2_10_10_10_REV:
+        case GL_UNSIGNED_INT_10F_11F_11F_REV:
+        case GL_UNSIGNED_INT_5_9_9_9_REV:
+            return 4;
+        case GL_BYTE:
+            return comps;
+        case GL_SHORT:
+        case GL_HALF_FLOAT:
+            return comps * 2;
+        case GL_INT:
+        case GL_FLOAT:
+            return comps * 4;
+        case GL_UNSIGNED_BYTE:
+            return es3_format ? comps : 0;
+        case GL_UNSIGNED_SHORT:
+            return es3_format ? comps * 2 : 0;
+        case GL_UNSIGNED_INT:
+            return es3_format ? comps * 4 : 0;
+        default:
+            return 0;
+    }
+}
+
 /* Get staging bytes-per-pixel. Packed formats are unpacked to RGBA8 during staging,
  * so they also return 4. Only LUMINANCE/ALPHA/LUMINANCE_ALPHA use smaller bpp.
  * Half-float: 2 bytes per component (GL_OES_texture_half_float). */
 uint32_t dk_gl_format_bpp(GLenum gl_format, GLenum gl_type) {
+    uint32_t es3_bpp = dk_es3_format_bpp(gl_format, gl_type);
+    if (es3_bpp)
+        return es3_bpp;
     if (gl_type == GL_HALF_FLOAT_OES) {
         switch (gl_format) {
             case GL_LUMINANCE:
@@ -466,6 +597,16 @@ uint32_t dk_gl_format_bpp(GLenum gl_format, GLenum gl_type) {
  * Cubemap Helpers
  * ============================================================================ */
 
+/* Usage flags of an uncompressed texture image: render target and 2D engine
+ * (copies, blits, mipmap generation), each only if the format supports it.
+ * Every GLES 2.0 texture format supports both, so their flags are unchanged;
+ * the GLES 3.0 RGB9_E5 and RGB32 ones support neither, and the debug deko3d
+ * rejects a usage flag the format lacks (dk_image.cpp:353-358). */
+static uint32_t dk_texture_usage_flags(DkImageFormat format) {
+    return (DkImageFlags_UsageRender | DkImageFlags_Usage2DEngine) &
+           dkImageFormatGetFlags(format);
+}
+
 bool dk_is_cubemap_face(GLenum target) {
     return target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X && target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z;
 }
@@ -488,8 +629,8 @@ static void dk_cubemap_face_upload(dk_backend_data_t *dk, sgl_handle_t handle, G
         /* Initialize DkImage as cubemap */
         DkImageLayoutMaker layoutMaker;
         dkImageLayoutMakerDefaults(&layoutMaker, dk->device);
-        layoutMaker.flags = DkImageFlags_UsageRender | DkImageFlags_Usage2DEngine;
         layoutMaker.format = dk_convert_format(internalformat, format, type);
+        layoutMaker.flags = dk_texture_usage_flags(layoutMaker.format);
         layoutMaker.type = DkImageType_Cubemap;
         layoutMaker.dimensions[0] = width;
         layoutMaker.dimensions[1] = height;
@@ -955,7 +1096,7 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, 
 
             DkImageLayoutMaker layoutMaker;
             dkImageLayoutMakerDefaults(&layoutMaker, dk->device);
-            layoutMaker.flags = DkImageFlags_UsageRender | DkImageFlags_Usage2DEngine;
+            layoutMaker.flags = dk_texture_usage_flags(newFmt);
             layoutMaker.format = newFmt;
             layoutMaker.dimensions[0] = w0;
             layoutMaker.dimensions[1] = h0;
@@ -1122,7 +1263,7 @@ void dk_texture_image_2d(sgl_backend_t *be, sgl_handle_t handle, GLenum target, 
         /* Initialize DkImage for this texture */
         DkImageLayoutMaker layoutMaker;
         dkImageLayoutMakerDefaults(&layoutMaker, dk->device);
-        layoutMaker.flags = DkImageFlags_UsageRender | DkImageFlags_Usage2DEngine;
+        layoutMaker.flags = dk_texture_usage_flags(newFormat);
         bool hw_compressed = dk_texture_wants_hw_compression(newFormat, width, height, pixels);
         if (hw_compressed)
             layoutMaker.flags |= DkImageFlags_HwCompression;

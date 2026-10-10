@@ -85,6 +85,15 @@ int sgl_es3_get_tex_parameter(sgl_context_t *ctx, GLenum target, GLenum pname, G
 bool sgl_es3_pixel_store(sgl_context_t *ctx, GLenum pname, GLint param);
 bool sgl_es3_get_integer(sgl_context_t *ctx, GLenum pname, GLint *params);
 
+/* GLES 3.0 texture format rules (gl_texture_es3.c). 0: GLES 2.0 context or an
+ * unsized format, the GLES 2.0 checks apply; 1: valid sized format/type;
+ * -1: GL error set. has_data: the call reads texels (pixels or a bound
+ * GL_PIXEL_UNPACK_BUFFER). */
+int sgl_es3_tex_image_validate(sgl_context_t *ctx, GLint internalformat, GLenum format,
+                               GLenum type, bool has_data);
+int sgl_es3_tex_sub_image_validate(sgl_context_t *ctx, GLenum tex_internalformat, GLenum format,
+                                   GLenum type, bool has_data);
+
 /* Binding point of a buffer target: GL_ARRAY_BUFFER / GL_ELEMENT_ARRAY_BUFFER,
  * plus the GLES 3.0 targets in a GLES 3.0 context. NULL for any other target
  * (GL_INVALID_ENUM). gl_buffer.c */
