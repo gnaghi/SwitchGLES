@@ -334,6 +334,10 @@ GL_APICALL void GL_APIENTRY glBindTexture(GLenum target, GLuint texture) {
     if (!ctx)
         return;
 
+    /* GLES 3.0 3D / 2D array targets: only the default texture for now */
+    if (sgl_es3_bind_texture(ctx, target, texture))
+        return;
+
     if (target != GL_TEXTURE_2D && target != GL_TEXTURE_CUBE_MAP) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
@@ -637,6 +641,10 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint xo
 }
 
 GL_APICALL void GL_APIENTRY glTexParameterf(GLenum target, GLenum pname, GLfloat param) {
+    /* GLES 3.0 parameters (LOD clamps) keep their fraction */
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (ctx && sgl_es3_tex_parameter(ctx, target, pname, param))
+        return;
     glTexParameteri(target, pname, (GLint)param);
 }
 
@@ -648,12 +656,16 @@ GL_APICALL void GL_APIENTRY glTexParameterfv(GLenum target, GLenum pname, const 
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
-    glTexParameteri(target, pname, (GLint)params[0]);
+    glTexParameterf(target, pname, params[0]);
 }
 
 GL_APICALL void GL_APIENTRY glTexParameteri(GLenum target, GLenum pname, GLint param) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
+        return;
+
+    /* GLES 3.0 parameters and targets: only the defaults for now */
+    if (sgl_es3_tex_parameter(ctx, target, pname, (GLfloat)param))
         return;
 
     if (target != GL_TEXTURE_2D && target != GL_TEXTURE_CUBE_MAP) {
@@ -733,6 +745,17 @@ GL_APICALL void GL_APIENTRY glGetTexParameterfv(GLenum target, GLenum pname, GLf
     if (!params)
         return;
 
+    /* GLES 3.0 parameters and targets: always at their defaults */
+    {
+        GLfloat value;
+        int es3 = sgl_es3_get_tex_parameter(ctx, target, pname, &value);
+        if (es3 != 0) {
+            if (es3 > 0)
+                *params = value;
+            return;
+        }
+    }
+
     if (target != GL_TEXTURE_2D && target != GL_TEXTURE_CUBE_MAP) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
         return;
@@ -775,6 +798,17 @@ GL_APICALL void GL_APIENTRY glGetTexParameteriv(GLenum target, GLenum pname, GLi
         return;
     if (!params)
         return;
+
+    /* GLES 3.0 parameters and targets: always at their defaults */
+    {
+        GLfloat value;
+        int es3 = sgl_es3_get_tex_parameter(ctx, target, pname, &value);
+        if (es3 != 0) {
+            if (es3 > 0)
+                *params = (GLint)value; /* the LOD defaults are integral */
+            return;
+        }
+    }
 
     if (target != GL_TEXTURE_2D && target != GL_TEXTURE_CUBE_MAP) {
         sgl_set_error(ctx, GL_INVALID_ENUM);

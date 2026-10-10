@@ -65,6 +65,27 @@ bool sgl_bind_program_for_draw(sgl_context_t *ctx, GLuint program_id);
 void sgl_uniform_cache_rebuild(sgl_program_t *prog);
 void sgl_uniform_cache_invalidate(sgl_program_t *prog);
 
+/* GLES 3.0 state that is only supported at its default value (gl_es3_defaults.c).
+ * SGL_ES3_UNSUPPORTED sets GL_INVALID_OPERATION for a valid value that needs a
+ * feature not implemented yet, and logs it once per call site. The hooks
+ * below return false (nothing done) in a GLES 2.0 context or for state that is
+ * not theirs, so the GLES 2.0 code that calls them runs unchanged. */
+void sgl_es3_unsupported(sgl_context_t *ctx, const char *what, bool *logged);
+#define SGL_ES3_UNSUPPORTED(ctx, what)                                                             \
+    do {                                                                                           \
+        static bool s_logged;                                                                      \
+        sgl_es3_unsupported(ctx, what, &s_logged);                                                 \
+    } while (0)
+bool sgl_es3_enable_cap(sgl_context_t *ctx, GLenum cap, bool enable);
+bool sgl_es3_is_enabled_cap(sgl_context_t *ctx, GLenum cap);
+bool sgl_es3_bind_buffer(sgl_context_t *ctx, GLenum target, GLuint buffer);
+bool sgl_es3_bind_texture(sgl_context_t *ctx, GLenum target, GLuint texture);
+bool sgl_es3_tex_parameter(sgl_context_t *ctx, GLenum target, GLenum pname, GLfloat value);
+/* 1: *value set, -1: GL error set, 0: not a GLES 3.0 query (GLES 2.0 path) */
+int sgl_es3_get_tex_parameter(sgl_context_t *ctx, GLenum target, GLenum pname, GLfloat *value);
+bool sgl_es3_pixel_store(sgl_context_t *ctx, GLenum pname, GLint param);
+bool sgl_es3_get_integer(sgl_context_t *ctx, GLenum pname, GLint *params);
+
 /* Check if a dimension is a power of two */
 static inline bool sgl_is_pot(GLsizei n) {
     return n > 0 && (n & (n - 1)) == 0;

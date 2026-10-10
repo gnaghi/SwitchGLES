@@ -51,6 +51,8 @@ GL_APICALL void GL_APIENTRY glEnable(GLenum cap) {
             ctx->sample_coverage_enabled = true;
             break;
         default:
+            if (sgl_es3_enable_cap(ctx, cap, true))
+                return;
             sgl_set_error(ctx, GL_INVALID_ENUM);
             return;
     }
@@ -92,6 +94,8 @@ GL_APICALL void GL_APIENTRY glDisable(GLenum cap) {
             ctx->sample_coverage_enabled = false;
             break;
         default:
+            if (sgl_es3_enable_cap(ctx, cap, false))
+                return;
             sgl_set_error(ctx, GL_INVALID_ENUM);
             return;
     }
@@ -124,6 +128,8 @@ GL_APICALL GLboolean GL_APIENTRY glIsEnabled(GLenum cap) {
         case GL_SAMPLE_COVERAGE:
             return ctx->sample_coverage_enabled ? GL_TRUE : GL_FALSE;
         default:
+            if (sgl_es3_is_enabled_cap(ctx, cap))
+                return GL_FALSE; /* GLES 3.0 capabilities that cannot be enabled yet */
             sgl_set_error(ctx, GL_INVALID_ENUM);
             return GL_FALSE;
     }

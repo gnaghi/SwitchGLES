@@ -100,6 +100,10 @@ GL_APICALL void GL_APIENTRY glBindBuffer(GLenum target, GLuint buffer) {
     if (!ctx)
         return;
 
+    /* GLES 3.0 targets: only the unbound default for now */
+    if (sgl_es3_bind_buffer(ctx, target, buffer))
+        return;
+
     if (buffer != 0 && !GET_BUFFER(buffer)) {
         /* GLES2 spec: binding an unused name implicitly creates the object */
         if (buffer > 0 && buffer < SGL_MAX_BUFFERS) {

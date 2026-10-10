@@ -479,6 +479,9 @@ GL_APICALL void GL_APIENTRY glGetIntegerv(GLenum pname, GLint *params) {
             break;
 
         default:
+            /* GLES 3.0 state that only exists at its default (gl_es3_defaults.c) */
+            if (sgl_es3_get_integer(ctx, pname, params))
+                break;
             sgl_set_error(ctx, GL_INVALID_ENUM);
             break;
     }
@@ -900,6 +903,10 @@ GL_APICALL void GL_APIENTRY glPolygonOffset(GLfloat factor, GLfloat units) {
 GL_APICALL void GL_APIENTRY glPixelStorei(GLenum pname, GLint param) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
+        return;
+
+    /* GLES 3.0 row length / skip / image height: only the default 0 for now */
+    if (sgl_es3_pixel_store(ctx, pname, param))
         return;
 
     /* Only valid alignment values are 1, 2, 4, 8 */

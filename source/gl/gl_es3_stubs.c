@@ -36,17 +36,6 @@ static void sgl_es3_unimplemented(const char *name, bool *logged) {
 
 /* Framebuffers and render targets */
 
-GL_APICALL void GL_APIENTRY glReadBuffer(GLenum src) {
-    (void)src;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
-GL_APICALL void GL_APIENTRY glDrawBuffers(GLsizei n, const GLenum *bufs) {
-    (void)n;
-    (void)bufs;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
 GL_APICALL void GL_APIENTRY glClearBufferiv(GLenum buffer, GLint drawbuffer, const GLint *value) {
     (void)buffer;
     (void)drawbuffer;
@@ -150,17 +139,6 @@ GL_APICALL void GL_APIENTRY glDrawElementsInstanced(GLenum mode, GLsizei count, 
     SGL_ES3_UNIMPLEMENTED();
 }
 
-GL_APICALL void GL_APIENTRY glVertexAttribDivisor(GLuint index, GLuint divisor) {
-    (void)index;
-    (void)divisor;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
-GL_APICALL void GL_APIENTRY glBindVertexArray(GLuint array) {
-    (void)array;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
 GL_APICALL void GL_APIENTRY glDeleteVertexArrays(GLsizei n, const GLuint *arrays) {
     (void)n;
     (void)arrays;
@@ -171,12 +149,6 @@ GL_APICALL void GL_APIENTRY glGenVertexArrays(GLsizei n, GLuint *arrays) {
     (void)n;
     (void)arrays;
     SGL_ES3_UNIMPLEMENTED();
-}
-
-GL_APICALL GLboolean GL_APIENTRY glIsVertexArray(GLuint array) {
-    (void)array;
-    SGL_ES3_UNIMPLEMENTED();
-    return GL_FALSE;
 }
 
 GL_APICALL void GL_APIENTRY glVertexAttribIPointer(GLuint index, GLint size, GLenum type,
@@ -235,22 +207,6 @@ GL_APICALL void GL_APIENTRY glVertexAttribI4uiv(GLuint index, const GLuint *v) {
 }
 
 /* 3D / array textures and immutable storage */
-
-GL_APICALL void GL_APIENTRY glTexImage3D(GLenum target, GLint level, GLint internalformat,
-                                         GLsizei width, GLsizei height, GLsizei depth, GLint border,
-                                         GLenum format, GLenum type, const void *pixels) {
-    (void)target;
-    (void)level;
-    (void)internalformat;
-    (void)width;
-    (void)height;
-    (void)depth;
-    (void)border;
-    (void)format;
-    (void)type;
-    (void)pixels;
-    SGL_ES3_UNIMPLEMENTED();
-}
 
 GL_APICALL void GL_APIENTRY glTexSubImage3D(GLenum target, GLint level, GLint xoffset,
                                             GLint yoffset, GLint zoffset, GLsizei width,
@@ -354,18 +310,6 @@ GL_APICALL void GL_APIENTRY glDeleteSamplers(GLsizei count, const GLuint *sample
     SGL_ES3_UNIMPLEMENTED();
 }
 
-GL_APICALL GLboolean GL_APIENTRY glIsSampler(GLuint sampler) {
-    (void)sampler;
-    SGL_ES3_UNIMPLEMENTED();
-    return GL_FALSE;
-}
-
-GL_APICALL void GL_APIENTRY glBindSampler(GLuint unit, GLuint sampler) {
-    (void)unit;
-    (void)sampler;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
 GL_APICALL void GL_APIENTRY glSamplerParameteri(GLuint sampler, GLenum pname, GLint param) {
     (void)sampler;
     (void)pname;
@@ -450,23 +394,6 @@ GL_APICALL void GL_APIENTRY glCopyBufferSubData(GLenum readTarget, GLenum writeT
     (void)readOffset;
     (void)writeOffset;
     (void)size;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
-GL_APICALL void GL_APIENTRY glBindBufferRange(GLenum target, GLuint index, GLuint buffer,
-                                              GLintptr offset, GLsizeiptr size) {
-    (void)target;
-    (void)index;
-    (void)buffer;
-    (void)offset;
-    (void)size;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
-GL_APICALL void GL_APIENTRY glBindBufferBase(GLenum target, GLuint index, GLuint buffer) {
-    (void)target;
-    (void)index;
-    (void)buffer;
     SGL_ES3_UNIMPLEMENTED();
 }
 
@@ -722,13 +649,6 @@ GL_APICALL void GL_APIENTRY glEndQuery(GLenum target) {
     SGL_ES3_UNIMPLEMENTED();
 }
 
-GL_APICALL void GL_APIENTRY glGetQueryiv(GLenum target, GLenum pname, GLint *params) {
-    (void)target;
-    (void)pname;
-    (void)params;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
 GL_APICALL void GL_APIENTRY glGetQueryObjectuiv(GLuint id, GLenum pname, GLuint *params) {
     (void)id;
     (void)pname;
@@ -771,12 +691,6 @@ GL_APICALL void GL_APIENTRY glGetTransformFeedbackVarying(GLuint program, GLuint
     SGL_ES3_UNIMPLEMENTED();
 }
 
-GL_APICALL void GL_APIENTRY glBindTransformFeedback(GLenum target, GLuint id) {
-    (void)target;
-    (void)id;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
 GL_APICALL void GL_APIENTRY glDeleteTransformFeedbacks(GLsizei n, const GLuint *ids) {
     (void)n;
     (void)ids;
@@ -789,12 +703,6 @@ GL_APICALL void GL_APIENTRY glGenTransformFeedbacks(GLsizei n, GLuint *ids) {
     SGL_ES3_UNIMPLEMENTED();
 }
 
-GL_APICALL GLboolean GL_APIENTRY glIsTransformFeedback(GLuint id) {
-    (void)id;
-    SGL_ES3_UNIMPLEMENTED();
-    return GL_FALSE;
-}
-
 GL_APICALL void GL_APIENTRY glPauseTransformFeedback(void) {
     SGL_ES3_UNIMPLEMENTED();
 }
@@ -803,18 +711,4 @@ GL_APICALL void GL_APIENTRY glResumeTransformFeedback(void) {
     SGL_ES3_UNIMPLEMENTED();
 }
 
-/* Indexed state queries (uniform and transform feedback buffer bindings) */
 
-GL_APICALL void GL_APIENTRY glGetIntegeri_v(GLenum target, GLuint index, GLint *data) {
-    (void)target;
-    (void)index;
-    (void)data;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
-GL_APICALL void GL_APIENTRY glGetInteger64i_v(GLenum target, GLuint index, GLint64 *data) {
-    (void)target;
-    (void)index;
-    (void)data;
-    SGL_ES3_UNIMPLEMENTED();
-}
