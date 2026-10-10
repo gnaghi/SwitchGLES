@@ -91,6 +91,11 @@ typedef struct sgl_buffer {
     GLenum usage;
     uint32_t backend_handle;
     uint32_t data_offset;
+    /* GLES 3.0 glMapBufferRange state */
+    bool mapped;
+    GLbitfield map_access;
+    GLintptr map_offset;
+    GLsizeiptr map_length;
 } sgl_buffer_t;
 
 /* Mesa direct compilation metadata (for ES 1.00 shaders compiled without transpiler) */

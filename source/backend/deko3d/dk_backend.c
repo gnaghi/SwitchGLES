@@ -63,6 +63,7 @@ const sgl_backend_ops_t dk_backend_ops = {
     .buffer_data_orphan = dk_buffer_data_orphan,
     .buffer_free = dk_buffer_free,
     .get_data_cpu_ptr = dk_get_data_cpu_ptr,
+    .buffer_written = dk_buffer_written,
 
     /* Texture Operations (dk_texture.c) */
     .create_texture = NULL, /* Handled at GL layer */

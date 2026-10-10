@@ -78,13 +78,17 @@ void sgl_es3_unsupported(sgl_context_t *ctx, const char *what, bool *logged);
     } while (0)
 bool sgl_es3_enable_cap(sgl_context_t *ctx, GLenum cap, bool enable);
 bool sgl_es3_is_enabled_cap(sgl_context_t *ctx, GLenum cap);
-bool sgl_es3_bind_buffer(sgl_context_t *ctx, GLenum target, GLuint buffer);
 bool sgl_es3_bind_texture(sgl_context_t *ctx, GLenum target, GLuint texture);
 bool sgl_es3_tex_parameter(sgl_context_t *ctx, GLenum target, GLenum pname, GLfloat value);
 /* 1: *value set, -1: GL error set, 0: not a GLES 3.0 query (GLES 2.0 path) */
 int sgl_es3_get_tex_parameter(sgl_context_t *ctx, GLenum target, GLenum pname, GLfloat *value);
 bool sgl_es3_pixel_store(sgl_context_t *ctx, GLenum pname, GLint param);
 bool sgl_es3_get_integer(sgl_context_t *ctx, GLenum pname, GLint *params);
+
+/* Binding point of a buffer target: GL_ARRAY_BUFFER / GL_ELEMENT_ARRAY_BUFFER,
+ * plus the GLES 3.0 targets in a GLES 3.0 context. NULL for any other target
+ * (GL_INVALID_ENUM). gl_buffer.c */
+GLuint *sgl_buffer_binding(sgl_context_t *ctx, GLenum target);
 
 /* Check if a dimension is a power of two */
 static inline bool sgl_is_pot(GLsizei n) {

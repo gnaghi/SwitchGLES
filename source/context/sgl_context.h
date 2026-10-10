@@ -45,6 +45,13 @@ typedef struct sgl_context {
     GLuint bound_draw_framebuffer; /* GL_DRAW_FRAMEBUFFER */
     GLuint bound_renderbuffer;
     GLuint bound_vertex_array; /* GLES 3.0 vertex array object (0 = default) */
+    /* GLES 3.0 generic buffer binding points (sgl_buffer_binding) */
+    GLuint bound_copy_read_buffer;
+    GLuint bound_copy_write_buffer;
+    GLuint bound_pixel_pack_buffer;
+    GLuint bound_pixel_unpack_buffer;
+    GLuint bound_uniform_buffer;
+    GLuint bound_transform_feedback_buffer;
 
     /* Vertex attributes */
     sgl_vertex_attrib_t vertex_attribs[SGL_MAX_ATTRIBS];

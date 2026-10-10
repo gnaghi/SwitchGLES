@@ -930,6 +930,9 @@ GL_APICALL void GL_APIENTRY glPixelStorei(GLenum pname, GLint param) {
 
 /* Buffer Queries */
 
+static bool sgl_get_buffer_parameter(sgl_context_t *ctx, GLenum target, GLenum pname,
+                                     GLint64 *value);
+
 GL_APICALL void GL_APIENTRY glGetBufferParameteriv(GLenum target, GLenum pname, GLint *params) {
     sgl_context_t *ctx = sgl_get_current_context();
     if (!ctx)
@@ -938,38 +941,107 @@ GL_APICALL void GL_APIENTRY glGetBufferParameteriv(GLenum target, GLenum pname, 
     if (!params)
         return;
 
-    GLuint buffer_id = 0;
-    if (target == GL_ARRAY_BUFFER) {
-        buffer_id = ctx->bound_array_buffer;
-    } else if (target == GL_ELEMENT_ARRAY_BUFFER) {
-        buffer_id = ctx->bound_element_buffer;
-    } else {
+    GLint64 value;
+    if (sgl_get_buffer_parameter(ctx, target, pname, &value))
+        *params = (GLint)value;
+}
+
+/* Buffer parameter of the buffer bound to target, with the GLES errors.
+ * Shared by glGetBufferParameteriv and glGetBufferParameteri64v. */
+static bool sgl_get_buffer_parameter(sgl_context_t *ctx, GLenum target, GLenum pname,
+                                     GLint64 *value) {
+    GLuint *point = sgl_buffer_binding(ctx, target);
+    if (!point) {
         sgl_set_error(ctx, GL_INVALID_ENUM);
-        return;
+        return false;
     }
 
+    GLuint buffer_id = *point;
     if (buffer_id == 0) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
-        return;
+        return false;
     }
 
     sgl_buffer_t *buf = GET_BUFFER(buffer_id);
     if (!buf) {
         sgl_set_error(ctx, GL_INVALID_OPERATION);
-        return;
+        return false;
     }
 
     switch (pname) {
         case GL_BUFFER_SIZE:
-            *params = (GLint)buf->size;
-            break;
+            *value = buf->size;
+            return true;
         case GL_BUFFER_USAGE:
-            *params = buf->usage;
-            break;
+            *value = buf->usage;
+            return true;
         default:
-            sgl_set_error(ctx, GL_INVALID_ENUM);
             break;
     }
+
+    /* GLES 3.0 mapping state */
+    if (sgl_ctx_is_es3(ctx)) {
+        switch (pname) {
+            case GL_BUFFER_MAPPED:
+                *value = buf->mapped ? GL_TRUE : GL_FALSE;
+                return true;
+            case GL_BUFFER_ACCESS_FLAGS:
+                *value = buf->map_access;
+                return true;
+            case GL_BUFFER_MAP_OFFSET:
+                *value = buf->map_offset;
+                return true;
+            case GL_BUFFER_MAP_LENGTH:
+                *value = buf->map_length;
+                return true;
+            default:
+                break;
+        }
+    }
+    sgl_set_error(ctx, GL_INVALID_ENUM);
+    return false;
+}
+
+GL_APICALL void GL_APIENTRY glGetBufferParameteri64v(GLenum target, GLenum pname,
+                                                     GLint64 *params) {
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
+    if (!sgl_ctx_is_es3(ctx)) {
+        sgl_set_error(ctx, GL_INVALID_OPERATION);
+        return;
+    }
+    if (!params)
+        return;
+    GLint64 value;
+    if (sgl_get_buffer_parameter(ctx, target, pname, &value))
+        *params = value;
+}
+
+GL_APICALL void GL_APIENTRY glGetBufferPointerv(GLenum target, GLenum pname, void **params) {
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
+    if (!sgl_ctx_is_es3(ctx)) {
+        sgl_set_error(ctx, GL_INVALID_OPERATION);
+        return;
+    }
+    if (!params)
+        return;
+    GLuint *point = sgl_buffer_binding(ctx, target);
+    if (!point || pname != GL_BUFFER_MAP_POINTER) {
+        sgl_set_error(ctx, GL_INVALID_ENUM);
+        return;
+    }
+    sgl_buffer_t *buf = *point ? GET_BUFFER(*point) : NULL;
+    if (!buf) {
+        sgl_set_error(ctx, GL_INVALID_OPERATION);
+        return;
+    }
+    *params = NULL;
+    if (buf->mapped && ctx->backend && ctx->backend->ops->get_data_cpu_ptr)
+        *params = (uint8_t *)ctx->backend->ops->get_data_cpu_ptr(ctx->backend, buf->data_offset) +
+                  buf->map_offset;
 }
 
 /* Shader Compiler (stubs) */

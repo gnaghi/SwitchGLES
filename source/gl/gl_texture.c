@@ -402,6 +402,64 @@ static int sgl_is_cubemap_face(GLenum target) {
     return target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X && target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z;
 }
 
+/* Bytes read from client memory for a width x height image of format/type,
+ * rows padded to GL_UNPACK_ALIGNMENT (GLES 2.0 §3.6.2) */
+static size_t sgl_unpack_image_size(sgl_context_t *ctx, GLsizei width, GLsizei height,
+                                    GLenum format, GLenum type) {
+    if (width <= 0 || height <= 0)
+        return 0;
+    size_t comps = (format == GL_RGBA || format == GL_BGRA_EXT) ? 4
+                   : (format == GL_RGB)                         ? 3
+                   : (format == GL_LUMINANCE_ALPHA)             ? 2
+                                                                : 1;
+    size_t bpp;
+    switch (type) {
+        case GL_UNSIGNED_SHORT_5_6_5:
+        case GL_UNSIGNED_SHORT_4_4_4_4:
+        case GL_UNSIGNED_SHORT_5_5_5_1:
+            bpp = 2;
+            break;
+        case GL_UNSIGNED_SHORT:
+        case GL_HALF_FLOAT_OES:
+            bpp = 2 * comps;
+            break;
+        case GL_UNSIGNED_INT:
+        case GL_FLOAT:
+            bpp = 4 * comps;
+            break;
+        case GL_UNSIGNED_INT_24_8_OES:
+            bpp = 4;
+            break;
+        default:
+            bpp = comps;
+            break;
+    }
+    size_t align = ctx->unpack_alignment > 0 ? (size_t)ctx->unpack_alignment : 1;
+    size_t row = ((size_t)width * bpp + align - 1) / align * align;
+    return row * (size_t)(height - 1) + (size_t)width * bpp;
+}
+
+/* GLES 3.0 pixel unpack buffer (§3.7.1): with a buffer bound to
+ * GL_PIXEL_UNPACK_BUFFER, the client pointer of a texture upload is an offset
+ * into it. Replaces *pixels by the CPU address of that offset in the buffer
+ * (buffers live in CPU-visible memory). Sets GL_INVALID_OPERATION and returns
+ * false if the buffer is mapped or the size bytes do not fit in it. Without a
+ * bound buffer (always the case in a GLES 2.0 context) *pixels is unchanged. */
+static bool sgl_unpack_source(sgl_context_t *ctx, const void **pixels, size_t size) {
+    if (ctx->bound_pixel_unpack_buffer == 0)
+        return true;
+    sgl_buffer_t *buf = GET_BUFFER(ctx->bound_pixel_unpack_buffer);
+    uintptr_t offset = (uintptr_t)*pixels;
+    if (!buf || buf->mapped || offset > (uintptr_t)buf->size ||
+        size > (size_t)buf->size - (size_t)offset || !ctx->backend->ops->get_data_cpu_ptr) {
+        sgl_set_error(ctx, GL_INVALID_OPERATION);
+        return false;
+    }
+    *pixels =
+        (const uint8_t *)ctx->backend->ops->get_data_cpu_ptr(ctx->backend, buf->data_offset) + offset;
+    return true;
+}
+
 GL_APICALL void GL_APIENTRY glTexImage2D(GLenum target, GLint level, GLint internalformat,
                                          GLsizei width, GLsizei height, GLint border, GLenum format,
                                          GLenum type, const void *pixels) {
@@ -485,6 +543,10 @@ GL_APICALL void GL_APIENTRY glTexImage2D(GLenum target, GLint level, GLint inter
             return;
         }
     }
+
+    /* GLES 3.0 pixel unpack buffer */
+    if (!sgl_unpack_source(ctx, &pixels, sgl_unpack_image_size(ctx, width, height, format, type)))
+        return;
 
     /* Empty texture - silently return */
     if (width == 0 || height == 0) {
@@ -630,6 +692,10 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint xo
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
+
+    /* GLES 3.0 pixel unpack buffer */
+    if (!sgl_unpack_source(ctx, &pixels, sgl_unpack_image_size(ctx, width, height, format, type)))
+        return;
 
     /* Delegate to backend for actual GPU texture update */
     if (ctx->backend->ops->texture_sub_image_2d) {
@@ -1129,6 +1195,10 @@ GL_APICALL void GL_APIENTRY glCompressedTexImage2D(GLenum target, GLint level,
         return;
     }
 
+    /* GLES 3.0 pixel unpack buffer */
+    if (!sgl_unpack_source(ctx, &data, (size_t)imageSize))
+        return;
+
     /* Update GL-level texture state — only update base dimensions at level 0 */
     tex->used = true;
     if (level == 0) {
@@ -1197,6 +1267,10 @@ GL_APICALL void GL_APIENTRY glCompressedTexSubImage2D(GLenum target, GLint level
         sgl_set_error(ctx, GL_INVALID_OPERATION);
         return;
     }
+
+    /* GLES 3.0 pixel unpack buffer */
+    if (!sgl_unpack_source(ctx, &data, (size_t)imageSize))
+        return;
 
     /* Delegate to backend for actual GPU texture update */
     if (ctx->backend->ops->compressed_texture_sub_image_2d) {

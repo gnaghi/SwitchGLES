@@ -4,6 +4,7 @@
  */
 
 #include "gl_common.h"
+#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -1172,7 +1173,19 @@ GL_APICALL void GL_APIENTRY glReadPixels(GLint x, GLint y, GLsizei width, GLsize
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
-    if (!pixels || width == 0 || height == 0) {
+
+    /* GLES 3.0 pixel pack buffer: pixels is an offset into it (always 0
+     * bound in a GLES 2.0 context) */
+    sgl_buffer_t *pack = NULL;
+    if (ctx->bound_pixel_pack_buffer != 0) {
+        pack = GET_BUFFER(ctx->bound_pixel_pack_buffer);
+        if (!pack || pack->mapped) {
+            sgl_set_error(ctx, GL_INVALID_OPERATION);
+            return;
+        }
+    }
+
+    if ((!pixels && !pack) || width == 0 || height == 0) {
         return; /* No-op per spec */
     }
 
@@ -1197,6 +1210,32 @@ GL_APICALL void GL_APIENTRY glReadPixels(GLint x, GLint y, GLsizei width, GLsize
         bool valid_type = (type == GL_UNSIGNED_BYTE || type == GL_UNSIGNED_SHORT_5_6_5 ||
                            type == GL_UNSIGNED_SHORT_4_4_4_4 || type == GL_UNSIGNED_SHORT_5_5_5_1);
         sgl_set_error(ctx, (valid_format && valid_type) ? GL_INVALID_OPERATION : GL_INVALID_ENUM);
+        return;
+    }
+
+    /* GLES 3.0 pixel pack buffer: read back on the CPU, then store into the
+     * buffer like glBufferSubData (4 bytes per pixel, so rows need no
+     * GL_PACK_ALIGNMENT padding) */
+    if (pack) {
+        uintptr_t offset = (uintptr_t)pixels;
+        size_t size = (size_t)width * (size_t)height * 4u;
+        if (offset > (uintptr_t)pack->size || size > (size_t)pack->size - (size_t)offset) {
+            sgl_set_error(ctx, GL_INVALID_OPERATION);
+            return;
+        }
+        void *tmp = malloc(size);
+        if (!tmp) {
+            sgl_set_error(ctx, GL_OUT_OF_MEMORY);
+            return;
+        }
+        if (ctx->backend->ops->read_pixels)
+            ctx->backend->ops->read_pixels(ctx->backend, x, y, width, height, format, type, tmp);
+        if (ctx->backend->ops->buffer_sub_data)
+            ctx->backend->ops->buffer_sub_data(ctx->backend, ctx->bound_pixel_pack_buffer,
+                                               pack->data_offset + (uint32_t)offset,
+                                               (GLsizeiptr)size, tmp);
+        free(tmp);
+        SGL_TRACE_FBO("glReadPixels(%d,%d %dx%d) -> pack buffer", x, y, width, height);
         return;
     }
 

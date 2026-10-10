@@ -161,20 +161,6 @@ GL_APICALL GLboolean GL_APIENTRY glIsSampler(GLuint sampler) {
  * Buffer binding points
  * ============================================================================ */
 
-static bool sgl_es3_is_buffer_target(GLenum target) {
-    return target == GL_COPY_READ_BUFFER || target == GL_COPY_WRITE_BUFFER ||
-           target == GL_PIXEL_PACK_BUFFER || target == GL_PIXEL_UNPACK_BUFFER ||
-           target == GL_UNIFORM_BUFFER || target == GL_TRANSFORM_FEEDBACK_BUFFER;
-}
-
-bool sgl_es3_bind_buffer(sgl_context_t *ctx, GLenum target, GLuint buffer) {
-    if (!sgl_ctx_is_es3(ctx) || !sgl_es3_is_buffer_target(target))
-        return false;
-    if (buffer != 0)
-        SGL_ES3_UNSUPPORTED(ctx, "glBindBuffer (GLES 3.0 buffer targets)");
-    return true;
-}
-
 /* Indexed binding points of target, 0 if target has none */
 static GLuint sgl_es3_indexed_binding_count(GLenum target) {
     if (target == GL_UNIFORM_BUFFER)
@@ -292,7 +278,7 @@ GL_APICALL void GL_APIENTRY glDrawBuffers(GLsizei n, const GLenum *bufs) {
     sgl_context_t *ctx = sgl_es3_context();
     if (!ctx)
         return;
-    if (n < 0 || n > SGL_ES3_MAX_DRAW_BUFFERS) {
+    if (n < 0) {
         sgl_set_error(ctx, GL_INVALID_VALUE);
         return;
     }
@@ -303,6 +289,10 @@ GL_APICALL void GL_APIENTRY glDrawBuffers(GLsizei n, const GLenum *bufs) {
             sgl_set_error(ctx, GL_INVALID_ENUM);
             return;
         }
+    }
+    if (n > SGL_ES3_MAX_DRAW_BUFFERS) {
+        sgl_set_error(ctx, GL_INVALID_VALUE);
+        return;
     }
 
     bool default_fb = ctx->bound_draw_framebuffer == 0;
@@ -608,12 +598,6 @@ bool sgl_es3_get_integer(sgl_context_t *ctx, GLenum pname, GLint *params) {
         case GL_SAMPLER_BINDING:
         case GL_TEXTURE_BINDING_3D:
         case GL_TEXTURE_BINDING_2D_ARRAY:
-        case GL_COPY_READ_BUFFER_BINDING:
-        case GL_COPY_WRITE_BUFFER_BINDING:
-        case GL_PIXEL_PACK_BUFFER_BINDING:
-        case GL_PIXEL_UNPACK_BUFFER_BINDING:
-        case GL_UNIFORM_BUFFER_BINDING:
-        case GL_TRANSFORM_FEEDBACK_BUFFER_BINDING:
         /* Disabled capabilities, inactive transform feedback */
         case GL_PRIMITIVE_RESTART_FIXED_INDEX:
         case GL_RASTERIZER_DISCARD:
@@ -636,6 +620,26 @@ bool sgl_es3_get_integer(sgl_context_t *ctx, GLenum pname, GLint *params) {
             return true;
         case GL_DRAW_BUFFER0:
             *params = ctx->bound_draw_framebuffer ? GL_COLOR_ATTACHMENT0 : GL_BACK;
+            return true;
+
+        /* GLES 3.0 generic buffer bindings */
+        case GL_COPY_READ_BUFFER_BINDING:
+            *params = (GLint)ctx->bound_copy_read_buffer;
+            return true;
+        case GL_COPY_WRITE_BUFFER_BINDING:
+            *params = (GLint)ctx->bound_copy_write_buffer;
+            return true;
+        case GL_PIXEL_PACK_BUFFER_BINDING:
+            *params = (GLint)ctx->bound_pixel_pack_buffer;
+            return true;
+        case GL_PIXEL_UNPACK_BUFFER_BINDING:
+            *params = (GLint)ctx->bound_pixel_unpack_buffer;
+            return true;
+        case GL_UNIFORM_BUFFER_BINDING:
+            *params = (GLint)ctx->bound_uniform_buffer;
+            return true;
+        case GL_TRANSFORM_FEEDBACK_BUFFER_BINDING:
+            *params = (GLint)ctx->bound_transform_feedback_buffer;
             return true;
 
         case GL_MAX_UNIFORM_BUFFER_BINDINGS:

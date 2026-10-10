@@ -60,6 +60,9 @@ struct sgl_backend_ops {
     void (*buffer_free)(sgl_backend_t *be, uint32_t offset, uint32_t size);
     /* Get CPU pointer to data memblock at given offset (for EBO index scanning) */
     const void *(*get_data_cpu_ptr)(sgl_backend_t *be, uint32_t offset);
+    /* The CPU wrote buffer memory directly (glMapBufferRange): make the
+     * writes visible to the next draws, as buffer_sub_data does for its own. */
+    void (*buffer_written)(sgl_backend_t *be);
 
     /* ======== Texture Operations ======== */
     sgl_handle_t (*create_texture)(sgl_backend_t *be);

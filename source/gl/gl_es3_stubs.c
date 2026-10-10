@@ -343,55 +343,6 @@ GL_APICALL void GL_APIENTRY glGetSamplerParameterfv(GLuint sampler, GLenum pname
 
 /* Buffer objects: mapping, copies, indexed bindings */
 
-GL_APICALL void *GL_APIENTRY glMapBufferRange(GLenum target, GLintptr offset, GLsizeiptr length,
-                                              GLbitfield access) {
-    (void)target;
-    (void)offset;
-    (void)length;
-    (void)access;
-    SGL_ES3_UNIMPLEMENTED();
-    return NULL;
-}
-
-GL_APICALL void GL_APIENTRY glFlushMappedBufferRange(GLenum target, GLintptr offset,
-                                                     GLsizeiptr length) {
-    (void)target;
-    (void)offset;
-    (void)length;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
-GL_APICALL GLboolean GL_APIENTRY glUnmapBuffer(GLenum target) {
-    (void)target;
-    SGL_ES3_UNIMPLEMENTED();
-    return GL_FALSE;
-}
-
-GL_APICALL void GL_APIENTRY glGetBufferPointerv(GLenum target, GLenum pname, void * *params) {
-    (void)target;
-    (void)pname;
-    (void)params;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
-GL_APICALL void GL_APIENTRY glCopyBufferSubData(GLenum readTarget, GLenum writeTarget,
-                                                GLintptr readOffset, GLintptr writeOffset,
-                                                GLsizeiptr size) {
-    (void)readTarget;
-    (void)writeTarget;
-    (void)readOffset;
-    (void)writeOffset;
-    (void)size;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
-GL_APICALL void GL_APIENTRY glGetBufferParameteri64v(GLenum target, GLenum pname, GLint64 *params) {
-    (void)target;
-    (void)pname;
-    (void)params;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
 /* Uniforms: unsigned, non-square matrices, uniform blocks */
 
 GL_APICALL void GL_APIENTRY glGetUniformIndices(GLuint program, GLsizei uniformCount,

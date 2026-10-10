@@ -145,6 +145,14 @@ const void *dk_get_data_cpu_ptr(sgl_backend_t *be, uint32_t offset) {
     return (const uint8_t *)dkMemBlockGetCpuAddr(dk->data_memblock) + offset;
 }
 
+void dk_buffer_written(sgl_backend_t *be) {
+    dk_backend_data_t *dk = (dk_backend_data_t *)be->impl_data;
+    /* Same flags as dk_buffer_sub_data: dsb st and an L2 invalidate before
+     * the next draw (dk_draw.c) */
+    dk->vbo_data_dirty = true;
+    dk->cpu_store_pending = true;
+}
+
 /* ============================================================================
  * Buffer Data Upload
  * ============================================================================ */

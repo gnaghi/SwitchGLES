@@ -453,6 +453,7 @@ void dk_buffer_free(sgl_backend_t *be, uint32_t offset, uint32_t size);
  * Used by GL layer to scan EBO indices for max vertex index.
  */
 const void *dk_get_data_cpu_ptr(sgl_backend_t *be, uint32_t offset);
+void dk_buffer_written(sgl_backend_t *be);
 
 /* ============================================================================
  * Draw Operations (dk_draw.c)
