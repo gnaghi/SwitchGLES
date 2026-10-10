@@ -5,6 +5,7 @@
 
 #include "gl_common.h"
 #include "../util/sgl_perf.h"
+#include <GLES3/gl3.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -45,6 +46,12 @@ static const GLint s_compressed_formats[] = {
     GL_COMPRESSED_RGBA_ASTC_12x12_KHR,
 };
 #define NUM_COMPRESSED_FORMATS (sizeof(s_compressed_formats) / sizeof(s_compressed_formats[0]))
+
+/* GLES 3.0 64-bit limits (glGetInteger64v; glGetIntegerv clamps them to
+ * INT_MAX). Indices are fetched as 32-bit values (GL_UNSIGNED_INT, uint8 is
+ * widened to uint16), and glWaitSync never waits (gl_sync.c). */
+#define SGL_MAX_ELEMENT_INDEX 0xFFFFFFFFll
+#define SGL_MAX_SERVER_WAIT_TIMEOUT 0ll
 
 /* Extensions, in the order glGetString(GL_EXTENSIONS) lists them. glGetStringi
  * (ES 3.0) indexes the same table. */
@@ -457,10 +464,98 @@ GL_APICALL void GL_APIENTRY glGetIntegerv(GLenum pname, GLint *params) {
             *params = sgl_ctx_is_es3(ctx) ? (GLint)NUM_EXTENSIONS : 0;
             break;
 
+        /* GLES 3.0 state (GL_INVALID_ENUM in an ES 2.0 context) */
+        case GL_MAX_ELEMENT_INDEX:
+        case GL_MAX_SERVER_WAIT_TIMEOUT:
+            if (!sgl_ctx_is_es3(ctx)) {
+                sgl_set_error(ctx, GL_INVALID_ENUM);
+                break;
+            }
+            {
+                GLint64 v = (pname == GL_MAX_ELEMENT_INDEX) ? SGL_MAX_ELEMENT_INDEX
+                                                            : SGL_MAX_SERVER_WAIT_TIMEOUT;
+                *params = (v > 0x7FFFFFFF) ? 0x7FFFFFFF : (GLint)v;
+            }
+            break;
+
         default:
             sgl_set_error(ctx, GL_INVALID_ENUM);
             break;
     }
+}
+
+/* Number of values glGetIntegerv writes for pname */
+static int sgl_get_value_count(GLenum pname) {
+    switch (pname) {
+        case GL_VIEWPORT:
+        case GL_SCISSOR_BOX:
+        case GL_COLOR_WRITEMASK:
+        case GL_COLOR_CLEAR_VALUE:
+        case GL_BLEND_COLOR:
+            return 4;
+        case GL_MAX_VIEWPORT_DIMS:
+        case GL_DEPTH_RANGE:
+        case GL_ALIASED_POINT_SIZE_RANGE:
+        case GL_ALIASED_LINE_WIDTH_RANGE:
+            return 2;
+        case GL_COMPRESSED_TEXTURE_FORMATS:
+            return (int)NUM_COMPRESSED_FORMATS;
+        default:
+            return 1;
+    }
+}
+
+/* GLES 3.0 §6.1.1: every integer state can be read as a 64-bit integer */
+GL_APICALL void GL_APIENTRY glGetInteger64v(GLenum pname, GLint64 *data) {
+    sgl_context_t *ctx = sgl_get_current_context();
+    if (!ctx)
+        return;
+    if (!sgl_ctx_is_es3(ctx)) {
+        sgl_set_error(ctx, GL_INVALID_OPERATION);
+        return;
+    }
+    if (!data)
+        return;
+
+    switch (pname) {
+        case GL_MAX_ELEMENT_INDEX:
+            *data = SGL_MAX_ELEMENT_INDEX;
+            return;
+        case GL_MAX_SERVER_WAIT_TIMEOUT:
+            *data = SGL_MAX_SERVER_WAIT_TIMEOUT;
+            return;
+        /* Unsigned 32-bit masks: no sign extension (glGetIntegerv returns
+         * 0xFFFFFFFF as -1) */
+        case GL_STENCIL_VALUE_MASK:
+            *data = (GLuint)ctx->depth_state.front.func_mask;
+            return;
+        case GL_STENCIL_BACK_VALUE_MASK:
+            *data = (GLuint)ctx->depth_state.back.func_mask;
+            return;
+        case GL_STENCIL_WRITEMASK:
+            *data = (GLuint)ctx->depth_state.front.write_mask;
+            return;
+        case GL_STENCIL_BACK_WRITEMASK:
+            *data = (GLuint)ctx->depth_state.back.write_mask;
+            return;
+        default:
+            break;
+    }
+
+    /* Everything else is the glGetIntegerv value (same errors) */
+    GLint temp[32] = {0};
+    GLenum prev_error = ctx->error;
+    ctx->error = GL_NO_ERROR;
+    glGetIntegerv(pname, temp);
+    GLenum error = ctx->error;
+    ctx->error = prev_error;
+    if (error != GL_NO_ERROR) {
+        sgl_set_error(ctx, error);
+        return;
+    }
+    int count = sgl_get_value_count(pname);
+    for (int i = 0; i < count; i++)
+        data[i] = temp[i];
 }
 
 GL_APICALL void GL_APIENTRY glGetBooleanv(GLenum pname, GLboolean *params) {
@@ -684,6 +779,12 @@ GL_APICALL void GL_APIENTRY glGetFloatv(GLenum pname, GLfloat *params) {
             break;
 
         default: {
+            /* GLES 3.0: the 64-bit value, not the INT_MAX clamp of glGetIntegerv */
+            if (pname == GL_MAX_ELEMENT_INDEX && sgl_ctx_is_es3(ctx)) {
+                *params = (GLfloat)SGL_MAX_ELEMENT_INDEX;
+                break;
+            }
+
             /* Fall through to glGetIntegerv for integer states → float conversion */
             int count = 1;
             switch (pname) {

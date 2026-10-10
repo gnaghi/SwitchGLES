@@ -803,17 +803,11 @@ GL_APICALL void GL_APIENTRY glResumeTransformFeedback(void) {
     SGL_ES3_UNIMPLEMENTED();
 }
 
-/* Indexed and 64-bit state queries */
+/* Indexed state queries (uniform and transform feedback buffer bindings) */
 
 GL_APICALL void GL_APIENTRY glGetIntegeri_v(GLenum target, GLuint index, GLint *data) {
     (void)target;
     (void)index;
-    (void)data;
-    SGL_ES3_UNIMPLEMENTED();
-}
-
-GL_APICALL void GL_APIENTRY glGetInteger64v(GLenum pname, GLint64 *data) {
-    (void)pname;
     (void)data;
     SGL_ES3_UNIMPLEMENTED();
 }
